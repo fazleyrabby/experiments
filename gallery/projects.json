@@ -1,5 +1,11 @@
 [
   {
+    "slug": "chladni-plate",
+    "title": "Chladni Plate",
+    "category": "Play",
+    "description": "Sing to a steel plate and watch the sand settle into its standing waves."
+  },
+  {
     "slug": "rug-rescue",
     "title": "Rug Rescue",
     "category": "Play",
