@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ece7df">
+<title>Pocket Thunderstorm // 10</title>
+<style>
+  :root { --paper: #ece7df; --ink: #2b2722; --quiet: #716a61; color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--paper); color: var(--ink); }
+  body, button { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  ::selection { background: #bacbd0; color: var(--ink); }
+  #stage { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+  .label { position: fixed; z-index: 2; font-size: 11px; font-weight: 500; line-height: 1.8; letter-spacing: .17em; text-transform: uppercase; }
+  .back { top: max(22px, env(safe-area-inset-top)); left: 28px; min-height: 44px; display: flex; align-items: center; gap: 9px; color: inherit; text-decoration: none; }
+  .back svg { width: 16px; height: 16px; }
+  .back:hover { color: var(--quiet); }
+  .sound { top: max(22px, env(safe-area-inset-top)); right: 28px; padding: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+  .sound svg { width: 18px; height: 18px; }
+  .label.visits { top: max(74px, calc(env(safe-area-inset-top) + 52px)); right: 28px; display: flex; align-items: center; gap: 8px; pointer-events: none; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: currentColor; }
+  .caption { left: 28px; bottom: max(26px, env(safe-area-inset-bottom)); pointer-events: none; }
+  .hint { margin-top: 4px; color: var(--quiet); letter-spacing: .1em; }
+  .weather { right: 28px; bottom: max(26px, env(safe-area-inset-bottom)); text-align: right; pointer-events: none; }
+  .weather .quiet { color: var(--quiet); font-size: 10px; letter-spacing: .13em; margin-top: 4px; }
+  #cloud { position: fixed; z-index: 1; border: 0; padding: 0; background: transparent; border-radius: 50%; cursor: grab; touch-action: none; transform: translate(-50%, -50%); -webkit-tap-highlight-color: transparent; }
+  #cloud:active { cursor: grabbing; }
+  button:focus-visible, a:focus-visible { outline: 2px solid #557584; outline-offset: 7px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  @media (max-width: 540px) {
+    .label { font-size: 10px; letter-spacing: .12em; }
+    .back, .caption { left: 20px; }
+    .sound, .weather, .label.visits { right: 20px; }
+    .caption, .weather { bottom: max(20px, env(safe-area-inset-bottom)); }
+    .hint { max-width: 190px; letter-spacing: .05em; }
+    .weather .quiet { font-size: 9px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="stage" aria-label="A soft floating cloud above small reflective puddles. Hold the cloud to build a storm; release for rain and lightning."></canvas>
+<a class="label back" href="/" aria-label="Back to experiments"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6"/></svg>Experiments</a>
+<button id="sound" class="label sound" aria-pressed="false" aria-label="Turn storm sound on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path id="sound-mark" d="m16 9 6 6m0-6-6 6"/></svg><span id="sound-text">Sound off</span></button>
+<button id="cloud" aria-label="Storm cloud. Hold Space or Enter to charge, release to make a storm. Use arrow keys to move the cloud and P to ripple a puddle." aria-describedby="instructions"></button>
+<div class="label caption"><div>Pocket Thunderstorm // 10</div><div class="hint" id="instructions">Hold to charge / Release to rain<br>Drag the cloud. Tap the puddles.</div></div>
+<div class="label weather"><div id="weather">Clear skies</div><div class="quiet" id="weather-note">A storm in your hands</div></div>
+<div class="sr-only" role="status" aria-live="polite" id="announcement"></div>
+<script>
+(() => {
+  'use strict';
+  const canvas = document.getElementById('stage'), ctx = canvas.getContext('2d');
+  const cloudButton = document.getElementById('cloud');
+  const weather = document.getElementById('weather'), weatherNote = document.getElementById('weather-note');
+  const announcement = document.getElementById('announcement');
+  const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
+  let reducedMotion = motionQuery.matches;
+  motionQuery.addEventListener('change', e => { reducedMotion = e.matches; });
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const random = (a, b) => a + Math.random() * (b - a);
+  let W, H, dpr, unit, ground, nowTime = 0, previous = 0, frameId;
+  let cloud = { x: 0, y: 0, tx: 0, ty: 0, vx: 0, vy: 0 };
+  let charge = 0, shade = 0, compression = 0, holding = false, gesture = null, keyboardHeld = false;
+  let storm = 0, strength = 0, rainDebt = 0, nextBolt = 0, bounce = 0;
+  let drops = [], puddles = [], ripples = [], splashes = [], bolts = [];
+  let lastStatus = '', soundEnabled = false, audio, noiseBuffer, rainGain, rainSource;
+
+  // The cloud is a single smooth 3D surface, lit from above and sculpted from
+  // overlapping spheres. Rendering it offscreen keeps the weather on one canvas.
+  const cloudCanvas = document.createElement('canvas');
+  const gl = cloudCanvas.getContext('webgl', { alpha: true, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
+  let cloudProgram, uniforms;
+  if (gl) {
+    const vertex = 'attribute vec2 position; varying vec2 uv; void main(){uv=position; gl_Position=vec4(position,0.,1.);}';
+    const fragment = `
+      precision highp float;
+      varying vec2 uv;
+      uniform float charge, clock, squash;
+      uniform vec2 press;
+      float smin(float a,float b,float k){float h=clamp(.5+.5*(b-a)/k,0.,1.);return mix(b,a,h)-k*h*(1.-h);}
+      float ball(vec3 p,vec3 c,float r){return length(p-c)-r;}
+      float hash(vec3 p){p=fract(p*.3183099+vec3(.1,.2,.3));p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
+      float noise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);}
+      vec4 pores(vec3 p){vec3 cell=floor(p),f=fract(p),direction=vec3(0);float dist=2.;for(int x=-1;x<=1;x++){for(int y=-1;y<=1;y++){for(int z=-1;z<=1;z++){vec3 o=vec3(float(x),float(y),float(z));vec3 q=cell+o;vec3 center=vec3(hash(q),hash(q+17.),hash(q+39.));vec3 delta=o+center-f;float candidate=length(delta);if(candidate<dist){dist=candidate;direction=delta;}}}}return vec4(direction,dist);}
+      float map(vec3 p){
+        p.x/=1.+charge*.12+squash*.09; p.y/=1.-squash*.26;
+        float d=ball(p,vec3(-.93,-.12,.05),.5);
+        d=smin(d,ball(p,vec3(-.56,.2,.08),.64),.24);
+        d=smin(d,ball(p,vec3(.06,.46,0),.7),.24);
+        d=smin(d,ball(p,vec3(.65,.18,.02),.59),.24);
+        d=smin(d,ball(p,vec3(1.05,-.16,.02),.44),.2);
+        d=smin(d,ball(p,vec3(.29,-.22,.25),.56),.22);
+        d=smin(d,ball(p,vec3(-.35,-.24,.3),.5),.18);
+        d=smin(d,ball(p,vec3(-.68,-.12,.42),.33),.16);
+        d=smin(d,ball(p,vec3(.63,-.18,.43),.33),.16);
+        float dent=squash*.15*exp(-dot(p.xy-press,p.xy-press)*3.5)*smoothstep(0.,.5,p.z);
+        return d+dent+(noise(p*6.)-.5)*.004;
+      }
+      void main(){
+        vec3 ro=vec3(uv.x*2.03,uv.y*1.52,4.),rd=vec3(0,0,-1);
+        float t=2.5,d=0.; vec3 p;
+        for(int i=0;i<56;i++){p=ro+rd*t;d=map(p);if(d<.002||t>5.8)break;t+=max(d*.8,.003);}
+        if(d>.006||t>5.8){gl_FragColor=vec4(0);return;}
+        vec2 e=vec2(.006,0);vec3 n=normalize(vec3(map(p+e.xyy)-map(p-e.xyy),map(p+e.yxy)-map(p-e.yxy),map(p+e.yyx)-map(p-e.yyx)));
+        vec3 light=normalize(vec3(-.65,1.2,1.8));float diffuse=max(dot(n,light),0.);
+        float occ=0.;for(int i=1;i<=4;i++){float h=float(i)*.085;occ+=(h-map(p+n*h))*.8;}occ=clamp(1.-occ, .85,1.);
+        float shadow=1.,h=.035;for(int i=0;i<10;i++){float sd=map(p+light*h);shadow=min(shadow,9.*sd/h);h+=clamp(sd,.04,.17);}shadow=clamp(shadow,.3,1.);
+        vec3 base=mix(vec3(.96,.95,.90),vec3(.29,.35,.40),charge*.88);
+        vec3 ambient=mix(vec3(.86,.89,.90),vec3(.42,.51,.61),charge);
+        vec3 color=base*(ambient*.78+vec3(1.,.975,.90)*diffuse*.34*shadow)*occ;
+        float rim=pow(1.-max(n.z,0.),3.);color+=vec3(.76,.85,.86)*rim*.13*(1.-charge*.45);
+        vec4 cellular=pores(p*28.);float cell=cellular.w;
+        float cavity=1.-smoothstep(.105,.245,cell);
+        float poreRim=exp(-pow((cell-.27)*17.,2.));
+        color*=1.-cavity*.38;
+        color+=poreRim*.07*dot(normalize(cellular.xyz),light)*(1.-charge*.5);
+        color+=vec3(noise(p*150.)-.5)*.012;
+        gl_FragColor=vec4(color,1.);
+      }`;
+    function shader(type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { gl.deleteShader(s); return null; } return s; }
+    const vs = shader(gl.VERTEX_SHADER, vertex), fs = shader(gl.FRAGMENT_SHADER, fragment);
+    if (vs && fs) {
+      cloudProgram = gl.createProgram(); gl.attachShader(cloudProgram, vs); gl.attachShader(cloudProgram, fs); gl.linkProgram(cloudProgram);
+      if (!gl.getProgramParameter(cloudProgram, gl.LINK_STATUS)) cloudProgram = null;
+      else {
+        gl.useProgram(cloudProgram); const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+        const attribute = gl.getAttribLocation(cloudProgram, 'position'); gl.enableVertexAttribArray(attribute); gl.vertexAttribPointer(attribute, 2, gl.FLOAT, false, 0, 0);
+        uniforms = { charge: gl.getUniformLocation(cloudProgram, 'charge'), clock: gl.getUniformLocation(cloudProgram, 'clock'), squash: gl.getUniformLocation(cloudProgram, 'squash'), press: gl.getUniformLocation(cloudProgram, 'press') };
+      }
+    }
+    cloudCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); cloudProgram = null; });
+  }
+
+  // Puddles share one surface. Travelling waves change its normals, bending
+  // the reflected cloud and the light instead of drawing rings over the floor.
+  const waterCanvas = document.createElement('canvas');
+  const waterGL = waterCanvas.getContext('webgl', { alpha: true, antialias: false, premultipliedAlpha: false });
+  let waterProgram, waterUniforms, reflectionTexture;
+  const poolData = new Float32Array(22 * 4), waveData = new Float32Array(24 * 4);
+  if (waterGL) {
+    const vertex = 'attribute vec2 position; varying vec2 uv; void main(){uv=position*.5+.5;gl_Position=vec4(position,0.,1.);}';
+    const fragment = `
+      precision highp float;
+      varying vec2 uv;
+      uniform vec2 size, cloudPosition;
+      uniform float floorY, scale, clock, stormLight;
+      uniform vec4 pools[22], waves[24];
+      uniform sampler2D reflection;
+      float smin(float a,float b,float k){float h=clamp(.5+.5*(b-a)/k,0.,1.);return mix(b,a,h)-k*h*(1.-h);}
+      void main(){
+        vec2 p=vec2(uv.x*size.x,(1.-uv.y)*size.y+floorY);
+        float distanceToWater=10000.,wet=0.;
+        for(int i=0;i<22;i++){
+          vec4 pool=pools[i];if(pool.z>.1){
+            vec2 local=(p-pool.xy)*vec2(1.,4.2);float angle=atan(local.y,local.x);
+            float radius=pool.z*(1.+sin(angle*3.+pool.x*.013)*.07+cos(angle*5.+pool.y*.02)*.035);
+            float d=(length(local)-radius)*.34;
+            distanceToWater=smin(distanceToWater,d,4.*scale);wet=max(wet,pool.w*(1.-smoothstep(-3.,4.,d)));
+          }
+        }
+        if(distanceToWater>4.){gl_FragColor=vec4(0);return;}
+        vec2 slope=vec2(0.);
+        for(int i=0;i<24;i++){
+          vec4 wave=waves[i];if(wave.w>.0){
+            vec2 q=(p-wave.xy)*vec2(1.,4.2);float d=length(q),age=wave.z;
+            float front=age*72.*scale;float bandwidth=15.*scale;
+            float envelope=exp(-pow((d-front)/bandwidth,2.))*exp(-age*1.4);
+            float k=.55/scale,phase=d*k-age*39.;
+            float derivative=(cos(phase)*k-sin(phase)*2.*(d-front)/(bandwidth*bandwidth))*envelope;
+            slope+=q/max(d,1.)*derivative*wave.w*scale*.6;
+          }
+        }
+        slope+=vec2(sin(p.x*.07+clock*.7),cos(p.y*.19+clock*.5))*.003;
+        vec3 normal=normalize(vec3(-slope.x,1.,-slope.y));
+        vec3 view=normalize(vec3(0.,.42,1.));float fresnel=.035+.965*pow(1.-max(dot(normal,view),0.),5.);
+        vec2 reflectionUV=vec2((p.x-cloudPosition.x)/(400.*scale)+.5,(p.y-(floorY+57.*scale))/(84.*scale)+.5);
+        reflectionUV+=slope*vec2(.055,.12);
+        vec4 cloudColor=texture2D(reflection,clamp(reflectionUV,.001,.999));
+        float reflected=cloudColor.a*step(0.,reflectionUV.x)*step(reflectionUV.x,1.)*step(0.,reflectionUV.y)*step(reflectionUV.y,1.);
+        vec3 paper=vec3(.9255,.9059,.8745),sky=vec3(.84,.88,.89);
+        vec3 reflectedSky=mix(sky,cloudColor.rgb,reflected*.58);
+        vec3 color=mix(paper*.965,reflectedSky,.2+fresnel*.65);
+        vec3 light=normalize(vec3(-.4,1.,.7));
+        float specular=pow(max(dot(reflect(-light,normal),view),0.),45.);
+        color+=vec3(1.,.97,.88)*specular*.36;
+        float glint=exp(-pow((slope.y+.017)*40.,2.))*abs(slope.x)*.9;
+        color+=vec3(glint);
+        float rim=exp(-abs(distanceToWater)*1.5);color=mix(color,vec3(.37,.43,.43),rim*.17);
+        color+=vec3(1.,.98,.93)*exp(-pow((distanceToWater+1.2)*2.,2.))*.075;
+        color+=vec3(.9,.79,.51)*stormLight*.06;
+        float alpha=(1.-smoothstep(-.5,1.2,distanceToWater))*min(1.,wet*4.);
+        gl_FragColor=vec4(color,alpha*.88);
+      }`;
+    const make = (type, source) => { const s = waterGL.createShader(type); waterGL.shaderSource(s, source); waterGL.compileShader(s); return waterGL.getShaderParameter(s, waterGL.COMPILE_STATUS) ? s : null; };
+    const vs = make(waterGL.VERTEX_SHADER, vertex), fs = make(waterGL.FRAGMENT_SHADER, fragment);
+    if (vs && fs) {
+      waterProgram = waterGL.createProgram(); waterGL.attachShader(waterProgram, vs); waterGL.attachShader(waterProgram, fs); waterGL.linkProgram(waterProgram);
+      if (!waterGL.getProgramParameter(waterProgram, waterGL.LINK_STATUS)) waterProgram = null;
+      else {
+        waterGL.useProgram(waterProgram); const b = waterGL.createBuffer(); waterGL.bindBuffer(waterGL.ARRAY_BUFFER, b); waterGL.bufferData(waterGL.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), waterGL.STATIC_DRAW);
+        const a = waterGL.getAttribLocation(waterProgram, 'position'); waterGL.enableVertexAttribArray(a); waterGL.vertexAttribPointer(a, 2, waterGL.FLOAT, false, 0, 0);
+        waterUniforms = Object.fromEntries(['size','cloudPosition','floorY','scale','clock','stormLight','pools[0]','waves[0]','reflection'].map(name => [name, waterGL.getUniformLocation(waterProgram, name)]));
+        reflectionTexture = waterGL.createTexture(); waterGL.bindTexture(waterGL.TEXTURE_2D, reflectionTexture);
+        waterGL.texParameteri(waterGL.TEXTURE_2D, waterGL.TEXTURE_MIN_FILTER, waterGL.LINEAR); waterGL.texParameteri(waterGL.TEXTURE_2D, waterGL.TEXTURE_MAG_FILTER, waterGL.LINEAR);
+        waterGL.texParameteri(waterGL.TEXTURE_2D, waterGL.TEXTURE_WRAP_S, waterGL.CLAMP_TO_EDGE); waterGL.texParameteri(waterGL.TEXTURE_2D, waterGL.TEXTURE_WRAP_T, waterGL.CLAMP_TO_EDGE);
+      }
+    }
+    waterCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); waterProgram = null; });
+  }
+  function drawWater() {
+    poolData.fill(0); puddles.slice(0,22).forEach((p,i) => poolData.set([p.x,p.y,p.radius,p.water],i*4));
+    const touchWaves=ripples.filter(r=>r.force>1).slice(-8);
+    const visibleWaves=touchWaves.concat(ripples.filter(r=>r.force<=1).slice(-(24-touchWaves.length)));
+    waveData.fill(0); visibleWaves.forEach((r,i) => waveData.set([r.x,r.y,r.age,r.force],i*4));
+    waterGL.useProgram(waterProgram); waterGL.uniform2f(waterUniforms.size,W,140*unit); waterGL.uniform2f(waterUniforms.cloudPosition,cloud.x,cloud.y);
+    waterGL.uniform1f(waterUniforms.floorY,ground-35*unit); waterGL.uniform1f(waterUniforms.scale,unit);
+    waterGL.uniform1f(waterUniforms.clock,reducedMotion?0:nowTime); waterGL.uniform1f(waterUniforms.stormLight,bolts.length ? 1 : 0);
+    waterGL.uniform4fv(waterUniforms['pools[0]'],poolData); waterGL.uniform4fv(waterUniforms['waves[0]'],waveData);
+    waterGL.activeTexture(waterGL.TEXTURE0); waterGL.bindTexture(waterGL.TEXTURE_2D,reflectionTexture); waterGL.pixelStorei(waterGL.UNPACK_FLIP_Y_WEBGL,true);
+    waterGL.texImage2D(waterGL.TEXTURE_2D,0,waterGL.RGBA,waterGL.RGBA,waterGL.UNSIGNED_BYTE,cloudCanvas); waterGL.uniform1i(waterUniforms.reflection,0);
+    waterGL.drawArrays(waterGL.TRIANGLES,0,6); ctx.drawImage(waterCanvas,0,ground-35*unit,W,140*unit);
+  }
+
+  function resize() {
+    const oldW = W, oldH = H;
+    W = innerWidth; H = innerHeight; dpr = Math.min(devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    unit = Math.min(W / 650, (H - 150) / 540, 1.1); unit = Math.max(.3, unit); ground = H * .735;
+    if (!oldW) { cloud.x = cloud.tx = W * .5; cloud.y = cloud.ty = H * .33; }
+    else { cloud.x = cloud.tx = cloud.tx / oldW * W; cloud.y = cloud.ty = cloud.ty / oldH * H; puddles.forEach(p => { p.x = p.x / oldW * W; p.y = ground + p.depth * 40 * unit; }); drops = []; ripples = []; }
+    constrainCloud();
+    const resolution = W < 540 ? 512 : 768;
+    cloudCanvas.width = resolution; cloudCanvas.height = resolution * .75;
+    if (gl) gl.viewport(0, 0, cloudCanvas.width, cloudCanvas.height);
+    waterCanvas.width = Math.min(1400,Math.round(W*1.5)); waterCanvas.height = Math.max(80,Math.round(140*unit*1.5));
+    if (waterGL) waterGL.viewport(0,0,waterCanvas.width,waterCanvas.height);
+    cloudButton.style.width = (330 * unit) + 'px'; cloudButton.style.height = (180 * unit) + 'px';
+  }
+  function constrainCloud() { const margin = 150 * unit + 16; cloud.tx = clamp(cloud.tx, margin, W - margin); cloud.ty = clamp(cloud.ty, 95 + 60 * unit, ground - 125 * unit); }
+  addEventListener('resize', resize); resize();
+  puddles = [{ x: W * .47, y: ground + 12 * unit, radius: 62 * unit, depth: .3, water: .4, seed: 1 }, { x: W * .55, y: ground + 28 * unit, radius: 44 * unit, depth: .7, water: .3, seed: 4 }];
+
+  function initAudio() {
+    if (!soundEnabled) return;
+    if (!audio) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) { soundEnabled = false; updateSound(); announcement.textContent = 'Sound is unavailable in this browser.'; return; }
+      audio = new AudioContext();
+      noiseBuffer = audio.createBuffer(1, audio.sampleRate * 3, audio.sampleRate);
+      const data = noiseBuffer.getChannelData(0); let low = 0;
+      for (let i = 0; i < data.length; i++) { low = (low + (Math.random() * 2 - 1) * .035) / 1.035; data[i] = low * 3.5; }
+      rainSource = audio.createBufferSource(); rainSource.buffer = noiseBuffer; rainSource.loop = true;
+      const filter = audio.createBiquadFilter(); filter.type = 'highpass'; filter.frequency.value = 700;
+      rainGain = audio.createGain(); rainGain.gain.value = 0; rainSource.connect(filter); filter.connect(rainGain); rainGain.connect(audio.destination); rainSource.start();
+    }
+    audio.resume().catch(() => {});
+  }
+  function thunder(power) {
+    if (!soundEnabled || !audio || audio.state !== 'running') return;
+    const t = audio.currentTime + .13, source = audio.createBufferSource(), filter = audio.createBiquadFilter(), gain = audio.createGain();
+    source.buffer = noiseBuffer; filter.type = 'lowpass'; filter.frequency.setValueAtTime(110 + power * 230, t); filter.frequency.exponentialRampToValueAtTime(65, t + 2.4);
+    gain.gain.setValueAtTime(0, t); gain.gain.linearRampToValueAtTime(.11 + power * .14, t + .1); gain.gain.exponentialRampToValueAtTime(.001, t + 2.7);
+    source.connect(filter); filter.connect(gain); gain.connect(audio.destination); source.start(t); source.stop(t + 2.8);
+    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+  }
+  function updateSound() {
+    const button = document.getElementById('sound'); button.setAttribute('aria-pressed', String(soundEnabled)); button.setAttribute('aria-label', soundEnabled ? 'Turn storm sound off' : 'Turn storm sound on');
+    document.getElementById('sound-text').textContent = soundEnabled ? 'Sound on' : 'Sound off';
+    document.getElementById('sound-mark').setAttribute('d', soundEnabled ? 'M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14' : 'm16 9 6 6m0-6-6 6');
+    if (!soundEnabled && rainGain && audio) rainGain.gain.setTargetAtTime(0, audio.currentTime, .15);
+  }
+  document.getElementById('sound').addEventListener('click', () => { soundEnabled = !soundEnabled; updateSound(); initAudio(); });
+
+  function ellipse(x, y, rx, ry, fill) { ctx.beginPath(); ctx.ellipse(x, y, Math.max(.1, rx), Math.max(.1, ry), 0, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill(); }
+  function addRipple(x, y, radius = 20 * unit) {
+    if (ripples.length >= 100) { const small=ripples.findIndex(r=>r.force<=1); ripples.splice(small<0?0:small,1); }
+    ripples.push({ x, y, r: radius, age: 0, force: clamp(radius/(18*unit),.25,2.3) });
+  }
+  function land(drop) {
+    let puddle = puddles.find(p => Math.abs(p.x - drop.x) < p.radius * .8);
+    if (!puddle && puddles.length < 22) { const depth = random(0, 1); puddle = { x: drop.x, y: ground + depth * 40 * unit, radius: random(5, 11) * unit, depth, water: .1, seed: random(0, 9) }; puddles.push(puddle); }
+    if (puddle) { puddle.water = Math.min(1, puddle.water + .009); puddle.radius = Math.min(120 * unit, puddle.radius + .27 * unit); if (Math.random() < .24) addRipple(drop.x, puddle.y, 8 * unit); }
+    if (!reducedMotion && splashes.length < 160 && Math.random() < .22) {
+      for (let i = 0; i < 2; i++) splashes.push({ x: drop.x, y: ground + random(0, 25) * unit, vx: random(-28, 28) * unit, vy: -random(20, 60) * unit, life: .4 });
+    }
+  }
+  function lightning(power) {
+    const x = cloud.x + random(-50, 50) * unit, y = cloud.y + 43 * unit;
+    const points = [[x, y]]; const endX = clamp(x + random(-90, 90) * unit, 25, W - 25);
+    for (let i = 1; i <= 9; i++) points.push([x + (endX - x) * i / 9 + (i === 9 ? 0 : random(-23, 23) * unit), y + (ground - y) * i / 9]);
+    bolts.push({ points, age: 0, power }); addRipple(endX, ground + 9 * unit, 35 * unit); thunder(power);
+  }
+  function beginCharge() { holding = true; charge = Math.max(charge, .045); initAudio(); }
+  function release(cancelled = false) {
+    if (!holding) return; holding = false; keyboardHeld = false;
+    if (!cancelled) {
+      strength = Math.max(strength * .55, clamp(charge, .15, 1)); storm = 3 + strength * 8; bounce = 1;
+      if (strength > .32) lightning(strength);
+      nextBolt = nowTime + random(1.9, 3.3); announcement.textContent = strength > .65 ? 'Thunderstorm released. Drag the cloud to move the rain.' : 'A little rain shower. Hold longer for thunder.';
+    }
+    charge = 0;
+  }
+  cloudButton.addEventListener('pointerdown', e => {
+    if (gesture || e.button > 0) return; e.preventDefault();
+    gesture = { id: e.pointerId, dx: e.clientX - cloud.tx, dy: e.clientY - cloud.ty };
+    cloudButton.setPointerCapture(e.pointerId); beginCharge();
+  });
+  cloudButton.addEventListener('pointermove', e => {
+    if (!gesture || gesture.id !== e.pointerId) return;
+    cloud.tx = e.clientX - gesture.dx; cloud.ty = e.clientY - gesture.dy; constrainCloud();
+  });
+  function finishPointer(e, cancelled = false) {
+    if (!gesture || gesture.id !== e.pointerId) return; gesture = null; release(cancelled);
+    if (cloudButton.hasPointerCapture(e.pointerId)) cloudButton.releasePointerCapture(e.pointerId);
+  }
+  cloudButton.addEventListener('pointerup', e => finishPointer(e));
+  cloudButton.addEventListener('pointercancel', e => finishPointer(e, true));
+  cloudButton.addEventListener('lostpointercapture', e => finishPointer(e, true));
+  cloudButton.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!keyboardHeld) { keyboardHeld = true; beginCharge(); } }
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); cloud.tx += e.key === 'ArrowLeft' ? -20 : e.key === 'ArrowRight' ? 20 : 0; cloud.ty += e.key === 'ArrowUp' ? -20 : e.key === 'ArrowDown' ? 20 : 0; constrainCloud(); }
+    if (e.key === 'Escape') { release(true); gesture = null; }
+    if (e.key.toLowerCase() === 'p' && puddles.length) { const p = puddles.reduce((a, b) => a.radius > b.radius ? a : b); addRipple(p.x, p.y, p.radius * .7); }
+  });
+  cloudButton.addEventListener('keyup', e => { if ((e.key === ' ' || e.key === 'Enter') && keyboardHeld) { e.preventDefault(); release(); } });
+  cloudButton.addEventListener('blur', () => { if (keyboardHeld) release(true); });
+  canvas.addEventListener('pointerdown', e => {
+    const p = puddles.find(p => Math.pow((e.clientX - p.x) / (p.radius + 14), 2) + Math.pow((e.clientY - p.y) / (p.radius * .23 + 15), 2) < 1);
+    if (p) { addRipple(e.clientX, p.y, p.radius * .7); for (let i = 0; i < 5 && !reducedMotion; i++) splashes.push({ x: e.clientX, y: p.y, vx: random(-45, 45) * unit, vy: -random(30, 85) * unit, life: .5 }); }
+  });
+  addEventListener('blur', () => { release(true); gesture = null; });
+
+  function fallbackCloud() {
+    const puffs = [[-91, 0, 45], [-55, -24, 54], [0, -43, 62], [59, -20, 52], [97, 7, 39], [25, 12, 48], [-35, 12, 46]];
+    for (const [x, y, r] of puffs) {
+      const g = ctx.createRadialGradient(x - r * .3, y - r * .4, 0, x, y, r);
+      const v = Math.round(247 - shade * 130); g.addColorStop(0, `rgb(${v},${v + 2},${v + 2})`); g.addColorStop(1, `rgb(${v - 51},${v - 41},${v - 34})`); ellipse(x, y, r, r * .9, g);
+    }
+  }
+  function drawCloud(dt) {
+    const bob = reducedMotion ? 0 : Math.sin(nowTime * 1.2) * 4 * unit;
+    const wobble = reducedMotion ? 0 : Math.sin(bounce * 19) * bounce * .06;
+    ctx.save(); ctx.translate(cloud.x, cloud.y + bob); ctx.rotate(clamp(cloud.vx * .00009, -.13, .13));
+    ctx.scale(unit * (1 + wobble), unit * (1 - wobble));
+    if (cloudProgram) {
+      gl.useProgram(cloudProgram); gl.uniform1f(uniforms.charge, shade); gl.uniform1f(uniforms.clock, reducedMotion ? 0 : nowTime); gl.uniform1f(uniforms.squash, compression);
+      gl.uniform2f(uniforms.press,gesture ? gesture.dx/(100*unit) : 0,gesture ? -gesture.dy/(100*unit) : 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 6); ctx.drawImage(cloudCanvas, -200, -150, 400, 300);
+    } else fallbackCloud();
+    ctx.restore();
+    cloudButton.style.left = cloud.x + 'px'; cloudButton.style.top = (cloud.y + bob - 12 * unit) + 'px';
+  }
+
+  function frame(timestamp) {
+    const dt = previous ? Math.min((timestamp - previous) / 1000, .035) : .016; previous = timestamp; nowTime += dt;
+    if (holding) charge = Math.min(1, charge + dt * .38);
+    else storm = Math.max(0, storm - dt);
+    const intensity = holding ? charge * .22 : storm > 0 ? strength * Math.min(1, storm / 2) : 0;
+    const darkness = holding ? charge : storm > 0 ? strength * Math.min(1, storm / 3) : 0;
+    shade += (darkness - shade) * Math.min(1, dt * 3); bounce = Math.max(0, bounce - dt * 1.6);
+    compression += ((holding ? 1 : 0)-compression)*Math.min(1,dt*10);
+    const damping = Math.exp(-dt * 10);
+    cloud.vx = cloud.vx * damping + (cloud.tx - cloud.x) * dt * 100; cloud.vy = cloud.vy * damping + (cloud.ty - cloud.y) * dt * 100;
+    cloud.x += cloud.vx * dt; cloud.y += cloud.vy * dt;
+    if (!holding && storm > 1.5 && strength > .5 && nowTime > nextBolt) { lightning(strength); nextBolt = nowTime + random(2.2, 3.6); }
+    rainDebt += intensity * (W < 540 ? 170 : 260) * dt;
+    while (rainDebt > 1) {
+      rainDebt--;
+      if (drops.length < 650) drops.push({ x: cloud.x + random(-111, 112) * unit, y: cloud.y + random(24, 45) * unit, speed: random(370, 620) * unit, length: random(9, 21) * unit, wind: cloud.vx * .06 + random(-4, 4) * unit, alpha: random(.2, .5) });
+    }
+    for (const drop of drops) { drop.y += drop.speed * dt; drop.x += drop.wind * dt; if (drop.y >= ground) land(drop); }
+    drops = drops.filter(d => d.y < ground);
+    puddles.forEach(p => { p.water = Math.max(0, p.water - dt * .011); p.radius = Math.max(0, p.radius - dt * .06 * unit); }); puddles = puddles.filter(p => p.water > 0 && p.radius > 2);
+    ripples.forEach(r => r.age += dt); ripples = ripples.filter(r => r.age < 1.5);
+    for (const s of splashes) { s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 230 * unit * dt; s.life -= dt; } splashes = splashes.filter(s => s.life > 0);
+    bolts.forEach(b => b.age += dt); bolts = bolts.filter(b => b.age < (reducedMotion ? .5 : .34));
+    const status = holding ? charge > .78 ? 'Ready to rumble' : 'Gathering a storm' : intensity > .5 ? 'Thunder & rain' : intensity > .02 ? 'A little downpour' : drops.length ? 'Passing shower' : 'Clear skies';
+    if (status !== lastStatus) { weather.textContent = status; weatherNote.textContent = holding ? 'Let go when you’re ready' : storm > 0 ? 'Move it. Make a little mess.' : 'A storm in your hands'; lastStatus = status; }
+    if (rainGain && audio && audio.state === 'running') rainGain.gain.setTargetAtTime(soundEnabled ? intensity * .38 : 0, audio.currentTime, .2);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#ece7df'; ctx.fillRect(0, 0, W, H);
+    // A soft floor shadow anchors the cloud without drawing a stage around it.
+    const shadowWidth = (130 + shade * 24) * unit;
+    const shadow = ctx.createRadialGradient(cloud.x, ground + 10 * unit, 1, cloud.x, ground + 10 * unit, shadowWidth);
+    shadow.addColorStop(0, '#66758424'); shadow.addColorStop(1, '#66758400');
+    ctx.save(); ctx.translate(0, ground + 10 * unit); ctx.scale(1, .15); ctx.translate(0, -ground - 10 * unit); ctx.fillStyle = shadow; ctx.fillRect(cloud.x - shadowWidth, ground + 10 * unit - shadowWidth, shadowWidth * 2, shadowWidth * 2); ctx.restore();
+    if (waterProgram) drawWater();
+    else for (const p of puddles) {
+      ctx.save(); ctx.globalAlpha = Math.min(1, p.water * 3.5);
+      const g = ctx.createLinearGradient(0, p.y - p.radius * .17, 0, p.y + p.radius * .17); g.addColorStop(0, '#a7b8bb70'); g.addColorStop(.45, '#809ea680'); g.addColorStop(1, '#b5c6c78a');
+      ctx.beginPath();
+      for (let i = 0; i <= 64; i++) { const a = i / 64 * Math.PI * 2, r = p.radius * (1 + Math.sin(a * 3 + p.seed) * .08 + Math.cos(a * 5) * .04); const x = p.x + Math.cos(a) * r, y = p.y + Math.sin(a) * r * .2; ctx[i ? 'lineTo' : 'moveTo'](x, y); }
+      ctx.closePath(); ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = '#829ea652'; ctx.lineWidth = .7; ctx.stroke();
+      ctx.strokeStyle = '#fffaf1ae'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(p.x - p.radius * .12, p.y - p.radius * .055, p.radius * .63, p.radius * .115, 0, Math.PI * 1.04, Math.PI * 1.8); ctx.stroke(); ctx.restore();
+    }
+    if (!waterProgram) for (const r of ripples) { ctx.globalAlpha = Math.max(0, 1 - r.age / 1.5) * .55; ctx.strokeStyle = '#648e9c'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(r.x, r.y, Math.max(.1, r.r * (.15 + r.age)), Math.max(.1, r.r * (.15 + r.age) * .2), 0, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    for (const drop of drops) { ctx.strokeStyle = `rgba(80,122,143,${drop.alpha})`; ctx.lineWidth = .9 * unit; ctx.beginPath(); ctx.moveTo(drop.x, drop.y); ctx.lineTo(drop.x - drop.wind * .015, drop.y - drop.length); ctx.stroke(); }
+    for (const splash of splashes) ellipse(splash.x, splash.y, .9 * unit, 1.6 * unit, '#7899a78c');
+    for (const bolt of bolts) {
+      ctx.globalAlpha = Math.max(0, 1 - bolt.age / (reducedMotion ? .5 : .34));
+      ctx.beginPath(); bolt.points.forEach(([x, y], i) => ctx[i ? 'lineTo' : 'moveTo'](x, y));
+      ctx.lineJoin = 'round'; ctx.strokeStyle = '#f5d98a'; ctx.lineWidth = 4 * unit; ctx.shadowColor = '#dfb458'; ctx.shadowBlur = reducedMotion ? 0 : 13 * unit; ctx.stroke(); ctx.shadowBlur = 0; ctx.strokeStyle = '#fffbed'; ctx.lineWidth = 1.6 * unit; ctx.stroke();
+      const branch = bolt.points[3]; ctx.beginPath(); ctx.moveTo(...branch); ctx.lineTo(branch[0] + 23 * unit, branch[1] + 18 * unit); ctx.lineTo(branch[0] + 18 * unit, branch[1] + 40 * unit); ctx.lineWidth = .9 * unit; ctx.stroke();
+    }
+    ctx.globalAlpha = 1; drawCloud(dt);
+    frameId = requestAnimationFrame(frame);
+  }
+  document.addEventListener('visibilitychange', () => {
+    cancelAnimationFrame(frameId); previous = 0;
+    if (document.hidden) { release(true); gesture = null; if (rainGain && audio) rainGain.gain.setTargetAtTime(0, audio.currentTime, .1); }
+    else frameId = requestAnimationFrame(frame);
+  });
+  frameId = requestAnimationFrame(frame);
+})();
+</script>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+<script defer src="/visit-counter.js" data-project="pocket-thunderstorm"></script>
+</body>
+</html>

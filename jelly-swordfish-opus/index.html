@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jelly Swordfish // 13</title>
+<style>
+  :root { --bg: #F1E7DA; --ink: #2B2722; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; outline: none; }
+  canvas#stage.dragging { cursor: grabbing; }
+  .label, .controls {
+    position: fixed; bottom: 26px; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label { pointer-events: none; }
+  .label.left { left: 28px; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.45; }
+  .controls { right: 28px; display: flex; gap: 22px; }
+  .controls button {
+    appearance: none; -webkit-appearance: none; border: 0; background: none; margin: 0; padding: 8px 0;
+    font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; cursor: pointer;
+    display: flex; align-items: center; gap: 8px; -webkit-tap-highlight-color: transparent;
+  }
+  .controls button::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .controls button:hover { opacity: 0.5; }
+  .controls button:focus-visible { outline: 1px solid var(--ink); outline-offset: 4px; }
+  .keys { display: none; }
+  @media (hover: hover) and (pointer: fine) { .keys { display: block; } }
+  @media (max-width: 520px) {
+    .label, .controls { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+    .controls { right: 18px; gap: 18px; }
+    .controls button { padding: 6px 0; }
+  }
+  @media (max-width: 400px) {
+    .controls { top: 10px; bottom: auto; left: 18px; right: auto; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage" tabindex="0" aria-label="Jelly swordfish. Drag to lift and toss, tap to poke. Space to jump, R to reset, arrow keys to shove, P to poke."></canvas>
+<div class="label left">
+  <div>Jelly Swordfish // 13</div>
+  <div class="hint">Drag to lift &amp; toss<br>Tap to poke<span class="keys">Space jump / R reset / Arrows shove</span></div>
+</div>
+<div class="controls">
+  <button type="button" id="jump" aria-keyshortcuts="Space">Jump</button>
+  <button type="button" id="reset" aria-keyshortcuts="R">Reset</button>
+</div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const BG = '#F1E7DA';
+const FISH_SCALE = 0.86;          // the fish is modelled in its own units, then scaled
+const MESH_CELL = 0.034;          // surface resolution of the visible skin
+const LATTICE_CELL = 0.2;         // physics particle spacing
+const STEP = 1 / 120;
+const GRAVITY = 14;
+const DAMPING = 0.6;              // velocity lost per second
+const GLOBAL_STIFFNESS = 0.12;    // pull toward the whole-body match, per step
+const LOCAL_STIFFNESS = 0.11;     // pull toward each little neighbourhood's match, per step
+const GLOBAL_STRETCH = 0.6;       // how much whole-body squash/shear persists (0 rigid .. 1 floppy)
+const LOCAL_STRETCH = 0.35;       // the same, for local dents
+const SEGMENT_STIFFNESS = 0.06;   // pull toward each body segment's match, per step
+const SEGMENT_STRETCH = 0.5;
+const FLOOR_FRICTION = 0.5;
+const PRESS_DEPTH = 0.36;         // how far a held finger sinks in
+const GRAB_RADIUS = 0.78;
+const GRAB_FOLLOW = 0.007;        // while carried, the rest of the body is gently led along too
+const POKE_SPEED = 4.5;
+const JUMP_SPEED = 6.2;
+const MAX_SPEED = 26;
+const CEILING = 7;
+const JELLY = 0x1F6FEB;
+
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const motion = () => reducedMotion.matches
+  ? { damping: 2.6, jump: 0.7, poke: 0.55, drop: 0 }
+  : { damping: DAMPING, jump: 1, poke: 1, drop: 2.2 };
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+scene.fog = new THREE.Fog(BG, 16, 38);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+pmrem.dispose();
+
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 120);
+const key = new THREE.DirectionalLight(0xFFF6EA, 2.2);
+key.position.set(-4, 9, 5);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.radius = 7;
+key.shadow.bias = -0.0006;
+Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 30 });
+scene.add(key, new THREE.HemisphereLight(0xFFFFFF, 0xE8DCCB, 0.55));
+
+function buildFloor() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#F4EBDD';
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = '#E3D5BF';
+  ctx.fillRect(0, 0, 64, 64);
+  ctx.fillRect(64, 64, 64, 64);
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(50, 50);
+  texture.anisotropy = 8;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.MeshStandardMaterial({ map: texture, roughness: 0.9 }));
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+scene.add(buildFloor());
+
+// ───────────────────────────── Fish shape ─────────────────────────────
+// One signed distance field, smooth-unioned from simple parts, so the fins and
+// bill grow out of the body like a single moulded piece of jelly. Modelled in
+// fish units with the bill pointing down +x.
+
+const smin = (a, b, k) => {
+  const h = Math.max(k - Math.abs(a - b), 0) / k;
+  return Math.min(a, b) - h * h * k * 0.25;
+};
+
+function ellipsoid(x, y, z, rx, ry, rz) {
+  const ax = x / rx, ay = y / ry, az = z / rz;
+  const k0 = Math.sqrt(ax * ax + ay * ay + az * az);
+  const bx = ax / rx, by = ay / ry, bz = az / rz;
+  const k1 = Math.sqrt(bx * bx + by * by + bz * bz);
+  return k1 > 1e-9 ? k0 * (k0 - 1) / k1 : -Math.min(rx, ry, rz);
+}
+
+// A tapered capsule from a to b, optionally flattened across its axis
+function makeCone(a, b, r1, r2, up, flatUp = 1, flatSide = 1) {
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
+  const u = B.clone().sub(A), h = u.length();
+  u.normalize();
+  const w = new THREE.Vector3().crossVectors(u, new THREE.Vector3(...up)).normalize();
+  const v = new THREE.Vector3().crossVectors(w, u);
+  const sb = (r1 - r2) / h;
+  return { A, u, v, w, h, r1, r2, sa: Math.sqrt(1 - sb * sb), sb, fv: flatUp, fw: flatSide, k: 1 / Math.max(flatUp, flatSide) };
+}
+
+function cone(c, x, y, z) {
+  const px = x - c.A.x, py = y - c.A.y, pz = z - c.A.z;
+  const qy = px * c.u.x + py * c.u.y + pz * c.u.z;
+  const rv = (px * c.v.x + py * c.v.y + pz * c.v.z) * c.fv;
+  const rw = (px * c.w.x + py * c.w.y + pz * c.w.z) * c.fw;
+  const qx = Math.sqrt(rv * rv + rw * rw);
+  const k = -c.sb * qx + c.sa * qy;
+  let d;
+  if (k < 0) d = Math.sqrt(qx * qx + qy * qy) - c.r1;
+  else if (k > c.sa * c.h) d = Math.sqrt(qx * qx + (qy - c.h) * (qy - c.h)) - c.r2;
+  else d = qx * c.sa + qy * c.sb - c.r1;
+  return d * c.k;
+}
+
+function triangle(px, py, x0, y0, x1, y1, x2, y2) {
+  const e0x = x1 - x0, e0y = y1 - y0, e1x = x2 - x1, e1y = y2 - y1, e2x = x0 - x2, e2y = y0 - y2;
+  const v0x = px - x0, v0y = py - y0, v1x = px - x1, v1y = py - y1, v2x = px - x2, v2y = py - y2;
+  const t0 = Math.min(1, Math.max(0, (v0x * e0x + v0y * e0y) / (e0x * e0x + e0y * e0y)));
+  const t1 = Math.min(1, Math.max(0, (v1x * e1x + v1y * e1y) / (e1x * e1x + e1y * e1y)));
+  const t2 = Math.min(1, Math.max(0, (v2x * e2x + v2y * e2y) / (e2x * e2x + e2y * e2y)));
+  const q0x = v0x - e0x * t0, q0y = v0y - e0y * t0;
+  const q1x = v1x - e1x * t1, q1y = v1y - e1y * t1;
+  const q2x = v2x - e2x * t2, q2y = v2y - e2y * t2;
+  const s = Math.sign(e0x * e2y - e0y * e2x);
+  const d = Math.min(q0x * q0x + q0y * q0y, q1x * q1x + q1y * q1y, q2x * q2x + q2y * q2y);
+  const inside = Math.min(s * (v0x * e0y - v0y * e0x), s * (v1x * e1y - v1y * e1x), s * (v2x * e2y - v2y * e2x));
+  return -Math.sqrt(d) * Math.sign(inside);
+}
+
+// A flat 2D outline given thickness, with rounded edges
+function extrude(d2, z, half, round) {
+  const wx = d2 + round, wy = Math.abs(z) - half;
+  const ox = Math.max(wx, 0), oy = Math.max(wy, 0);
+  return Math.min(Math.max(wx, wy), 0) + Math.sqrt(ox * ox + oy * oy) - round;
+}
+
+const PEDUNCLE = makeCone([-0.45, 0.0, 0], [-1.5, 0.02, 0], 0.37, 0.11, [0, 1, 0], 1, 1.12);
+const BILL = makeCone([1.22, 0.07, 0], [2.86, 0.13, 0], 0.15, 0.028, [0, 1, 0], 1.4, 1);
+const JAW = makeCone([1.08, -0.14, 0], [1.6, -0.08, 0], 0.13, 0.045, [0, 1, 0], 1.15, 1);
+const PEC_L = makeCone([0.6, -0.2, 0.25], [-0.12, -0.47, 0.8], 0.13, 0.04, [0, 1, 0.5], 2.6, 1);
+const PEC_R = makeCone([0.6, -0.2, -0.25], [-0.12, -0.47, -0.8], 0.13, 0.04, [0, 1, -0.5], 2.6, 1);
+
+function dorsalFin(x, y, z) {
+  if (x < -0.7 || x > 1 || y < 0.1 || y > 1.5) return 1;
+  let d = triangle(x, y, 0.66, 0.28, 0.0, 0.36, -0.22, 1.34);
+  d = Math.max(d, 0.5 - Math.hypot(x + 0.55, y - 0.76));    // concave trailing edge
+  const half = 0.065 - 0.035 * Math.min(1, Math.max(0, (y - 0.4) / 0.9));
+  return extrude(d, z, half, 0.035);
+}
+
+function tailFin(x, y, z) {
+  if (x > -1.1 || Math.abs(y) > 1.1) return 1;
+  const ys = y / 1.38;
+  const front = Math.hypot(x + 2.04, ys) - 0.62;    // lunate: one disc minus another
+  const back = Math.hypot(x + 2.32, ys) - 0.62;
+  const d = Math.max(front, -back) * 0.85;
+  return extrude(d, z, 0.05, 0.035);
+}
+
+function finlets(x, y, z) {
+  if (x > -0.8 || x < -1.6) return 1;
+  const top = triangle(x, y, -1.0, 0.1, -1.3, 0.08, -1.36, 0.33);
+  const bottom = triangle(x, y, -1.0, -0.1, -1.3, -0.08, -1.36, -0.33);
+  return extrude(Math.min(top, bottom), z, 0.025, 0.025);
+}
+
+function bodyRaw(x, y, z) {
+  let d = ellipsoid(x - 0.05, y, z, 1.22, 0.5, 0.41);
+  d = smin(d, ellipsoid(x - 0.12, y + 0.22, z, 1.05, 0.28, 0.5), 0.2);    // a broad belly it can sit on
+  d = smin(d, ellipsoid(x - 0.82, y - 0.03, z, 0.62, 0.41, 0.34), 0.25);
+  return smin(d, cone(PEDUNCLE, x, y, z), 0.3);
+}
+
+function fishRaw(x, y, z) {
+  let d = bodyRaw(x, y, z);
+  d = smin(d, cone(BILL, x, y, z), 0.22);
+  d = smin(d, cone(JAW, x, y, z), 0.12);
+  d = smin(d, dorsalFin(x, y, z), 0.12);
+  d = smin(d, tailFin(x, y, z), 0.16);
+  d = smin(d, z > 0 ? cone(PEC_L, x, y, z) : cone(PEC_R, x, y, z), 0.12);
+  return smin(d, finlets(x, y, z), 0.07);
+}
+
+const S = FISH_SCALE;
+const fishSDF = (x, y, z) => fishRaw(x / S, y / S, z / S) * S;
+const bodySDF = (x, y, z) => bodyRaw(x / S, y / S, z / S) * S;
+const FISH_LO = [-2.35 * S, -0.95 * S, -1.0 * S], FISH_HI = [2.95 * S, 1.45 * S, 1.0 * S];
+const FISH_LENGTH = 5.15 * S;
+
+function gradient(x, y, z, out) {
+  const e = 0.003;
+  out[0] = fishSDF(x + e, y, z) - fishSDF(x - e, y, z);
+  out[1] = fishSDF(x, y + e, z) - fishSDF(x, y - e, z);
+  out[2] = fishSDF(x, y, z + e) - fishSDF(x, y, z - e);
+  const l = Math.hypot(out[0], out[1], out[2]) || 1;
+  out[0] /= l; out[1] /= l; out[2] /= l;
+  return l / (2 * e);
+}
+
+// ───────────────────────────── Skin mesh ─────────────────────────────
+// Surface nets over the distance field, then each vertex is pulled exactly
+// onto the surface and told how deep the jelly is behind it.
+
+function buildFishGeometry() {
+  const cell = MESH_CELL, lo = FISH_LO;
+  const nx = Math.ceil((FISH_HI[0] - lo[0]) / cell) + 1;
+  const ny = Math.ceil((FISH_HI[1] - lo[1]) / cell) + 1;
+  const nz = Math.ceil((FISH_HI[2] - lo[2]) / cell) + 1;
+  const node = (i, j, k) => (k * ny + j) * nx + i;
+  const field = new Float32Array(nx * ny * nz);
+
+  // Sample in blocks, skipping blocks that are clearly far from the surface
+  const B = 4, reach = B * cell * 1.8;
+  for (let bz = 0; bz < nz; bz += B) for (let by = 0; by < ny; by += B) for (let bx = 0; bx < nx; bx += B) {
+    const ex = Math.min(bx + B, nx), ey = Math.min(by + B, ny), ez = Math.min(bz + B, nz);
+    const dc = fishSDF(lo[0] + (bx + ex - 1) * 0.5 * cell, lo[1] + (by + ey - 1) * 0.5 * cell, lo[2] + (bz + ez - 1) * 0.5 * cell);
+    const far = Math.abs(dc) > reach;
+    for (let k = bz; k < ez; k++) for (let j = by; j < ey; j++) for (let i = bx; i < ex; i++) {
+      field[node(i, j, k)] = far ? dc : fishSDF(lo[0] + i * cell, lo[1] + j * cell, lo[2] + k * cell);
+    }
+  }
+
+  const cx = nx - 1, cy = ny - 1, cz = nz - 1;
+  const cellOf = (i, j, k) => (k * cy + j) * cx + i;
+  const cellVert = new Int32Array(cx * cy * cz).fill(-1);
+  const verts = [];
+  const corner = new Float32Array(8);
+  const EDGES = [0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 1, 3, 4, 6, 5, 7, 0, 4, 1, 5, 2, 6, 3, 7];
+  for (let k = 0; k < cz; k++) for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) {
+    let mask = 0;
+    for (let c = 0; c < 8; c++) {
+      const v = field[node(i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1))];
+      corner[c] = v;
+      if (v < 0) mask |= 1 << c;
+    }
+    if (mask === 0 || mask === 255) continue;
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (let e = 0; e < 24; e += 2) {
+      const a = EDGES[e], b = EDGES[e + 1];
+      if ((corner[a] < 0) === (corner[b] < 0)) continue;
+      const t = corner[a] / (corner[a] - corner[b]);
+      sx += (a & 1) + ((b & 1) - (a & 1)) * t;
+      sy += ((a >> 1) & 1) + (((b >> 1) & 1) - ((a >> 1) & 1)) * t;
+      sz += ((a >> 2) & 1) + (((b >> 2) & 1) - ((a >> 2) & 1)) * t;
+      n++;
+    }
+    cellVert[cellOf(i, j, k)] = verts.length / 3;
+    verts.push(lo[0] + (i + sx / n) * cell, lo[1] + (j + sy / n) * cell, lo[2] + (k + sz / n) * cell);
+  }
+
+  const tris = [];
+  const quad = (a, b, c, d, outward) => {
+    if (a < 0 || b < 0 || c < 0 || d < 0) return;
+    if (outward) tris.push(a, b, c, a, c, d); else tris.push(a, c, b, a, d, c);
+  };
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const f0 = field[node(i, j, k)], inside = f0 < 0;
+    if (i < cx && j > 0 && k > 0 && j < cy && k < cz && (field[node(i + 1, j, k)] < 0) !== inside) {
+      quad(cellVert[cellOf(i, j - 1, k - 1)], cellVert[cellOf(i, j, k - 1)], cellVert[cellOf(i, j, k)], cellVert[cellOf(i, j - 1, k)], inside);
+    }
+    if (j < cy && i > 0 && k > 0 && i < cx && k < cz && (field[node(i, j + 1, k)] < 0) !== inside) {
+      quad(cellVert[cellOf(i - 1, j, k - 1)], cellVert[cellOf(i - 1, j, k)], cellVert[cellOf(i, j, k)], cellVert[cellOf(i, j, k - 1)], inside);
+    }
+    if (k < cz && i > 0 && j > 0 && i < cx && j < cy && (field[node(i, j, k + 1)] < 0) !== inside) {
+      quad(cellVert[cellOf(i - 1, j - 1, k)], cellVert[cellOf(i, j - 1, k)], cellVert[cellOf(i, j, k)], cellVert[cellOf(i - 1, j, k)], inside);
+    }
+  }
+
+  // Snap onto the true surface, then measure the jelly's depth straight in
+  const count = verts.length / 3, position = new Float32Array(verts), thickness = new Float32Array(count);
+  const g = [0, 0, 0];
+  for (let v = 0; v < count; v++) {
+    let x = position[v * 3], y = position[v * 3 + 1], z = position[v * 3 + 2];
+    for (let it = 0; it < 2; it++) {
+      const d = fishSDF(x, y, z), slope = gradient(x, y, z, g);
+      const s = d / Math.max(slope, 0.3);
+      x -= g[0] * s; y -= g[1] * s; z -= g[2] * s;
+    }
+    position[v * 3] = x; position[v * 3 + 1] = y; position[v * 3 + 2] = z;
+    gradient(x, y, z, g);
+    let t = 0.02;
+    for (let it = 0; it < 40 && t < 1.2; it++) {
+      const d = fishSDF(x - g[0] * t, y - g[1] * t, z - g[2] * t);
+      if (d > 0) break;
+      t += Math.max(-d, 0.025);
+    }
+    thickness[v] = Math.min(1.25, Math.max(0.12, t / 0.75));
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(position, 3).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('jellyThickness', new THREE.BufferAttribute(thickness, 1));
+  geometry.setIndex(tris);
+  return geometry;
+}
+
+// Find where a ray from inside the fish leaves its surface
+function surfacePoint(x, y, z, dx, dy, dz) {
+  let t = 0;
+  for (let i = 0; i < 200 && fishSDF(x + dx * t, y + dy * t, z + dz * t) < 0; i++) t += 0.005;
+  return new THREE.Vector3(x + dx * t, y + dy * t, z + dz * t);
+}
+
+const buildStart = performance.now();
+const fishGeometry = buildFishGeometry();
+const restVerts = fishGeometry.attributes.position.array.slice();
+const VERTS = restVerts.length / 3;
+
+// Eyes sit in the head just proud of the surface
+const EYE_RADIUS = 0.055;
+const eyeRest = [1, -1].map((side) => {
+  const p = surfacePoint(1.02 * S, 0.11 * S, 0, 0, 0, side);
+  const g = [0, 0, 0];
+  gradient(p.x, p.y, p.z, g);
+  return p.addScaledVector(new THREE.Vector3(...g), -EYE_RADIUS * 0.45);
+});
+
+// Little air bubbles caught in the thick part of the body
+const bubbleRest = [], bubbleScale = [];
+let seed = 7;
+const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+while (bubbleRest.length < 30 * 3) {
+  const x = (-1.3 + random() * 2.6) * S, y = (-0.4 + random() * 0.8) * S, z = (-0.34 + random() * 0.68) * S;
+  if (fishSDF(x, y, z) < -0.07) { bubbleRest.push(x, y, z); bubbleScale.push(0.016 + random() ** 2 * 0.04); }
+}
+const BUBBLES = bubbleScale.length;
+
+// ───────────────────────────── Soft body ─────────────────────────────
+// A lattice of particles fills the fish, cell by cell, down into the bill and
+// fins. Each particle's little neighbourhood is shape-matched on its own (so the
+// bill and fins can bend and a poke can dent), and the whole lattice is also
+// matched as one piece with some squash allowed (so it wobbles like the cube).
+
+const H = LATTICE_CELL;
+const LO = [Math.floor(FISH_LO[0] / H) * H - H, Math.floor(FISH_LO[1] / H) * H - H, -H / 2 - Math.ceil(-FISH_LO[2] / H) * H];
+const LN = [0, 1, 2].map((a) => Math.ceil((FISH_HI[a] - LO[a]) / H) + 1);   // cells per axis
+const cellIndex = (i, j, k) => (k * LN[1] + j) * LN[0] + i;
+const nodeKey = (i, j, k) => (k * (LN[1] + 1) + j) * (LN[0] + 1) + i;
+const occupied = new Uint8Array(LN[0] * LN[1] * LN[2]);
+const cellOfPoint = (x, y, z) => [
+  Math.min(LN[0] - 1, Math.max(0, Math.floor((x - LO[0]) / H))),
+  Math.min(LN[1] - 1, Math.max(0, Math.floor((y - LO[1]) / H))),
+  Math.min(LN[2] - 1, Math.max(0, Math.floor((z - LO[2]) / H))),
+];
+
+// A cell is jelly if its middle is inside the fish or any of the skin passes through it
+for (let k = 0; k < LN[2]; k++) for (let j = 0; j < LN[1]; j++) for (let i = 0; i < LN[0]; i++) {
+  if (fishSDF(LO[0] + (i + 0.5) * H, LO[1] + (j + 0.5) * H, LO[2] + (k + 0.5) * H) < 0) occupied[cellIndex(i, j, k)] = 1;
+}
+const anchorPoints = [...restVerts, ...bubbleRest, ...eyeRest.flatMap((p) => [p.x, p.y, p.z])];
+for (let v = 0; v < anchorPoints.length; v += 3) occupied[cellIndex(...cellOfPoint(anchorPoints[v], anchorPoints[v + 1], anchorPoints[v + 2]))] = 1;
+
+const nodeId = new Int32Array((LN[0] + 1) * (LN[1] + 1) * (LN[2] + 1)).fill(-1);
+const nodeRestList = [];
+const neighbours = [];
+for (let k = 0; k < LN[2]; k++) for (let j = 0; j < LN[1]; j++) for (let i = 0; i < LN[0]; i++) {
+  if (!occupied[cellIndex(i, j, k)]) continue;
+  const ids = [];
+  for (let c = 0; c < 8; c++) {
+    const a = i + (c & 1), b = j + ((c >> 1) & 1), d = k + ((c >> 2) & 1), key = nodeKey(a, b, d);
+    if (nodeId[key] < 0) {
+      nodeId[key] = nodeRestList.length / 3;
+      nodeRestList.push(LO[0] + a * H, LO[1] + b * H, LO[2] + d * H);
+      neighbours.push(new Set());
+    }
+    ids.push(nodeId[key]);
+  }
+  for (const a of ids) for (const b of ids) neighbours[a].add(b);
+}
+
+const N = nodeRestList.length / 3;
+const rest = new Float32Array(nodeRestList);
+
+// Each particle weighs as much jelly as it carries: a cell shares out the part of
+// it that is inside the fish among its corners. The thin bill and fins are light.
+const mass = new Float32Array(N);
+for (let k = 0; k < LN[2]; k++) for (let j = 0; j < LN[1]; j++) for (let i = 0; i < LN[0]; i++) {
+  if (!occupied[cellIndex(i, j, k)]) continue;
+  let inside = 0;
+  for (let c = 0; c < 64; c++) {
+    const x = LO[0] + (i + ((c & 3) + 0.5) / 4) * H, y = LO[1] + (j + (((c >> 2) & 3) + 0.5) / 4) * H, z = LO[2] + (k + ((c >> 4) + 0.5) / 4) * H;
+    if (fishSDF(x, y, z) < 0) inside++;
+  }
+  for (let c = 0; c < 8; c++) mass[nodeId[nodeKey(i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1))]] += inside / 64 / 8;
+}
+let totalMass = 0, mx = 0, my = 0, mz = 0;
+for (let i = 0; i < N; i++) {
+  mass[i] = Math.max(mass[i], 0.012);
+  totalMass += mass[i]; mx += rest[i * 3] * mass[i]; my += rest[i * 3 + 1] * mass[i]; mz += rest[i * 3 + 2] * mass[i];
+}
+mx /= totalMass; my /= totalMass; mz /= totalMass;
+for (let i = 0; i < N; i++) { rest[i * 3] -= mx; rest[i * 3 + 1] -= my; rest[i * 3 + 2] -= mz; }
+
+function invert3(m, out, o = 0) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+  const det = a * A + b * B + c * C, s = 1 / det;
+  out[o] = A * s; out[o + 1] = -(b * i - c * h) * s; out[o + 2] = (b * f - c * e) * s;
+  out[o + 3] = B * s; out[o + 4] = (a * i - c * g) * s; out[o + 5] = -(a * f - c * d) * s;
+  out[o + 6] = C * s; out[o + 7] = -(a * h - b * g) * s; out[o + 8] = (a * e - b * d) * s;
+}
+
+// Shape-matching groups. Fine ones: each particle with every particle it shares
+// a cell with (dents, flexing fins and bill). Coarse ones: overlapping segments
+// from tail to bill tip (they keep the long body from sagging like a noodle).
+function buildGroups(lists) {
+  const start = new Int32Array(lists.length + 1), flat = [];
+  lists.forEach((list, g) => { start[g] = flat.length; flat.push(...list); });
+  start[lists.length] = flat.length;
+  const members = new Int32Array(flat), offsets = new Float32Array(flat.length * 3);
+  const aqqInv = new Float32Array(lists.length * 9), quat = new Float64Array(lists.length * 4), count = new Float32Array(N);
+  const groupMass = new Float32Array(lists.length);   // 1 / total mass
+  for (let g = 0; g < lists.length; g++) {
+    const s = start[g], e = start[g + 1];
+    let cx = 0, cy = 0, cz = 0, total = 0;
+    for (let m = s; m < e; m++) {
+      const n = members[m], p = n * 3, w = mass[n];
+      cx += rest[p] * w; cy += rest[p + 1] * w; cz += rest[p + 2] * w; total += w; count[n]++;
+    }
+    cx /= total; cy /= total; cz /= total;
+    groupMass[g] = 1 / total;
+    const aqq = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (let m = s; m < e; m++) {
+      const p = members[m] * 3, w = mass[members[m]];
+      const qx = rest[p] - cx, qy = rest[p + 1] - cy, qz = rest[p + 2] - cz;
+      offsets[m * 3] = qx; offsets[m * 3 + 1] = qy; offsets[m * 3 + 2] = qz;
+      aqq[0] += w * qx * qx; aqq[1] += w * qx * qy; aqq[2] += w * qx * qz;
+      aqq[3] += w * qy * qx; aqq[4] += w * qy * qy; aqq[5] += w * qy * qz;
+      aqq[6] += w * qz * qx; aqq[7] += w * qz * qy; aqq[8] += w * qz * qz;
+    }
+    invert3(aqq, aqqInv, g * 9);
+  }
+  return { size: lists.length, start, members, offsets, aqqInv, quat, count, groupMass, goal: new Float32Array(N * 3) };
+}
+
+const fineGroups = buildGroups(neighbours.map((set) => [...set]));
+const segmentGroups = buildGroups([
+  [-1.95, 0.0, 0.75], [-1.3, 0.0, 0.75], [-0.6, 0.05, 0.8], [0.1, 0.05, 0.8], [0.8, 0.05, 0.75],
+  [1.5, 0.08, 0.6], [2.2, 0.1, 0.6], [0.05, 0.75, 0.6],
+].map(([x, y, r]) => {
+  const list = [];
+  for (let i = 0; i < N; i++) {
+    if (Math.hypot(rest[i * 3] + mx - x * S, rest[i * 3 + 1] + my - y * S) < r * S) list.push(i);
+  }
+  return list;
+}).filter((list) => list.length >= 8));
+const globalAqqInv = new Float32Array(9);
+{
+  const aqq = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < N; i++) {
+    const qx = rest[i * 3], qy = rest[i * 3 + 1], qz = rest[i * 3 + 2], w = mass[i];
+    aqq[0] += w * qx * qx; aqq[1] += w * qx * qy; aqq[2] += w * qx * qz;
+    aqq[3] += w * qy * qx; aqq[4] += w * qy * qy; aqq[5] += w * qy * qz;
+    aqq[6] += w * qz * qx; aqq[7] += w * qz * qy; aqq[8] += w * qz * qz;
+  }
+  invert3(aqq, globalAqqInv);
+}
+
+// The core of the body follows the whole-body match more firmly than the bill and fin tips
+// Particles outside the skin may dip below the table only as far as they stand clear of the skin
+const kGlobal = new Float32Array(N), kLocal = new Float32Array(N), kSegment = new Float32Array(N), clearance = new Float32Array(N);
+for (let i = 0; i < N; i++) {
+  const x = rest[i * 3] + mx, y = rest[i * 3 + 1] + my, z = rest[i * 3 + 2] + mz;
+  clearance[i] = Math.max(0, fishSDF(x, y, z));
+  const core = THREE.MathUtils.clamp(1 - bodySDF(x, y, z) / 0.35, 0, 1);
+  kGlobal[i] = GLOBAL_STIFFNESS * (0.45 + 0.55 * core);
+  kLocal[i] = LOCAL_STIFFNESS * (0.75 + 0.25 * core);
+  kSegment[i] = SEGMENT_STIFFNESS * (0.6 + 0.4 * core);
+}
+
+const pos = new Float32Array(N * 3);
+const prev = new Float32Array(N * 3);
+const vel = new Float32Array(N * 3);
+const push = new Float32Array(N);
+const grabWeight = new Float32Array(N);
+const grabLocal = new Float32Array(N * 3);    // offsets from the grabbed point in the body's frame
+const grabWorld = new Float32Array(N * 3);    // the same, as the world saw them at grab time
+const globalQuat = new Float64Array(4);
+const bounds = { x: 4, z: 2.3 };
+let impact = 0;
+
+// Skinning: any model-space point becomes a trilinear blend of its cell's 8 particles
+function buildSkin(points) {
+  const n = points.length / 3, index = new Int32Array(n * 8), weight = new Float32Array(n * 8);
+  for (let v = 0; v < n; v++) {
+    const x = points[v * 3], y = points[v * 3 + 1], z = points[v * 3 + 2];
+    const [i, j, k] = cellOfPoint(x, y, z);
+    const fx = (x - LO[0]) / H - i, fy = (y - LO[1]) / H - j, fz = (z - LO[2]) / H - k;
+    for (let c = 0; c < 8; c++) {
+      const dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1;
+      index[v * 8 + c] = nodeId[nodeKey(i + dx, j + dy, k + dz)];
+      weight[v * 8 + c] = (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy) * (dz ? fz : 1 - fz);
+    }
+  }
+  return { index, weight, count: n };
+}
+
+const meshSkin = buildSkin(restVerts);
+const bubbleSkin = buildSkin(bubbleRest);
+const eyeSkin = buildSkin(eyeRest.flatMap((p) => [p.x, p.y, p.z]));
+
+// A thinned-out set of skin points for the floor test every physics step; the
+// full skin is checked once more right before each frame is drawn.
+const contactSkin = (() => {
+  const seen = new Set(), pick = [];
+  for (let v = 0; v < VERTS; v++) {
+    const key = `${Math.round(restVerts[v * 3] / 0.075)},${Math.round(restVerts[v * 3 + 1] / 0.075)},${Math.round(restVerts[v * 3 + 2] / 0.075)}`;
+    if (!seen.has(key)) { seen.add(key); pick.push(v); }
+  }
+  const index = new Int32Array(pick.length * 8), weight = new Float32Array(pick.length * 8);
+  pick.forEach((v, n) => {
+    index.set(meshSkin.index.subarray(v * 8, v * 8 + 8), n * 8);
+    weight.set(meshSkin.weight.subarray(v * 8, v * 8 + 8), n * 8);
+  });
+  return { index, weight, count: pick.length };
+})();
+
+// Keep every skin point at or above the tabletop. Each fix only ever lifts
+// particles, so it can never push an earlier point back under.
+function floorPass(skin, lift = 0) {
+  let touched = false;
+  const { index, weight, count } = skin;
+  for (let v = 0, o = 0; v < count; v++, o += 8) {
+    let y = -lift, s = 0;
+    for (let c = o; c < o + 8; c++) { y += pos[index[c] * 3 + 1] * weight[c]; s += weight[c] * weight[c] / mass[index[c]]; }
+    if (y >= 0) continue;
+    const k = -y / s;
+    for (let c = o; c < o + 8; c++) {
+      const n = index[c], w = weight[c];
+      if (w === 0) continue;
+      pos[n * 3 + 1] += k * w / mass[n];
+      push[n] += w;
+      impact = Math.max(impact, -vel[n * 3 + 1]);
+    }
+    touched = true;
+  }
+  return touched;
+}
+
+// Scratch for the shape matches
+const A = new Float64Array(9), R = new Float64Array(9), L = new Float64Array(9), T = new Float64Array(9);
+
+// Rotation part of A, warm-started from the quaternion at Q[o] (Mueller et al. 2016)
+function extractRotation(Q, o, iterations) {
+  let qx = Q[o], qy = Q[o + 1], qz = Q[o + 2], qw = Q[o + 3];
+  for (let it = 0; it <= iterations; it++) {
+    const r00 = 1 - 2 * (qy * qy + qz * qz), r01 = 2 * (qx * qy - qw * qz), r02 = 2 * (qx * qz + qw * qy);
+    const r10 = 2 * (qx * qy + qw * qz), r11 = 1 - 2 * (qx * qx + qz * qz), r12 = 2 * (qy * qz - qw * qx);
+    const r20 = 2 * (qx * qz - qw * qy), r21 = 2 * (qy * qz + qw * qx), r22 = 1 - 2 * (qx * qx + qy * qy);
+    if (it === iterations) {
+      R[0] = r00; R[1] = r01; R[2] = r02; R[3] = r10; R[4] = r11; R[5] = r12; R[6] = r20; R[7] = r21; R[8] = r22;
+      break;
+    }
+    // omega = sum(R.col x A.col) / |sum(R.col . A.col)|
+    let ox = 0, oy = 0, oz = 0, dot = 0;
+    for (let c = 0; c < 3; c++) {
+      const rx = c === 0 ? r00 : c === 1 ? r01 : r02;
+      const ry = c === 0 ? r10 : c === 1 ? r11 : r12;
+      const rz = c === 0 ? r20 : c === 1 ? r21 : r22;
+      const ax = A[c], ay = A[3 + c], az = A[6 + c];
+      ox += ry * az - rz * ay; oy += rz * ax - rx * az; oz += rx * ay - ry * ax;
+      dot += rx * ax + ry * ay + rz * az;
+    }
+    const scale = 1 / (Math.abs(dot) + 1e-9);
+    ox *= scale; oy *= scale; oz *= scale;
+    const w = Math.sqrt(ox * ox + oy * oy + oz * oz);
+    if (w < 1e-9) { iterations = it + 1; continue; }
+    const s = Math.sin(w / 2) / w, dw = Math.cos(w / 2), dx = ox * s, dy = oy * s, dz = oz * s;
+    const nx = dw * qx + dx * qw + dy * qz - dz * qy;
+    const ny = dw * qy - dx * qz + dy * qw + dz * qx;
+    const nz = dw * qz + dx * qy - dy * qx + dz * qw;
+    const nw = dw * qw - dx * qx - dy * qy - dz * qz;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz + nw * nw);
+    qx = nx / len; qy = ny / len; qz = nz / len; qw = nw / len;
+  }
+  Q[o] = qx; Q[o + 1] = qy; Q[o + 2] = qz; Q[o + 3] = qw;
+}
+
+// T = blend of the volume-preserving linear fit A * Aqq^-1 and the pure rotation R
+function blendFit(aqqInv, o, stretch) {
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    L[r * 3 + c] = A[r * 3] * aqqInv[o + c] + A[r * 3 + 1] * aqqInv[o + 3 + c] + A[r * 3 + 2] * aqqInv[o + 6 + c];
+  }
+  const det = L[0] * (L[4] * L[8] - L[5] * L[7]) - L[1] * (L[3] * L[8] - L[5] * L[6]) + L[2] * (L[3] * L[7] - L[4] * L[6]);
+  if (det < 0.05) { T.set(R); return; }
+  const norm = stretch / Math.cbrt(det);
+  for (let n = 0; n < 9; n++) T[n] = L[n] * norm + (1 - stretch) * R[n];
+}
+
+// Match every group to the particles; each particle collects the sum of its groups' goals
+function matchGroups(groups, stretch, iterations) {
+  const { size, start, members, offsets, aqqInv, quat, groupMass, goal } = groups;
+  goal.fill(0);
+  for (let g = 0; g < size; g++) {
+    const s = start[g], e = start[g + 1], inv = groupMass[g];
+    let rx = 0, ry = 0, rz = 0;
+    for (let m = s; m < e; m++) { const n = members[m], p = n * 3, w = mass[n]; rx += pos[p] * w; ry += pos[p + 1] * w; rz += pos[p + 2] * w; }
+    rx *= inv; ry *= inv; rz *= inv;
+    A.fill(0);
+    for (let m = s; m < e; m++) {
+      const n = members[m], p = n * 3, q = m * 3, w = mass[n];
+      const px = (pos[p] - rx) * w, py = (pos[p + 1] - ry) * w, pz = (pos[p + 2] - rz) * w;
+      const qx = offsets[q], qy = offsets[q + 1], qz = offsets[q + 2];
+      A[0] += px * qx; A[1] += px * qy; A[2] += px * qz;
+      A[3] += py * qx; A[4] += py * qy; A[5] += py * qz;
+      A[6] += pz * qx; A[7] += pz * qy; A[8] += pz * qz;
+    }
+    extractRotation(quat, g * 4, iterations);
+    blendFit(aqqInv, g * 9, stretch);
+    for (let m = s; m < e; m++) {
+      const p = members[m] * 3, q = m * 3;
+      const qx = offsets[q], qy = offsets[q + 1], qz = offsets[q + 2];
+      goal[p] += T[0] * qx + T[1] * qy + T[2] * qz + rx;
+      goal[p + 1] += T[3] * qx + T[4] * qy + T[5] * qz + ry;
+      goal[p + 2] += T[6] * qx + T[7] * qy + T[8] * qz + rz;
+    }
+  }
+}
+
+const grab = {
+  id: -1, active: false, dragging: false, startX: 0, startY: 0, minY: 0.12,
+  target: new THREE.Vector3(), point: new THREE.Vector3(), history: [],
+};
+const centre = new THREE.Vector3();
+const globalR = new Float64Array(9);
+
+function stepBody(dt, damping) {
+  const damp = Math.exp(-damping * dt);
+  for (let i = 0; i < N * 3; i += 3) {
+    prev[i] = pos[i]; prev[i + 1] = pos[i + 1]; prev[i + 2] = pos[i + 2];
+    vel[i] *= damp; vel[i + 1] = (vel[i + 1] - GRAVITY * dt) * damp; vel[i + 2] *= damp;
+    pos[i] += vel[i] * dt; pos[i + 1] += vel[i + 1] * dt; pos[i + 2] += vel[i + 2] * dt;
+  }
+
+  // Whole-body match
+  let cx = 0, cy = 0, cz = 0;
+  for (let i = 0, n = 0; n < N; i += 3, n++) { const w = mass[n]; cx += pos[i] * w; cy += pos[i + 1] * w; cz += pos[i + 2] * w; }
+  cx /= totalMass; cy /= totalMass; cz /= totalMass;
+  centre.set(cx, cy, cz);
+  A.fill(0);
+  for (let i = 0, n = 0; n < N; i += 3, n++) {
+    const w = mass[n], px = (pos[i] - cx) * w, py = (pos[i + 1] - cy) * w, pz = (pos[i + 2] - cz) * w;
+    const qx = rest[i], qy = rest[i + 1], qz = rest[i + 2];
+    A[0] += px * qx; A[1] += px * qy; A[2] += px * qz;
+    A[3] += py * qx; A[4] += py * qy; A[5] += py * qz;
+    A[6] += pz * qx; A[7] += pz * qy; A[8] += pz * qz;
+  }
+  extractRotation(globalQuat, 0, 4);
+  globalR.set(R);
+  blendFit(globalAqqInv, 0, GLOBAL_STRETCH);
+  const G0 = T[0], G1 = T[1], G2 = T[2], G3 = T[3], G4 = T[4], G5 = T[5], G6 = T[6], G7 = T[7], G8 = T[8];
+
+  matchGroups(fineGroups, LOCAL_STRETCH, 2);
+  matchGroups(segmentGroups, SEGMENT_STRETCH, 3);
+  const fine = fineGroups.goal, fineCount = fineGroups.count, seg = segmentGroups.goal, segCount = segmentGroups.count;
+
+  for (let i = 0, n = 0; n < N; i += 3, n++) {
+    const qx = rest[i], qy = rest[i + 1], qz = rest[i + 2], kg = kGlobal[n];
+    const kf = kLocal[n] / fineCount[n], nf = fineCount[n];
+    const ks = segCount[n] > 0 ? kSegment[n] / segCount[n] : 0, ns = segCount[n];
+    pos[i] += kf * (fine[i] - nf * pos[i]) + ks * (seg[i] - ns * pos[i]) + kg * (G0 * qx + G1 * qy + G2 * qz + cx - pos[i]);
+    pos[i + 1] += kf * (fine[i + 1] - nf * pos[i + 1]) + ks * (seg[i + 1] - ns * pos[i + 1]) + kg * (G3 * qx + G4 * qy + G5 * qz + cy - pos[i + 1]);
+    pos[i + 2] += kf * (fine[i + 2] - nf * pos[i + 2]) + ks * (seg[i + 2] - ns * pos[i + 2]) + kg * (G6 * qx + G7 * qy + G8 * qz + cz - pos[i + 2]);
+  }
+
+  // The hand: the grabbed patch is held where the finger is, as it was gripped.
+  // While carried, the rest of the body is led along too, free to swing.
+  if (grab.active) {
+    grab.point.lerp(grab.target, 0.4);
+    const gx = grab.point.x, gy = grab.point.y, gz = grab.point.z, R0 = globalR;
+    for (let i = 0, n = 0; n < N; i += 3, n++) {
+      const w = grabWeight[n] * 0.5;
+      if (w > 0) {
+        pos[i] += w * (gx + grabWorld[i] - pos[i]);
+        pos[i + 1] += w * (gy + grabWorld[i + 1] - pos[i + 1]);
+        pos[i + 2] += w * (gz + grabWorld[i + 2] - pos[i + 2]);
+      }
+      if (!grab.dragging) continue;
+      const ox = grabLocal[i], oy = grabLocal[i + 1], oz = grabLocal[i + 2];
+      pos[i] += GRAB_FOLLOW * (gx + R0[0] * ox + R0[1] * oy + R0[2] * oz - pos[i]);
+      pos[i + 1] += GRAB_FOLLOW * (gy + R0[3] * ox + R0[4] * oy + R0[5] * oz - pos[i + 1]);
+      pos[i + 2] += GRAB_FOLLOW * (gz + R0[6] * ox + R0[7] * oy + R0[8] * oz - pos[i + 2]);
+    }
+  }
+
+  // Invisible walls and ceiling keep it in view
+  for (let i = 0; i < N * 3; i += 3) {
+    if (pos[i] < -bounds.x) pos[i] = -bounds.x; else if (pos[i] > bounds.x) pos[i] = bounds.x;
+    if (pos[i + 2] < -bounds.z) pos[i + 2] = -bounds.z; else if (pos[i + 2] > bounds.z) pos[i + 2] = bounds.z;
+    if (pos[i + 1] > CEILING) pos[i + 1] = CEILING;
+  }
+
+  // Tabletop: the skin itself collides, then touching particles grip
+  impact = 0;
+  push.fill(0);
+  let touched = floorPass(contactSkin) | floorPass(eyeSkin, EYE_RADIUS);
+  for (let n = 0; n < N; n++) {
+    if (pos[n * 3 + 1] >= -clearance[n]) continue;
+    impact = Math.max(impact, -vel[n * 3 + 1]);
+    pos[n * 3 + 1] = -clearance[n];
+    push[n] += 1;
+    touched = 1;
+  }
+  for (let i = 0, n = 0; n < N; i += 3, n++) {
+    if (touched && push[n] > 0) {
+      const f = FLOOR_FRICTION * Math.min(1, push[n] * 2);
+      pos[i] = prev[i] + (pos[i] - prev[i]) * (1 - f);
+      pos[i + 2] = prev[i + 2] + (pos[i + 2] - prev[i + 2]) * (1 - f);
+    }
+    let vx = (pos[i] - prev[i]) / dt, vy = (pos[i + 1] - prev[i + 1]) / dt, vz = (pos[i + 2] - prev[i + 2]) / dt;
+    const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+    if (speed > MAX_SPEED) { const s = MAX_SPEED / speed; vx *= s; vy *= s; vz *= s; }
+    vel[i] = vx; vel[i + 1] = vy; vel[i + 2] = vz;
+  }
+}
+
+// Place the fish at rest, turned a little toward the camera, its lowest point at `height`
+function placeFish(height, yaw = -0.36) {
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
+  const v = new THREE.Vector3();
+  for (let i = 0; i < N; i++) {
+    v.set(rest[i * 3], rest[i * 3 + 1], rest[i * 3 + 2]).applyQuaternion(q);
+    pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z;
+  }
+  let lowest = Infinity;
+  for (let v = 0, o = 0; v < VERTS; v++, o += 8) {
+    let y = 0;
+    for (let c = o; c < o + 8; c++) y += pos[meshSkin.index[c] * 3 + 1] * meshSkin.weight[c];
+    lowest = Math.min(lowest, y);
+  }
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] -= 0.15;                    // centre the bill-to-tail length on screen
+    pos[i * 3 + 1] += height - lowest;
+  }
+  vel.fill(0);
+  globalQuat[0] = q.x; globalQuat[1] = q.y; globalQuat[2] = q.z; globalQuat[3] = q.w;
+  for (let g = 0; g < fineGroups.size; g++) fineGroups.quat.set(globalQuat, g * 4);
+  for (let g = 0; g < segmentGroups.size; g++) segmentGroups.quat.set(globalQuat, g * 4);
+  grab.active = false; grab.id = -1; grab.dragging = false;
+  canvas.classList.remove('dragging');
+}
+
+// ───────────────────────────── Look ─────────────────────────────
+
+const jellyMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0xFFFFFF,
+  transmission: 1,
+  thickness: 1.3,
+  ior: 1.36,
+  roughness: 0.06,
+  clearcoat: 1,
+  clearcoatRoughness: 0.05,
+  attenuationColor: new THREE.Color(JELLY),
+  attenuationDistance: 0.85,   // saturates through the thick body, stays light in the fins and at the edges
+  emissive: new THREE.Color(JELLY),
+  emissiveIntensity: 0.06,
+  specularIntensity: 1,
+  envMapIntensity: 1.25,
+});
+// Per-vertex thickness: the fins and bill really are thinner than the body,
+// and the view through a grazing edge is shorter than through the middle.
+jellyMaterial.onBeforeCompile = (shader) => {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float jellyThickness;\nvarying float vJellyThickness;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvJellyThickness = jellyThickness;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vJellyThickness;')
+    .replace('#include <transmission_fragment>', THREE.ShaderChunk.transmission_fragment.replace(
+      'material.thickness = thickness;',
+      'material.thickness = thickness * vJellyThickness * ( 0.4 + 0.6 * abs( dot( normal, normalize( vViewPosition ) ) ) );'));
+};
+
+const fish = new THREE.Mesh(fishGeometry, jellyMaterial);
+fish.frustumCulled = false;
+fish.castShadow = true;
+scene.add(fish);
+
+const bubbles = new THREE.InstancedMesh(
+  new THREE.SphereGeometry(1, 16, 12),
+  new THREE.MeshStandardMaterial({ color: new THREE.Color(JELLY).lerp(new THREE.Color(0xFFFFFF), 0.8), roughness: 0.25 }),
+  BUBBLES
+);
+bubbles.frustumCulled = false;
+scene.add(bubbles);
+
+const eyes = new THREE.InstancedMesh(
+  new THREE.SphereGeometry(EYE_RADIUS, 20, 14),
+  new THREE.MeshPhysicalMaterial({ color: 0x0B1426, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08 }),
+  2
+);
+eyes.frustumCulled = false;
+scene.add(eyes);
+
+const tmp = new THREE.Vector3(), tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3();
+function skinPoint(skin, v, out) {
+  let x = 0, y = 0, z = 0;
+  for (let c = v * 8, end = c + 8; c < end; c++) {
+    const p = skin.index[c] * 3, w = skin.weight[c];
+    x += pos[p] * w; y += pos[p + 1] * w; z += pos[p + 2] * w;
+  }
+  return out.set(x, y, z);
+}
+
+function updateSkin() {
+  const p = fishGeometry.attributes.position.array, { index, weight } = meshSkin;
+  for (let v = 0, o = 0; v < VERTS; v++, o += 8) {
+    let x = 0, y = 0, z = 0;
+    for (let c = o; c < o + 8; c++) {
+      const n = index[c] * 3, w = weight[c];
+      x += pos[n] * w; y += pos[n + 1] * w; z += pos[n + 2] * w;
+    }
+    p[v * 3] = x; p[v * 3 + 1] = y; p[v * 3 + 2] = z;
+  }
+  fishGeometry.attributes.position.needsUpdate = true;
+  fishGeometry.computeVertexNormals();
+  fishGeometry.computeBoundingSphere();   // keeps raycasts against the deformed mesh correct
+
+  for (let b = 0; b < BUBBLES; b++) {
+    skinPoint(bubbleSkin, b, tmp);
+    bubbles.setMatrixAt(b, tmpM.compose(tmp, tmpQ, tmpS.setScalar(bubbleScale[b])));
+  }
+  bubbles.instanceMatrix.needsUpdate = true;
+  tmpQ.set(globalQuat[0], globalQuat[1], globalQuat[2], globalQuat[3]);
+  for (let e = 0; e < 2; e++) eyes.setMatrixAt(e, tmpM.compose(skinPoint(eyeSkin, e, tmp), tmpQ, tmpS.setScalar(1)));
+  eyes.instanceMatrix.needsUpdate = true;
+  tmpQ.identity();
+}
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, lastBlup = 0;
+
+function initAudio() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (Ctx) audio = new Ctx();
+}
+
+function playBlup(strength, pitch = 1) {
+  if (!audio || audio.currentTime - lastBlup < 0.09) return;
+  lastBlup = audio.currentTime;
+  const t = audio.currentTime, level = Math.min(0.5, 0.08 + strength * 0.06);
+  const osc = audio.createOscillator();
+  osc.frequency.setValueAtTime(130 * pitch, t);
+  osc.frequency.exponentialRampToValueAtTime(55 * pitch, t + 0.18);
+  const wobble = audio.createOscillator(), depth = audio.createGain();
+  wobble.frequency.value = 10; depth.gain.value = 12 * pitch;
+  wobble.connect(depth).connect(osc.frequency);
+  const gain = audio.createGain();
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(level, t + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.36);
+  osc.connect(gain).connect(audio.destination);
+  osc.start(t); wobble.start(t); osc.stop(t + 0.38); wobble.stop(t + 0.38);
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const dragPlane = new THREE.Plane();
+const viewDir = new THREE.Vector3();
+
+function setRay(x, y) {
+  ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+}
+
+// Where the ray meets the fish; near misses on the thin bill and fins still count
+function pickFish() {
+  const hits = raycaster.intersectObject(fish);
+  if (hits.length) return hits[0].point.clone();
+  const ray = raycaster.ray, p = new THREE.Vector3();
+  let best = -1, bestD = 0.28;
+  for (let n = 0; n < N; n++) {
+    p.set(pos[n * 3], pos[n * 3 + 1], pos[n * 3 + 2]);
+    const d = ray.distanceToPoint(p);
+    if (d < bestD) { bestD = d; best = n; }
+  }
+  if (best < 0) return null;
+  return ray.closestPointToPoint(p.set(pos[best * 3], pos[best * 3 + 1], pos[best * 3 + 2]), new THREE.Vector3());
+}
+
+// Push the jelly in along the ray, strongest right under the finger
+function poke(point, dir, strength) {
+  for (let n = 0; n < N; n++) {
+    const d = Math.hypot(pos[n * 3] - point.x, pos[n * 3 + 1] - point.y, pos[n * 3 + 2] - point.z);
+    const w = Math.max(0, 1 - d / GRAB_RADIUS) ** 2;
+    vel[n * 3] += dir.x * strength * w;
+    vel[n * 3 + 1] += dir.y * strength * w;
+    vel[n * 3 + 2] += dir.z * strength * w;
+  }
+}
+
+function clampTarget(t) {
+  t.x = THREE.MathUtils.clamp(t.x, -bounds.x + 0.2, bounds.x - 0.2);
+  t.z = THREE.MathUtils.clamp(t.z, -bounds.z + 0.2, bounds.z - 0.2);
+  t.y = THREE.MathUtils.clamp(t.y, grab.minY, CEILING - 1.2);
+  return t;
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  initAudio();
+  if (grab.id !== -1 || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  setRay(e.clientX, e.clientY);
+  const point = pickFish();
+  if (!point) return;
+  e.preventDefault();
+
+  const r = globalR;
+  for (let n = 0; n < N; n++) {
+    const dx = pos[n * 3] - point.x, dy = pos[n * 3 + 1] - point.y, dz = pos[n * 3 + 2] - point.z;
+    grabWeight[n] = Math.max(0, 1 - Math.hypot(dx, dy, dz) / GRAB_RADIUS) ** 2;
+    grabWorld[n * 3] = dx; grabWorld[n * 3 + 1] = dy; grabWorld[n * 3 + 2] = dz;
+    grabLocal[n * 3] = r[0] * dx + r[3] * dy + r[6] * dz;
+    grabLocal[n * 3 + 1] = r[1] * dx + r[4] * dy + r[7] * dz;
+    grabLocal[n * 3 + 2] = r[2] * dx + r[5] * dy + r[8] * dz;
+  }
+  poke(point, raycaster.ray.direction, POKE_SPEED * motion().poke);
+  playBlup(1.5, 1.5);
+
+  // Holding still presses a dent in; dragging carries the grabbed spot on a camera-facing plane
+  camera.getWorldDirection(viewDir);
+  dragPlane.setFromNormalAndCoplanarPoint(viewDir, point);
+  grab.minY = Math.max(0.1, point.y * 0.45);
+  grab.point.copy(point);
+  grab.target.copy(point).addScaledVector(raycaster.ray.direction, PRESS_DEPTH * motion().poke);
+  grab.target.y = Math.max(grab.target.y, Math.min(point.y, 0.12));
+  grab.id = e.pointerId; grab.startX = e.clientX; grab.startY = e.clientY;
+  grab.active = true; grab.dragging = false; grab.history.length = 0;
+  canvas.setPointerCapture(e.pointerId);
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== grab.id) return;
+  if (!grab.dragging && Math.hypot(e.clientX - grab.startX, e.clientY - grab.startY) > 4) {
+    grab.dragging = true;
+    canvas.classList.add('dragging');
+  }
+  if (!grab.dragging) return;
+  const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+  const last = events.length ? events[events.length - 1] : e;
+  setRay(last.clientX, last.clientY);
+  if (raycaster.ray.intersectPlane(dragPlane, grab.target)) {
+    clampTarget(grab.target);
+    grab.history.push({ t: performance.now(), p: grab.target.clone() });
+    if (grab.history.length > 12) grab.history.shift();
+  }
+});
+
+// Throwing: the body keeps the hand's speed and direction at the moment of release
+function letGo(e) {
+  if (e.pointerId !== grab.id) return;
+  if (grab.dragging && e.type === 'pointerup') {
+    const now = performance.now(), recent = grab.history.filter((h) => now - h.t < 110);
+    if (recent.length >= 2 && now - recent[recent.length - 1].t < 70) {
+      const a = recent[0], b = recent[recent.length - 1], dt = Math.max(0.016, (b.t - a.t) / 1000);
+      const throwVel = b.p.clone().sub(a.p).divideScalar(dt);
+      if (throwVel.length() > 14) throwVel.setLength(14);
+      if (throwVel.length() > 1.2) {
+        const mean = new THREE.Vector3();
+        for (let n = 0; n < N; n++) mean.x += vel[n * 3] * mass[n], mean.y += vel[n * 3 + 1] * mass[n], mean.z += vel[n * 3 + 2] * mass[n];
+        mean.divideScalar(totalMass);
+        const add = throwVel.multiplyScalar(0.9).sub(mean).multiplyScalar(0.75);
+        for (let n = 0; n < N; n++) { vel[n * 3] += add.x; vel[n * 3 + 1] += add.y; vel[n * 3 + 2] += add.z; }
+      }
+    }
+  }
+  grab.id = -1; grab.active = false; grab.dragging = false;
+  canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', letGo);
+canvas.addEventListener('pointercancel', letGo);
+canvas.addEventListener('lostpointercapture', letGo);
+
+// A hop that also rights the fish if it has landed on its side
+function jump() {
+  initAudio();
+  if (grab.active) { grab.id = -1; grab.active = false; grab.dragging = false; canvas.classList.remove('dragging'); }
+  let meanVy = 0, low = Infinity, high = -Infinity;
+  for (let n = 0; n < N; n++) { meanVy += vel[n * 3 + 1]; low = Math.min(low, pos[n * 3 + 1]); high = Math.max(high, pos[n * 3 + 1]); }
+  if (meanVy / N > 2.5) return;   // already on the way up
+  const speed = JUMP_SPEED * motion().jump, flight = (2 * speed) / GRAVITY;
+  const q = new THREE.Quaternion(globalQuat[0], globalQuat[1], globalQuat[2], globalQuat[3]);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+  const spin = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0, 1, 0));
+  const angle = Math.atan2(spin.length(), up.y);
+  if (spin.lengthSq() > 1e-6) spin.normalize().multiplyScalar((angle / flight) * 0.85); else spin.set(0, 0, 0);
+  for (let n = 0; n < N; n++) {
+    const rx = pos[n * 3] - centre.x, ry = pos[n * 3 + 1] - centre.y, rz = pos[n * 3 + 2] - centre.z;
+    const lift = speed * (1 + 0.3 * (1 - (pos[n * 3 + 1] - low) / Math.max(0.01, high - low)));   // the bottom leaves first
+    vel[n * 3] += spin.y * rz - spin.z * ry;
+    vel[n * 3 + 1] += lift - vel[n * 3 + 1] * 0.5 + spin.z * rx - spin.x * rz;
+    vel[n * 3 + 2] += spin.x * ry - spin.y * rx;
+  }
+  playBlup(2.5, 1.2);
+}
+
+function reset() {
+  initAudio();
+  placeFish(motion().drop);
+}
+
+function shove(x, z) {
+  initAudio();
+  for (let n = 0; n < N; n++) { vel[n * 3] += x; vel[n * 3 + 1] += 1.6; vel[n * 3 + 2] += z; }
+}
+
+function pokeBelly() {
+  initAudio();
+  // Aim at the side of the belly facing the camera
+  const target = new THREE.Vector3(centre.x, Math.max(0.2, centre.y - 0.15), centre.z);
+  raycaster.set(camera.position, target.sub(camera.position).normalize());
+  const point = pickFish();
+  if (!point) return;
+  poke(point, raycaster.ray.direction, POKE_SPEED * 1.4 * motion().poke);
+  playBlup(1.5, 1.5);
+}
+
+document.getElementById('jump').addEventListener('click', jump);
+document.getElementById('reset').addEventListener('click', reset);
+window.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const onButton = e.target instanceof HTMLButtonElement;
+  switch (e.key) {
+    case ' ': if (onButton) return; jump(); break;
+    case 'r': case 'R': reset(); break;
+    case 'p': case 'P': pokeBelly(); break;
+    case 'ArrowLeft': shove(-3.2, 0); break;
+    case 'ArrowRight': shove(3.2, 0); break;
+    case 'ArrowUp': shove(0, -2.4); break;
+    case 'ArrowDown': shove(0, 2.4); break;
+    default: return;
+  }
+  e.preventDefault();
+});
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  // Pull back until the whole fish (plus room to toss it) fits across the screen
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const distance = Math.max(9.6, (FISH_LENGTH + 1.3) / 2 / (tanHalf * camera.aspect));
+  camera.position.set(0, 1 + distance * 0.205, distance);
+  camera.lookAt(0, 1, 0);
+  camera.updateProjectionMatrix();
+  scene.fog.near = distance + 6.5;
+  scene.fog.far = distance + 28.5;
+  // Walls sit just inside the edges of the view, but never closer than the fish is long
+  bounds.x = Math.max(FISH_LENGTH / 2 + 0.45, tanHalf * distance * camera.aspect - 0.6);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+let accumulator = 0;
+placeFish(motion().drop);
+console.info(`jelly swordfish: ${VERTS} skin vertices, ${N} particles, ${fineGroups.members.length + segmentGroups.members.length} group links, built in ${Math.round(performance.now() - buildStart)} ms`);
+
+function frame() {
+  accumulator += Math.min(clock.getDelta(), 0.05);
+  const { damping } = motion();
+  let hardest = 0;
+  for (let steps = 0; accumulator >= STEP && steps < 6; steps++, accumulator -= STEP) {
+    stepBody(STEP, damping);
+    hardest = Math.max(hardest, impact);
+  }
+  if (accumulator > STEP) accumulator = 0;
+  if (!Number.isFinite(pos[0] + pos[N * 3 - 1])) placeFish(1);   // never lose the toy
+  if (hardest > 2.5) playBlup(hardest);
+
+  // The full skin is checked against the table once more, so no part is ever drawn below it
+  push.fill(0);
+  floorPass(meshSkin);
+  floorPass(eyeSkin, EYE_RADIUS);
+  updateSkin();
+  renderer.render(scene, camera);
+  if (window.__jelly?.onFrame) window.__jelly.onFrame();
+}
+renderer.setAnimationLoop(frame);
+window.__jelly = { pos, vel, rest, N, VERTS, fishGeometry, camera, centre, globalQuat, placeFish, jump, bounds, eyes, eyeSkin, skinPoint, grab, grabWeight, grabLocal, globalR,
+  sim(seconds, each) {
+    const frames = Math.round(seconds * 60), p = fishGeometry.attributes.position.array; let before = 0, after = 0;
+    for (let f = 0; f < frames; f++) {
+      if (each) each(f);
+      stepBody(STEP, motion().damping); stepBody(STEP, motion().damping);
+      updateSkinOnly(); for (let i = 1; i < p.length; i += 3) before = Math.min(before, p[i]);
+      push.fill(0); floorPass(meshSkin); floorPass(eyeSkin, EYE_RADIUS);
+      updateSkinOnly(); for (let i = 1; i < p.length; i += 3) after = Math.min(after, p[i]);
+    }
+    return { before, after };
+  },
+};
+function updateSkinOnly() { const p = fishGeometry.attributes.position.array, { index, weight } = meshSkin; for (let v = 0, o = 0; v < VERTS; v++, o += 8) { let x = 0, y = 0, z = 0; for (let c = o; c < o + 8; c++) { const n = index[c] * 3, w = weight[c]; x += pos[n] * w; y += pos[n + 1] * w; z += pos[n + 2] * w; } p[v * 3] = x; p[v * 3 + 1] = y; p[v * 3 + 2] = z; } }
+</script>
+<script defer src="/visit-counter.js" data-project="jelly-swordfish-opus"></script>
+</body>
+</html>

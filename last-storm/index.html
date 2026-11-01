@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Last Storm</title>
+<meta name="description" content="A sixty-second hand-painted animated short, drawn live in Canvas 2D: an old fisherman, a bottle, and the storm he kept.">
+<meta name="theme-color" content="#061C27">
+<link rel="stylesheet" href="css/player.css">
+</head>
+<body>
+<main class="player" id="player" data-aspect="wide">
+  <div class="stage" id="stage">
+    <canvas id="film" aria-label="The Last Storm, animated short film"></canvas>
+    <div class="subs" id="subs" aria-live="polite"></div>
+    <div class="poster" id="poster">
+      <div class="poster-inner">
+        <p class="poster-kicker">A short film in five scenes</p>
+        <h1 class="poster-title">The Last Storm</h1>
+        <button class="poster-play" id="posterPlay" type="button" aria-label="Play the film">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>
+          <span>Play</span>
+        </button>
+        <p class="poster-note">90 seconds · sound on</p>
+      </div>
+    </div>
+    <div class="error" id="error" hidden></div>
+    <div class="debug" id="debug" hidden></div>
+  </div>
+
+  <div class="controls" id="controls">
+    <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="Film position" aria-valuemin="0" aria-valuemax="90" aria-valuenow="0">
+      <div class="scrub-track"><div class="scrub-fill" id="scrubFill"></div></div>
+      <div class="scrub-markers" id="markers"></div>
+      <div class="scrub-head" id="scrubHead"></div>
+      <div class="scrub-tip" id="scrubTip" hidden></div>
+    </div>
+    <div class="bar">
+      <div class="group">
+        <button type="button" class="ic" id="play" aria-label="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5.5v13l10.5-6.5z"/><path class="i-pause" d="M7 5h3.5v14H7zm6.5 0H17v14h-3.5z"/></svg></button>
+        <button type="button" class="ic" id="restart" aria-label="Restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6zm3.5 7L19 5.5v13z"/></svg></button>
+        <span class="time" id="time">0:00.0 / 1:30</span>
+        <span class="scene-name" id="sceneName">The Collector</span>
+      </div>
+      <div class="group">
+        <button type="button" class="ic" id="mute" aria-label="Mute"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="i-wave" d="M15 8.5a5 5 0 0 1 0 7M17.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path class="i-x" d="M15.5 9.5l5 5m0-5l-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <input type="range" id="volume" class="range" min="0" max="1" step="0.01" value="0.85" aria-label="Master volume">
+        <div class="menu-wrap">
+          <button type="button" class="pill" id="mixBtn" aria-expanded="false" aria-controls="mix">Sound</button>
+          <div class="menu" id="mix" hidden>
+            <label>Ambience <input type="range" id="ambVol" class="range" min="0" max="1" step="0.01" value="1"></label>
+            <label>Effects <input type="range" id="fxVol" class="range" min="0" max="1" step="0.01" value="1"></label>
+            <label class="check"><input type="checkbox" id="tts"> Spoken narration preview <small>(browser voice)</small></label>
+            <p class="menu-note" id="narrationNote">Narration: subtitles only. Add a recording in <code>audio/narration.json</code>.</p>
+          </div>
+        </div>
+        <button type="button" class="pill" id="cc" aria-pressed="true" title="Subtitles (C)">CC</button>
+        <button type="button" class="pill" id="aspect" title="Switch to vertical 9:16">16:9</button>
+        <button type="button" class="pill" id="quality" title="Render quality">High</button>
+        <button type="button" class="ic" id="fs" aria-label="Fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      </div>
+    </div>
+    <p class="status" id="status" aria-live="polite"></p>
+  </div>
+</main>
+<noscript><p class="noscript">This film is drawn live with JavaScript. Please enable it to watch.</p></noscript>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Light Switch Wall // 07</title>
+<style>
+  :root { --bg: #2A2723; --ink: #F3E9DC; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink); transition: color 0.3s;
+  }
+  .label.left { left: 28px; }
+  .label.right { right: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: currentColor; }
+  .label .hint { opacity: 0.6; }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; }
+    .label.right { right: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label left">
+  <div>Light Switch Wall // 07</div>
+  <div class="hint">Flick them all on</div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const CELL = [1.5, 2.1];          // spacing between switches
+const PLATE = [1.05, 1.6];
+const LAYOUTS = { landscape: [5, 3], portrait: [3, 5] };   // [columns, rows]
+const KINDS = ['rocker', 'toggle', 'push', 'slide', 'rotary'];
+const WALL_DARK = new THREE.Color(0x35312C), WALL_LIT = new THREE.Color(0xEFE6D8);
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+pmrem.dispose();
+
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+
+// The room gets brighter with every switch that is on
+const sun = new THREE.DirectionalLight(0xFFF1DE, 1);
+sun.position.set(-5, 7, 9);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.radius = 5;
+sun.shadow.bias = -0.0005;
+Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 30 });
+scene.add(sun);
+
+const wallMaterial = new THREE.MeshStandardMaterial({ color: WALL_DARK.clone(), roughness: 0.95 });
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), wallMaterial);
+wall.receiveShadow = true;
+scene.add(wall);
+
+// ───────────────────────────── Materials & shapes ─────────────────────────────
+
+const plastic = new THREE.MeshStandardMaterial({ color: 0xF4F1EA, roughness: 0.42 });
+const darkPlastic = new THREE.MeshStandardMaterial({ color: 0x1D1D1F, roughness: 0.5 });
+const chrome = new THREE.MeshStandardMaterial({ color: 0xDADDE2, metalness: 1, roughness: 0.18 });
+const brass = new THREE.MeshStandardMaterial({ color: 0xC9A24B, metalness: 1, roughness: 0.3 });
+const steelPlate = new THREE.MeshStandardMaterial({ color: 0xB9BCC2, metalness: 1, roughness: 0.42 });
+const blackPlate = new THREE.MeshStandardMaterial({ color: 0x26262A, roughness: 0.5 });
+const creamPlate = new THREE.MeshStandardMaterial({ color: 0xE6D7B8, roughness: 0.5 });
+const capColors = [0xE3242B, 0x17B890, 0x1238FF, 0xFFC400].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.35 }));
+
+function roundedRect(w, h, r) {
+  const s = new THREE.Shape();
+  s.moveTo(-w / 2 + r, -h / 2);
+  s.lineTo(w / 2 - r, -h / 2); s.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+  s.lineTo(w / 2, h / 2 - r); s.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+  s.lineTo(-w / 2 + r, h / 2); s.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+  s.lineTo(-w / 2, -h / 2 + r); s.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+  return s;
+}
+// Rounded slab lying on the wall, front face at z = depth
+function slab(w, h, r, depth, bevel = 0.02) {
+  return new THREE.ExtrudeGeometry(roundedRect(w, h, r), {
+    depth: depth - bevel, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 8,
+  });
+}
+function part(geometry, material, parent, x = 0, y = 0, z = 0) {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+// Cylinder standing out of the wall (axis along z), base at z = 0
+function post(radiusTop, radiusBottom, height, segments = 32) {
+  return new THREE.CylinderGeometry(radiusTop, radiusBottom, height, segments).rotateX(Math.PI / 2).translate(0, 0, height / 2);
+}
+
+const plateGeometry = slab(PLATE[0], PLATE[1], 0.1, 0.07);
+const screwGeometry = post(0.045, 0.045, 0.02, 20);
+const slotGeometry = new THREE.BoxGeometry(0.07, 0.012, 0.004);
+
+// ───────────────────────────── Switch builders ─────────────────────────────
+// Each returns { pose(a) } where a eases 0 (off) .. 1 (on), overshooting a little.
+
+const builders = {
+  rocker(group) {
+    part(slab(0.5, 0.86, 0.05, 0.02, 0.008), darkPlastic, group, 0, 0, 0.07);
+    const pivot = new THREE.Group();
+    pivot.position.z = 0.08;
+    group.add(pivot);
+    part(slab(0.42, 0.78, 0.04, 0.12, 0.02), plastic, pivot, 0, 0, -0.03);
+    return { pose: (a) => { pivot.rotation.x = THREE.MathUtils.lerp(-0.17, 0.17, a); } };
+  },
+
+  toggle(group) {
+    part(post(0.17, 0.19, 0.05, 6), chrome, group, 0, 0, 0.07);
+    part(post(0.11, 0.11, 0.05, 24), chrome, group, 0, 0, 0.12);
+    const pivot = new THREE.Group();
+    pivot.position.z = 0.12;
+    group.add(pivot);
+    part(post(0.07, 0.045, 0.5, 20), chrome, pivot);
+    part(new THREE.SphereGeometry(0.075, 20, 14), chrome, pivot, 0, 0, 0.5);
+    return { pose: (a) => { pivot.rotation.x = THREE.MathUtils.lerp(0.55, -0.55, a); } };
+  },
+
+  push(group, index) {
+    part(post(0.3, 0.33, 0.07, 40), chrome, group, 0, 0, 0.07);
+    const cap = part(post(0.22, 0.24, 0.14, 40), capColors[index % capColors.length], group, 0, 0, 0.1);
+    return { pose: (a) => { cap.position.z = THREE.MathUtils.lerp(0.11, 0.035, a); } };
+  },
+
+  slide(group) {
+    part(slab(0.74, 0.3, 0.14, 0.015, 0.006), darkPlastic, group, 0, 0, 0.07);
+    const knob = new THREE.Group();
+    knob.position.z = 0.085;
+    group.add(knob);
+    part(slab(0.3, 0.24, 0.05, 0.1, 0.02), chrome, knob);
+    for (let i = -1; i <= 1; i++) part(new THREE.BoxGeometry(0.02, 0.17, 0.02), darkPlastic, knob, i * 0.06, 0, 0.1);
+    return { pose: (a) => { knob.position.x = THREE.MathUtils.lerp(-0.2, 0.2, a); } };
+  },
+
+  rotary(group) {
+    for (let i = 0; i < 7; i++) {   // tick marks round the dial
+      const angle = Math.PI * (1 - i / 6);
+      const tick = part(new THREE.BoxGeometry(0.02, 0.07, 0.006), darkPlastic, group, Math.cos(angle) * 0.4, Math.sin(angle) * 0.4, 0.072);
+      tick.rotation.z = angle - Math.PI / 2;
+    }
+    const knob = new THREE.Group();
+    knob.position.z = 0.07;
+    group.add(knob);
+    part(post(0.25, 0.29, 0.2, 48), brass, knob);
+    part(new THREE.BoxGeometry(0.035, 0.2, 0.012), darkPlastic, knob, 0, 0.13, 0.2);
+    return { pose: (a) => { knob.rotation.z = THREE.MathUtils.lerp(Math.PI * 0.42, -Math.PI * 0.42, a); } };
+  },
+};
+
+// ───────────────────────────── Switches ─────────────────────────────
+
+const ledGeometry = new THREE.SphereGeometry(0.045, 16, 12);
+const glowTexture = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255, 190, 90, 1)');
+  g.addColorStop(0.25, 'rgba(255, 150, 40, 0.45)');
+  g.addColorStop(1, 'rgba(255, 120, 0, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+})();
+
+const switches = [];
+const hitTargets = [];
+const board = new THREE.Group();
+scene.add(board);
+
+// Three of each kind, shuffled until no two alike sit side by side or stacked
+// (checked for both the landscape and the portrait grid).
+function arrangeKinds(total) {
+  const pool = Array.from({ length: total }, (_, i) => KINDS[i % KINDS.length]);
+  const clash = (cols) => pool.some((k, i) => (i % cols < cols - 1 && pool[i + 1] === k) || pool[i + cols] === k);
+  for (let attempt = 0; attempt < 2000; attempt++) {
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    if (!Object.values(LAYOUTS).some(([cols]) => clash(cols))) break;
+  }
+  return pool;
+}
+const arrangement = arrangeKinds(15);
+const plateFinishes = [plastic, plastic, steelPlate, blackPlate, creamPlate];
+
+function createSwitch(index) {
+  const kind = arrangement[index];
+  const group = new THREE.Group();
+  board.add(group);
+
+  part(plateGeometry, plateFinishes[Math.floor(Math.random() * plateFinishes.length)], group);
+  for (const y of [-1, 1]) {
+    part(screwGeometry, chrome, group, 0, y * (PLATE[1] / 2 - 0.14), 0.07);
+    const slot = part(slotGeometry, darkPlastic, group, 0, y * (PLATE[1] / 2 - 0.14), 0.092);
+    slot.rotation.z = Math.sin(index * 7.1 + y) * 1.5;
+  }
+
+  // Indicator lamp above the switch
+  const ledMaterial = new THREE.MeshStandardMaterial({ color: 0x3A1D10, emissive: 0xFF8A1F, emissiveIntensity: 0, roughness: 0.3 });
+  part(ledGeometry, ledMaterial, group, 0, PLATE[1] / 2 - 0.3, 0.075);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0,
+  }));
+  glow.position.set(0, PLATE[1] / 2 - 0.3, 0.2);
+  glow.scale.setScalar(0.55);
+  group.add(glow);
+
+  const body = new THREE.Group();
+  body.position.y = -0.12;
+  group.add(body);
+  const mechanism = builders[kind](body, index);
+
+  // Invisible pad for hit testing
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(PLATE[0], PLATE[1], 0.6), new THREE.MeshBasicMaterial({ visible: false }));
+  pad.position.z = 0.3;
+  pad.userData.index = index;
+  group.add(pad);
+  hitTargets.push(pad);
+
+  const sw = {
+    kind, group, mechanism, ledMaterial, glow, on: false, value: 0, velocity: 0, lamp: 0,
+    // Hung by hand: never quite on the grid, never quite straight
+    jitter: [(Math.random() - 0.5) * 0.16, (Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.07],
+  };
+  mechanism.pose(0);
+  return sw;
+}
+
+for (let i = 0; i < 15; i++) switches.push(createSwitch(i));
+
+function layout(name) {
+  const [cols, rows] = LAYOUTS[name];
+  switches.forEach((sw, i) => {
+    const c = i % cols, r = Math.floor(i / cols);
+    sw.group.position.set((c - (cols - 1) / 2) * CELL[0] + sw.jitter[0], ((rows - 1) / 2 - r) * CELL[1] + sw.jitter[1], 0);
+    sw.group.rotation.z = sw.jitter[2];
+  });
+}
+
+// ───────────────────────────── Sound ─────────────────────────────
+// Each mechanism is a small struck object: a noise crack ringing a few damped resonances.
+
+let audio = null;
+const clicks = {};   // kind -> [onBuffer, offBuffer]
+
+function renderStrike(sampleRate, seconds, modes, scrape = 0) {
+  const length = Math.floor(sampleRate * seconds);
+  const out = new Float32Array(length), excitation = new Float32Array(length);
+  const crack = 0.0007 * sampleRate;
+  for (let n = 0; n < length && n < crack * 8; n++) excitation[n] = (Math.random() * 2 - 1) * Math.exp(-n / crack);
+  excitation[0] += 1;
+  // Optional scrape before the strike (slide switches), then the strike lands late
+  const delay = Math.floor(scrape * sampleRate);
+  if (delay > 0) {
+    excitation.copyWithin(delay, 0, length - delay);
+    for (let n = 0; n < delay; n++) excitation[n] = (Math.random() * 2 - 1) * 0.12 * Math.sin((Math.PI * n) / delay);
+  }
+  for (const [freq, decay, gain] of modes) {
+    const r = Math.exp(-1 / (decay * sampleRate));
+    const a1 = 2 * r * Math.cos((2 * Math.PI * freq) / sampleRate), a2 = -r * r;
+    let y1 = 0, y2 = 0;
+    for (let n = 0; n < length; n++) {
+      const y = excitation[n] + a1 * y1 + a2 * y2;
+      y2 = y1; y1 = y;
+      out[n] += gain * (1 - r) * y;
+    }
+  }
+  let peak = 0;
+  for (let n = 0; n < length; n++) peak = Math.max(peak, Math.abs(out[n]));
+  for (let n = 0; n < length; n++) out[n] *= (0.9 / peak) * Math.min(1, (length - n) / (sampleRate * 0.004));
+  const buffer = audio.createBuffer(1, length, sampleRate);
+  buffer.getChannelData(0).set(out);
+  return buffer;
+}
+
+// [frequency Hz, decay s, gain] per resonance; "off" is the same body struck a little lower
+const VOICES = {
+  rocker: { modes: [[420, 0.016, 1], [1250, 0.009, 0.8], [3100, 0.004, 0.5]], length: 0.09 },
+  toggle: { modes: [[1700, 0.007, 1], [4300, 0.005, 0.9], [7400, 0.003, 0.6], [520, 0.02, 0.5]], length: 0.1 },
+  push:   { modes: [[300, 0.02, 1], [900, 0.01, 0.6], [2200, 0.004, 0.3]], length: 0.1 },
+  slide:  { modes: [[2100, 0.006, 1], [3900, 0.004, 0.6], [700, 0.012, 0.6]], length: 0.12, scrape: 0.045 },
+  rotary: { modes: [[2600, 0.004, 1], [5400, 0.0025, 0.8], [1100, 0.008, 0.5]], length: 0.07 },
+};
+
+function initAudio() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  for (const [kind, v] of Object.entries(VOICES)) {
+    const lower = v.modes.map(([f, d, g]) => [f * 0.84, d, g]);
+    clicks[kind] = [renderStrike(audio.sampleRate, v.length, v.modes, v.scrape), renderStrike(audio.sampleRate, v.length, lower, v.scrape)];
+  }
+}
+
+function playClick(kind, on) {
+  if (!audio) return;
+  const src = audio.createBufferSource();
+  src.buffer = clicks[kind][on ? 0 : 1];
+  src.playbackRate.value = 0.96 + Math.random() * 0.08;
+  const gain = audio.createGain();
+  gain.gain.value = 0.6;
+  src.connect(gain).connect(audio.destination);
+  src.start();
+}
+
+function playFanfare() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+    const osc = audio.createOscillator();
+    osc.type = 'triangle'; osc.frequency.value = freq;
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(0.0001, t + i * 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.14, t + i * 0.08 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.08 + 0.5);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t + i * 0.08); osc.stop(t + i * 0.08 + 0.6);
+  });
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const pointerNdc = new THREE.Vector2();
+let pressing = false, lastFlicked = -1;
+let celebrate = 0;   // seconds left of the all-on lamp chase
+
+function showCount() {
+  const on = switches.filter((s) => s.on).length;
+  statusEl.textContent = `On ${String(on).padStart(2, '0')} / ${switches.length}`;
+  return on;
+}
+
+function flickAt(e) {
+  ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObjects(hitTargets);
+  const index = hits.length ? hits[0].object.userData.index : -1;
+  if (index === -1 || index === lastFlicked) { if (index === -1) lastFlicked = -1; return; }
+  lastFlicked = index;
+  const sw = switches[index];
+  sw.on = !sw.on;
+  playClick(sw.kind, sw.on);
+  if (navigator.vibrate) navigator.vibrate(6);
+  if (showCount() === switches.length) { celebrate = 2.2; playFanfare(); }
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  initAudio();
+  pressing = true; lastFlicked = -1;
+  canvas.setPointerCapture(e.pointerId);
+  flickAt(e);
+});
+canvas.addEventListener('pointermove', (e) => {
+  pointerNdc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  if (pressing) flickAt(e);   // drag across several to flick them in a run
+});
+const release = () => { pressing = false; lastFlicked = -1; };
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+
+// ───────────────────────────── Animation ─────────────────────────────
+
+let brightness = 0;
+let cameraDistance = 10;
+
+function update(dt, time) {
+  let onCount = 0;
+  switches.forEach((sw, i) => {
+    // Snappy spring with a touch of overshoot, like an over-centre mechanism
+    const target = sw.on ? 1 : 0;
+    sw.velocity += ((target - sw.value) * 900 - sw.velocity * 34) * dt;
+    sw.value += sw.velocity * dt;
+    sw.mechanism.pose(sw.value);
+    if (sw.on) onCount++;
+
+    let lamp = target;
+    if (celebrate > 0) lamp = 0.5 + 0.5 * Math.sin(time * 14 - i * 0.9);   // chase
+    sw.lamp += (lamp - sw.lamp) * (1 - Math.exp(-18 * dt));
+    sw.ledMaterial.emissiveIntensity = 3.5 * sw.lamp;
+    sw.glow.material.opacity = 0.85 * sw.lamp * (1 - 0.6 * brightness);   // glow reads weaker in a bright room
+  });
+  celebrate = Math.max(0, celebrate - dt);
+
+  brightness += (onCount / switches.length - brightness) * (1 - Math.exp(-6 * dt));
+  sun.intensity = 0.35 + 2.4 * brightness;
+  wallMaterial.color.copy(WALL_DARK).lerp(WALL_LIT, brightness);
+  plastic.envMapIntensity = blackPlate.envMapIntensity = creamPlate.envMapIntensity = 0.35 + 0.75 * brightness;
+  chrome.envMapIntensity = brass.envMapIntensity = steelPlate.envMapIntensity = 0.9 + 0.5 * brightness;   // metal needs reflections even in the dim
+  document.documentElement.style.setProperty('--ink', brightness > 0.45 ? '#2B2722' : '#F3E9DC');
+
+  // Slight parallax, so the levers read as 3D
+  camera.position.x += (pointerNdc.x * 0.9 - camera.position.x) * (1 - Math.exp(-4 * dt));
+  camera.position.y += (pointerNdc.y * 0.6 - camera.position.y) * (1 - Math.exp(-4 * dt));
+  camera.position.z = cameraDistance;
+  camera.lookAt(0, 0, 0);
+}
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const name = camera.aspect >= 1 ? 'landscape' : 'portrait';
+  layout(name);
+  const [cols, rows] = LAYOUTS[name];
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitH = (rows * CELL[1] * 0.5 + 0.9) / Math.tan(halfFov);
+  const fitW = (cols * CELL[0] * 0.5 + 0.5) / (Math.tan(halfFov) * camera.aspect);
+  cameraDistance = Math.max(fitH, fitW);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// A few start on, so the room is dim rather than black
+[1, 7, 13].forEach((i) => { switches[i].on = true; switches[i].value = 1; });
+showCount();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+function frame() {
+  update(Math.min(clock.getDelta(), 0.05), clock.elapsedTime);
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="light-switch-wall"></script>
+</body>
+</html>

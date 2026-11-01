@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Liquid Timer // 01</title>
+<style>
+  :root { --bg: #ECE7DF; --ink: #2B2722; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas#stage.dragging { cursor: grabbing; }
+  .label {
+    position: fixed; left: 28px; bottom: 26px; pointer-events: none; user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.visits { top: 24px; bottom: auto; left: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: currentColor; }
+  @media (max-width: 520px) { .label.visits { top: 16px; left: auto; right: 18px; } }
+  .label .hint { opacity: 0.45; }
+  @media (max-width: 520px) { .label { left: 18px; bottom: 18px; font-size: 10px; } }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label">
+  <div>Liquid Timer // 01</div>
+  <div class="hint">Drag to tilt / Flip upside down</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { edgeTable, triTable } from 'three/addons/objects/MarchingCubes.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const BG = 0xECE7DF;
+const LIQUID_COLOR = 0x1238FF;
+
+// Vessel (local space, y is the long axis)
+const HALF_HEIGHT = 1.5;
+const BULB_RADIUS = 0.72;
+const NECK_RADIUS = 0.21;
+const WALL = 0.035;
+const INNER_HALF_HEIGHT = HALF_HEIGHT - 0.04;
+const FLOOR_Y = -1.76;
+
+// Fluid simulation
+const COUNT = 140;
+const STEP = 1 / 120;
+const GRAVITY = 3.0;
+const DRAG = 6.0;            // viscous medium, terminal speed = GRAVITY / DRAG
+const REST = 0.15;           // particle rest spacing
+const RANGE = 0.30;          // interaction range
+const K_REPEL = 600;
+const K_COHESION = 20;
+const K_VISCOSITY = 6;
+const PARTICLE_RADIUS = 0.07;
+const WALL_FRICTION = 3.0;
+const WALL_BOUNCE = 0.15;
+
+// Metaball surface
+const CELL = 0.04;           // marching-cubes cell size
+const ISO = 0.5;
+const DROP_KERNEL = 0.24;    // kernel radius; an isolated drop is ~0.45x this
+const TAIL_KERNEL = 0.18;
+const TAIL_TIME = 0.14;      // seconds of velocity the teardrop tail trails behind
+const MASK_SOFTNESS = 0.09;
+const MAX_TRIANGLES = 30000;
+
+// ───────────────────────────── Vessel profile ─────────────────────────────
+
+const smooth = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+function outerRadius(y) {
+  const t = Math.min(1, Math.abs(y) / HALF_HEIGHT);
+  let r = NECK_RADIUS + (BULB_RADIUS - NECK_RADIUS) * smooth(0, 0.6, t);
+  if (t > 0.72) {
+    const u = (t - 0.72) / 0.28;
+    r *= 0.6 + 0.4 * Math.sqrt(1 - u * u);
+  }
+  return r;
+}
+const innerRadius = (y) => outerRadius(y) - WALL;
+const innerSlope = (y) => (innerRadius(y + 1e-3) - innerRadius(y - 1e-3)) / 2e-3;
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+pmrem.dispose();
+
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+
+const key = new THREE.DirectionalLight(0xFFF3E4, 2.2);
+key.position.set(-3, 5, 4);
+scene.add(key, new THREE.HemisphereLight(0xFFFFFF, 0xD9D0C4, 0.35));
+
+// ───────────────────────────── Vessel meshes ─────────────────────────────
+
+const vessel = new THREE.Group();
+scene.add(vessel);
+
+function buildGlass() {
+  const points = [];
+  const segments = 180;
+  for (let i = 0; i <= segments; i++) {
+    const y = -HALF_HEIGHT + (2 * HALF_HEIGHT * i) / segments;
+    points.push(new THREE.Vector2(outerRadius(y), y));
+  }
+  const material = new THREE.MeshPhysicalMaterial({
+    color: 0xFFFFFF,
+    transmission: 1,
+    roughness: 0.05,
+    ior: 1.47,
+    thickness: 0.35,
+    clearcoat: 1,
+    clearcoatRoughness: 0.04,
+    envMapIntensity: 1.2,
+    side: THREE.DoubleSide,
+  });
+  return new THREE.Mesh(new THREE.LatheGeometry(points, 96), material);
+}
+
+function buildCaps() {
+  const profile = [
+    [0, 0], [0.5, 0], [0.525, 0.012], [0.535, 0.03],
+    [0.535, 0.1], [0.525, 0.118], [0.5, 0.13], [0, 0.13],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  const geometry = new THREE.LatheGeometry(profile, 96);
+  const material = new THREE.MeshStandardMaterial({ color: 0xDDD7CD, metalness: 0.55, roughness: 0.42 });
+  const top = new THREE.Mesh(geometry, material);
+  top.position.y = HALF_HEIGHT - 0.03;
+  const bottom = new THREE.Mesh(geometry, material);
+  bottom.position.y = -(HALF_HEIGHT - 0.03);
+  bottom.rotation.x = Math.PI;
+  return [top, bottom];
+}
+
+vessel.add(buildGlass(), ...buildCaps());
+
+// ───────────────────────────── Contact shadow ─────────────────────────────
+// Opaque quad whose edges match the backdrop exactly, so it also shows up
+// through the glass (transparent meshes are skipped by the transmission pass).
+
+function buildShadow() {
+  const size = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#' + BG.toString(16).padStart(6, '0');
+  ctx.fillRect(0, 0, size, size);
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0.0, 'rgba(58, 46, 36, 0.46)');
+  g.addColorStop(0.22, 'rgba(58, 46, 36, 0.30)');
+  g.addColorStop(0.5, 'rgba(58, 46, 36, 0.09)');
+  g.addColorStop(1.0, 'rgba(58, 46, 36, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const quad = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.2, 3.2),
+    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false })
+  );
+  quad.rotation.x = -Math.PI / 2;
+  const pivot = new THREE.Group();
+  pivot.position.y = FLOOR_Y;
+  pivot.add(quad);
+  return { pivot, quad };
+}
+
+const shadow = buildShadow();
+scene.add(shadow.pivot);
+
+const axisWorld = new THREE.Vector3();
+function updateShadow() {
+  axisWorld.set(0, 1, 0).applyQuaternion(vessel.quaternion);
+  const lean = Math.hypot(axisWorld.x, axisWorld.z);   // 0 upright, 1 lying flat
+  shadow.pivot.rotation.y = Math.atan2(-axisWorld.z, axisWorld.x);
+  shadow.quad.scale.set(1 + 1.5 * lean, 1 + 0.1 * lean, 1);
+}
+
+// ───────────────────────────── Fluid simulation ─────────────────────────────
+
+const pos = new Float32Array(COUNT * 3);
+const vel = new Float32Array(COUNT * 3);
+const acc = new Float32Array(COUNT * 3);
+
+function seedParticles() {
+  // Jittered lattice stacked in the upper bulb, starting just above the neck.
+  let n = 0;
+  for (let y = 0.14; n < COUNT && y < INNER_HALF_HEIGHT; y += REST * 0.86) {
+    const limit = innerRadius(y) - PARTICLE_RADIUS;
+    for (let x = -BULB_RADIUS; n < COUNT && x <= BULB_RADIUS; x += REST) {
+      for (let z = -BULB_RADIUS; n < COUNT && z <= BULB_RADIUS; z += REST) {
+        if (Math.hypot(x, z) > limit) continue;
+        pos[n * 3] = x + (Math.random() - 0.5) * 0.02;
+        pos[n * 3 + 1] = y + (Math.random() - 0.5) * 0.02;
+        pos[n * 3 + 2] = z + (Math.random() - 0.5) * 0.02;
+        n++;
+      }
+    }
+  }
+}
+
+function collideWithVessel(i, dt) {
+  const ix = i * 3, iy = ix + 1, iz = ix + 2;
+  let touching = false;
+
+  // Flat end caps
+  const yMax = INNER_HALF_HEIGHT - PARTICLE_RADIUS;
+  if (pos[iy] > yMax) { pos[iy] = yMax; if (vel[iy] > 0) vel[iy] *= -WALL_BOUNCE; touching = true; }
+  else if (pos[iy] < -yMax) { pos[iy] = -yMax; if (vel[iy] < 0) vel[iy] *= -WALL_BOUNCE; touching = true; }
+
+  // Curved side wall: surface is rho = innerRadius(y)
+  const rho = Math.hypot(pos[ix], pos[iz]);
+  const limit = innerRadius(pos[iy]) - PARTICLE_RADIUS;
+  if (rho > limit && rho > 1e-6) {
+    const slope = innerSlope(pos[iy]);
+    const inv = 1 / Math.hypot(1, slope);
+    const nx = (pos[ix] / rho) * inv, ny = -slope * inv, nz = (pos[iz] / rho) * inv;   // outward normal
+    const depth = (rho - limit) * inv;
+    pos[ix] -= nx * depth; pos[iy] -= ny * depth; pos[iz] -= nz * depth;
+    const vn = vel[ix] * nx + vel[iy] * ny + vel[iz] * nz;
+    if (vn > 0) {
+      const k = vn * (1 + WALL_BOUNCE);
+      vel[ix] -= nx * k; vel[iy] -= ny * k; vel[iz] -= nz * k;
+    }
+    touching = true;
+  }
+
+  if (touching) {
+    const f = Math.exp(-WALL_FRICTION * dt);
+    vel[ix] *= f; vel[iy] *= f; vel[iz] *= f;
+  }
+}
+
+function stepFluid(dt, gx, gy, gz) {
+  for (let i = 0; i < COUNT; i++) {
+    acc[i * 3] = gx; acc[i * 3 + 1] = gy; acc[i * 3 + 2] = gz;
+  }
+
+  const range2 = RANGE * RANGE;
+  for (let i = 0; i < COUNT; i++) {
+    const ix = i * 3;
+    for (let j = i + 1; j < COUNT; j++) {
+      const jx = j * 3;
+      const dx = pos[ix] - pos[jx], dy = pos[ix + 1] - pos[jx + 1], dz = pos[ix + 2] - pos[jx + 2];
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 >= range2 || d2 < 1e-10) continue;
+      const d = Math.sqrt(d2);
+      // Short-range repulsion, longer-range cohesion that fades out at RANGE
+      const f = d < REST
+        ? K_REPEL * (REST - d)
+        : -K_COHESION * (d - REST) * (1 - (d - REST) / (RANGE - REST));
+      const w = K_VISCOSITY * (1 - d / RANGE);
+      const fx = (dx / d) * f - (vel[ix] - vel[jx]) * w;
+      const fy = (dy / d) * f - (vel[ix + 1] - vel[jx + 1]) * w;
+      const fz = (dz / d) * f - (vel[ix + 2] - vel[jx + 2]) * w;
+      acc[ix] += fx; acc[ix + 1] += fy; acc[ix + 2] += fz;
+      acc[jx] -= fx; acc[jx + 1] -= fy; acc[jx + 2] -= fz;
+    }
+  }
+
+  const damp = Math.exp(-DRAG * dt);
+  for (let i = 0; i < COUNT; i++) {
+    const ix = i * 3;
+    vel[ix] = (vel[ix] + acc[ix] * dt) * damp;
+    vel[ix + 1] = (vel[ix + 1] + acc[ix + 1] * dt) * damp;
+    vel[ix + 2] = (vel[ix + 2] + acc[ix + 2] * dt) * damp;
+    pos[ix] += vel[ix] * dt; pos[ix + 1] += vel[ix + 1] * dt; pos[ix + 2] += vel[ix + 2] * dt;
+    collideWithVessel(i, dt);
+  }
+}
+
+seedParticles();
+
+// ───────────────────────────── Liquid surface ─────────────────────────────
+// Metaballs polygonized with marching cubes on a grid fitted to the vessel.
+// Only the cells the liquid currently occupies are visited each frame.
+
+function createLiquidSurface(material) {
+  const nx = Math.ceil((2 * (BULB_RADIUS + CELL)) / CELL) + 1;
+  const ny = Math.ceil((2 * (HALF_HEIGHT + CELL)) / CELL) + 1;
+  const nz = nx;
+  const ox = (-(nx - 1) / 2) * CELL, oy = (-(ny - 1) / 2) * CELL, oz = ox;
+  const sy = nx, sz = nx * ny;
+  const field = new Float32Array(nx * ny * nz);
+
+  // Falloff that fades the field out at the inner glass wall, so the liquid
+  // conforms to the vessel instead of poking through it.
+  const mask = new Float32Array(field.length);
+  for (let z = 0; z < nz; z++) {
+    const lz = oz + z * CELL;
+    for (let y = 0; y < ny; y++) {
+      const ly = oy + y * CELL;
+      const endGap = INNER_HALF_HEIGHT - Math.abs(ly);
+      if (endGap <= 0) continue;
+      const r = innerRadius(ly);
+      const inv = 1 / Math.hypot(1, innerSlope(ly));
+      for (let x = 0; x < nx; x++) {
+        const dist = Math.min((r - Math.hypot(ox + x * CELL, lz)) * inv, endGap);
+        mask[z * sz + y * sy + x] = smooth(0, MASK_SOFTNESS, dist);
+      }
+    }
+  }
+
+  const positions = new Float32Array(MAX_TRIANGLES * 9);
+  const normals = new Float32Array(MAX_TRIANGLES * 9);
+  const geometry = new THREE.BufferGeometry();
+  const positionAttr = new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage);
+  const normalAttr = new THREE.BufferAttribute(normals, 3).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('position', positionAttr);
+  geometry.setAttribute('normal', normalAttr);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.frustumCulled = false;
+
+  // Cube corner layout matches three's edgeTable / triTable
+  const CORNER = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
+  const CORNER_OFFSET = CORNER.map(([x, y, z]) => x + y * sy + z * sz);
+  const CORNER_BIT = [1, 2, 8, 4, 16, 32, 128, 64];
+  const EDGE = [[0, 1], [1, 3], [2, 3], [0, 2], [4, 5], [5, 7], [6, 7], [4, 6], [0, 4], [1, 5], [3, 7], [2, 6]];
+  const edgeVerts = new Float32Array(36);
+  const edgeNormals = new Float32Array(36);
+  const value = new Float32Array(8);
+
+  // Bounds (in grid points) touched by this frame's splats
+  const lo = [0, 0, 0], hi = [0, 0, 0];
+
+  function reset() {
+    field.fill(0);
+    lo[0] = nx; lo[1] = ny; lo[2] = nz;
+    hi[0] = hi[1] = hi[2] = -1;
+  }
+
+  function splat(x, y, z, radius, weight) {
+    const x0 = Math.max(0, Math.ceil((x - radius - ox) / CELL)), x1 = Math.min(nx - 1, Math.floor((x + radius - ox) / CELL));
+    const y0 = Math.max(0, Math.ceil((y - radius - oy) / CELL)), y1 = Math.min(ny - 1, Math.floor((y + radius - oy) / CELL));
+    const z0 = Math.max(0, Math.ceil((z - radius - oz) / CELL)), z1 = Math.min(nz - 1, Math.floor((z + radius - oz) / CELL));
+    const inv = 1 / (radius * radius);
+    for (let k = z0; k <= z1; k++) {
+      const dz = oz + k * CELL - z, dz2 = dz * dz;
+      for (let j = y0; j <= y1; j++) {
+        const dy = oy + j * CELL - y, dyz2 = dz2 + dy * dy;
+        let q = k * sz + j * sy + x0;
+        for (let i = x0; i <= x1; i++, q++) {
+          const dx = ox + i * CELL - x;
+          const a = 1 - (dyz2 + dx * dx) * inv;
+          if (a > 0) field[q] += weight * a * a * a;
+        }
+      }
+    }
+    if (x0 < lo[0]) lo[0] = x0; if (x1 > hi[0]) hi[0] = x1;
+    if (y0 < lo[1]) lo[1] = y0; if (y1 > hi[1]) hi[1] = y1;
+    if (z0 < lo[2]) lo[2] = z0; if (z1 > hi[2]) hi[2] = z1;
+  }
+
+  function build() {
+    let count = 0;   // floats written
+    const limit = positions.length - 36;   // room for the largest cell (4 triangles)
+    const x0 = Math.max(1, lo[0] - 1), x1 = Math.min(nx - 3, hi[0]);
+    const y0 = Math.max(1, lo[1] - 1), y1 = Math.min(ny - 3, hi[1]);
+    const z0 = Math.max(1, lo[2] - 1), z1 = Math.min(nz - 3, hi[2]);
+
+    for (let z = Math.max(0, lo[2]); z <= hi[2]; z++)
+      for (let y = Math.max(0, lo[1]); y <= hi[1]; y++) {
+        const row = z * sz + y * sy;
+        for (let q = row + lo[0], end = row + hi[0]; q <= end; q++) field[q] *= mask[q];
+      }
+
+    for (let z = z0; z <= z1 && count < limit; z++) {
+      for (let y = y0; y <= y1 && count < limit; y++) {
+        for (let x = x0; x <= x1 && count < limit; x++) {
+          const q = z * sz + y * sy + x;
+          let cube = 0;
+          for (let c = 0; c < 8; c++) {
+            value[c] = field[q + CORNER_OFFSET[c]];
+            if (value[c] < ISO) cube |= CORNER_BIT[c];
+          }
+          const bits = edgeTable[cube];
+          if (bits === 0) continue;
+
+          for (let e = 0; e < 12; e++) {
+            if (!(bits & (1 << e))) continue;
+            const a = EDGE[e][0], b = EDGE[e][1];
+            const mu = (ISO - value[a]) / (value[b] - value[a]);
+            const ca = CORNER[a], cb = CORNER[b];
+            const o = e * 3;
+            edgeVerts[o] = ox + (x + ca[0] + (cb[0] - ca[0]) * mu) * CELL;
+            edgeVerts[o + 1] = oy + (y + ca[1] + (cb[1] - ca[1]) * mu) * CELL;
+            edgeVerts[o + 2] = oz + (z + ca[2] + (cb[2] - ca[2]) * mu) * CELL;
+            // Normal = negative field gradient, interpolated along the edge
+            const qa = q + CORNER_OFFSET[a], qb = q + CORNER_OFFSET[b], nu = 1 - mu;
+            edgeNormals[o] = (field[qa - 1] - field[qa + 1]) * nu + (field[qb - 1] - field[qb + 1]) * mu;
+            edgeNormals[o + 1] = (field[qa - sy] - field[qa + sy]) * nu + (field[qb - sy] - field[qb + sy]) * mu;
+            edgeNormals[o + 2] = (field[qa - sz] - field[qa + sz]) * nu + (field[qb - sz] - field[qb + sz]) * mu;
+          }
+
+          for (let t = cube << 4; triTable[t] !== -1; t++) {
+            const o = triTable[t] * 3;
+            positions[count] = edgeVerts[o]; positions[count + 1] = edgeVerts[o + 1]; positions[count + 2] = edgeVerts[o + 2];
+            normals[count] = edgeNormals[o]; normals[count + 1] = edgeNormals[o + 1]; normals[count + 2] = edgeNormals[o + 2];
+            count += 3;
+          }
+        }
+      }
+    }
+
+    geometry.setDrawRange(0, count / 3);
+    for (const attr of [positionAttr, normalAttr]) {
+      attr.clearUpdateRanges();
+      attr.addUpdateRange(0, count);
+      attr.needsUpdate = true;
+    }
+  }
+
+  return { mesh, reset, splat, build };
+}
+
+const liquid = createLiquidSurface(new THREE.MeshPhysicalMaterial({
+  color: LIQUID_COLOR,
+  emissive: 0x0A1FA8,
+  emissiveIntensity: 0.35,
+  roughness: 0.14,
+  clearcoat: 1,
+  clearcoatRoughness: 0.08,
+}));
+vessel.add(liquid.mesh);
+
+function updateLiquidSurface() {
+  liquid.reset();
+  for (let i = 0; i < COUNT; i++) {
+    const ix = i * 3;
+    const x = pos[ix], y = pos[ix + 1], z = pos[ix + 2];
+    liquid.splat(x, y, z, DROP_KERNEL, 1);
+
+    // Teardrop tail: a smaller ball trailing behind along the velocity
+    const speed = Math.hypot(vel[ix], vel[ix + 1], vel[ix + 2]);
+    const stretch = Math.min(1, speed / 0.3);
+    if (stretch > 0.05) {
+      liquid.splat(
+        x - vel[ix] * TAIL_TIME, y - vel[ix + 1] * TAIL_TIME, z - vel[ix + 2] * TAIL_TIME,
+        TAIL_KERNEL, stretch
+      );
+    }
+  }
+  liquid.build();
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const orientation = new THREE.Quaternion();     // user-driven orientation
+const omega = new THREE.Vector3();              // world-space angular velocity (rad/s)
+const AXIS_X = new THREE.Vector3(1, 0, 0);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
+const tmpQ = new THREE.Quaternion();
+const tmpV = new THREE.Vector3();
+
+const pointer = { down: false, id: -1, x: 0, y: 0, t: 0 };
+let flipRemaining = 0;
+let idleTime = 0;
+
+function rotateWorld(axis, angle) {
+  orientation.premultiply(tmpQ.setFromAxisAngle(axis, angle)).normalize();
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (pointer.down) return;
+  pointer.down = true; pointer.id = e.pointerId;
+  pointer.x = e.clientX; pointer.y = e.clientY; pointer.t = performance.now();
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add('dragging');
+  omega.set(0, 0, 0);
+  flipRemaining = 0;
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!pointer.down || e.pointerId !== pointer.id) return;
+  const now = performance.now();
+  const k = (1.6 * Math.PI) / Math.min(window.innerWidth, window.innerHeight);
+  const ax = (e.clientY - pointer.y) * k;
+  const ay = (e.clientX - pointer.x) * k;
+  rotateWorld(AXIS_X, ax);
+  rotateWorld(AXIS_Y, ay);
+  const dt = Math.max((now - pointer.t) / 1000, 1 / 240);
+  omega.lerp(tmpV.set(ax / dt, ay / dt, 0), 0.4);
+  pointer.x = e.clientX; pointer.y = e.clientY; pointer.t = now;
+});
+
+function endDrag(e) {
+  if (e.pointerId !== pointer.id) return;
+  pointer.down = false; pointer.id = -1;
+  canvas.classList.remove('dragging');
+  omega.clampLength(0, 12);
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+// Shortcut: double-click flips the timer end over end.
+canvas.addEventListener('dblclick', () => { flipRemaining = Math.PI; omega.set(0, 0, 0); });
+
+function updateOrientation(dt, time) {
+  if (pointer.down) {
+    omega.multiplyScalar(Math.exp(-10 * dt));   // holding still kills the fling
+  } else {
+    const speed = omega.length();
+    if (speed > 1e-4) rotateWorld(tmpV.copy(omega).divideScalar(speed), speed * dt);
+    omega.multiplyScalar(Math.exp(-2.4 * dt));
+  }
+
+  if (flipRemaining > 0) {
+    const progress = 1 - flipRemaining / Math.PI;
+    const a = Math.min(flipRemaining, dt * (1.0 + 5.5 * Math.sin(progress * Math.PI)));
+    rotateWorld(AXIS_Z, a);
+    flipRemaining -= a;
+  }
+
+  // Slight idle sway once left alone
+  const busy = pointer.down || flipRemaining > 0 || omega.length() > 0.05;
+  idleTime = busy ? 0 : idleTime + dt;
+  const sway = 0.03 * smooth(1, 4, idleTime);
+  vessel.quaternion.copy(orientation);
+  if (sway > 0) {
+    vessel.quaternion
+      .premultiply(tmpQ.setFromAxisAngle(AXIS_Z, Math.sin(time * 0.7) * sway))
+      .premultiply(tmpQ.setFromAxisAngle(AXIS_X, Math.sin(time * 0.5 + 1.3) * sway * 0.6));
+  }
+}
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const distance = 10.5 * Math.max(1, 0.72 / camera.aspect);   // keep the toy in frame on narrow screens
+  camera.position.set(0, 0.09 * distance, distance);
+  camera.lookAt(0, -0.12, 0);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+const gravityLocal = new THREE.Vector3();
+let accumulator = 0;
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  updateOrientation(dt, clock.elapsedTime);
+
+  // World-down expressed in vessel space
+  gravityLocal.set(0, -GRAVITY, 0).applyQuaternion(tmpQ.copy(vessel.quaternion).invert());
+
+  accumulator += dt;
+  let steps = 0;
+  while (accumulator >= STEP && steps < 6) {
+    stepFluid(STEP, gravityLocal.x, gravityLocal.y, gravityLocal.z);
+    accumulator -= STEP;
+    steps++;
+  }
+  if (steps === 6) accumulator = 0;
+
+  updateLiquidSurface();
+  updateShadow();
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+<script defer src="/visit-counter.js" data-project="pocket-liquid-hourglass"></script>
+</body>
+</html>

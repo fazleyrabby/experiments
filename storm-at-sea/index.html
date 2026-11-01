@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f12">
+<title>Storm at Sea</title>
+<meta name="description" content="A real-time, fully procedural ocean in Three.js: container ships and a cruise liner in calm seas, hurricanes and moonlit nights, with lightning, rogue waves, whales and synthesized sound.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://experiments.fazleyrabbi.xyz/storm-at-sea/">
+<meta property="og:title" content="Storm at Sea">
+<meta property="og:description" content="Ride out a hurricane on a container ship. Real-time, fully procedural, with synthesized sound.">
+<meta property="og:image" content="https://experiments.fazleyrabbi.xyz/storm-at-sea/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Storm at Sea">
+<meta name="twitter:description" content="Ride out a hurricane on a container ship. Real-time, fully procedural, with synthesized sound.">
+<meta name="twitter:image" content="https://experiments.fazleyrabbi.xyz/storm-at-sea/og.jpg">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0f12'/%3E%3Cpath d='M6 40c8-8 14-8 22 0s14 8 22 0 10-6 10-6v18H6z' fill='%232f8a83'/%3E%3Cpath d='M18 30h26l-3 8H21z' fill='%23e7ecee'/%3E%3Cpath d='M36 6l-8 14h6l-4 10 10-14h-6l4-10z' fill='%23ffd36b'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #e7ecee;
+    --dim: rgba(231, 236, 238, 0.55);
+    --faint: rgba(231, 236, 238, 0.14);
+    --glass: rgba(14, 19, 23, 0.46);
+    --warn: #ff9b5c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f12; color: var(--ink); font-family: Inter, system-ui, sans-serif; }
+  canvas#scene { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; outline: none; touch-action: none; }
+  html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+
+  /* intro */
+  #intro {
+    position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+    background: radial-gradient(120% 90% at 50% 40%, rgba(12,16,20,0.55), rgba(5,7,9,0.94));
+    transition: opacity 1.6s ease, visibility 1.6s;
+  }
+  body.entered #intro { opacity: 0; visibility: hidden; }
+  .intro-inner { text-align: center; max-width: 560px; padding: 0 24px; }
+  .eyebrow { font: 500 11px/1 'JetBrains Mono', monospace; letter-spacing: 0.28em; text-transform: uppercase; color: var(--dim); }
+  h1 { font: 400 clamp(52px, 9vw, 104px)/0.95 'Instrument Serif', serif; margin: 18px 0 14px; letter-spacing: -0.01em; }
+  h1 em { font-style: italic; color: #b9c9cf; }
+  .lede { color: var(--dim); font-size: 15px; line-height: 1.6; margin: 0 auto 34px; max-width: 420px; }
+  .enter-row { display: flex; gap: 14px; justify-content: center; align-items: center; flex-wrap: wrap; }
+  button.primary {
+    font: 500 13px/1 Inter, sans-serif; letter-spacing: 0.06em; color: #0b0f12; background: var(--ink);
+    border: 0; padding: 15px 26px; border-radius: 999px; cursor: pointer; opacity: 0.35; pointer-events: none;
+    transition: transform .2s ease, opacity .6s ease, background .2s;
+  }
+  body.ready button.primary { opacity: 1; pointer-events: auto; }
+  button.primary:hover { transform: translateY(-1px); background: #fff; }
+  button.ghost { font: 500 12px/1 Inter, sans-serif; color: var(--dim); background: none; border: 0; cursor: pointer; padding: 10px; }
+  button.ghost:hover { color: var(--ink); }
+  #loadStatus { margin-top: 26px; font: 400 11px/1 'JetBrains Mono', monospace; color: var(--dim); letter-spacing: 0.08em; min-height: 12px; }
+  .hint { margin-top: 10px; font-size: 12px; color: rgba(231,236,238,0.38); }
+
+  /* HUD */
+  .hud { position: fixed; z-index: 10; opacity: 0; transition: opacity 1.2s ease 0.6s; }
+  body.entered .hud { opacity: 1; }
+  body.clean .hud { opacity: 0 !important; pointer-events: none; }
+  .panel { background: var(--glass); backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%); border: 1px solid var(--faint); border-radius: 14px; }
+
+  #telemetry { top: 20px; left: 20px; padding: 16px 18px 14px; min-width: 248px; }
+  #telemetry .force { font: 400 26px/1 'Instrument Serif', serif; margin: 8px 0 14px; }
+  .grid { display: grid; grid-template-columns: auto 1fr; gap: 7px 22px; font: 400 11.5px/1.25 'JetBrains Mono', monospace; }
+  .grid dt { color: var(--dim); text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; align-self: center; }
+  .grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+  #controls { left: 20px; bottom: 20px; padding: 14px 16px; width: 330px; }
+  .row { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 12px; margin: 7px 0; }
+  .row label { font: 500 10px/1 'JetBrains Mono', monospace; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 2px; background: rgba(231,236,238,0.22); border-radius: 2px; outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--ink); cursor: pointer; box-shadow: 0 0 0 4px rgba(231,236,238,0.08); }
+  input[type=range]::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-radius: 50%; background: var(--ink); cursor: pointer; }
+  .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  #ctlToggle { display: none; }
+  .helm { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .helm .tele { flex: 1; }
+  .seg-btn.hold { flex: 0 0 auto; border: 1px solid var(--faint); padding: 7px 8px; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .seg-btn.hold:active { background: var(--ink); color: #0b0f12; }
+  #btnHorn { touch-action: none; user-select: none; -webkit-user-select: none; }
+
+  #glass { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 7; pointer-events: none; display: none; }
+  body.bridge #glass { display: block; }
+  #sheet { position: fixed; inset: 0; z-index: 7; pointer-events: none; opacity: 0; display: none;
+    -webkit-backdrop-filter: blur(7px) saturate(85%) brightness(1.06); backdrop-filter: blur(7px) saturate(85%) brightness(1.06);
+    -webkit-mask-image: linear-gradient(to bottom, #000 10%, rgba(0,0,0,0.75) 60%, rgba(0,0,0,0.25)); mask-image: linear-gradient(to bottom, #000 10%, rgba(0,0,0,0.75) 60%, rgba(0,0,0,0.25)); }
+  body.bridge #sheet { display: block; }
+  #bridgeFrame { position: fixed; inset: 0; z-index: 8; pointer-events: none; display: none;
+    background:
+      linear-gradient(to bottom, rgba(7,9,11,0.97) 0, rgba(7,9,11,0.93) 6%, rgba(7,9,11,0) 8.5%),
+      repeating-linear-gradient(to right, rgba(10,12,14,0.94) 0 12px, rgba(10,12,14,0) 12px calc(25% - 3px), rgba(10,12,14,0.94) calc(25% - 3px) 25%);
+  }
+  body.bridge #bridgeFrame { display: block; }
+  #bridgeFrame .console { position: absolute; left: 0; right: 0; bottom: 0; height: 17%; display: flex; align-items: center; justify-content: center; gap: 3vw;
+    background: linear-gradient(to bottom, rgba(14,17,20,0.6), rgba(10,12,14,0.98) 22%); border-top: 1px solid rgba(255,255,255,0.06); }
+  .scope { width: min(9vh, 70px); aspect-ratio: 1; border-radius: 50%; position: relative; overflow: hidden;
+    background: radial-gradient(circle, rgba(40,150,110,0.35), rgba(5,30,22,0.95) 70%); box-shadow: 0 0 18px rgba(60,200,150,0.25), inset 0 0 0 1px rgba(120,255,200,0.25); }
+  .scope.small { width: min(6vh, 46px); }
+  .scope i { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, rgba(120,255,190,0.55), rgba(120,255,190,0) 22%); animation: sweep 2.6s linear infinite; }
+  .scope.ecdis { border-radius: 6px; width: min(15vh, 120px); aspect-ratio: 1.5; background: linear-gradient(160deg, #0f2b45, #183f63 60%, #2a5d7e); box-shadow: 0 0 16px rgba(80,140,220,0.25), inset 0 0 0 1px rgba(150,190,255,0.2); }
+  .readout { font: 500 11px/1 'JetBrains Mono', monospace; color: rgba(255,190,110,0.85); letter-spacing: .12em; text-shadow: 0 0 8px rgba(255,160,60,0.5); }
+  .readout b { font-weight: 500; color: #ffd39a; }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .scope i { animation: none; } }
+  .seg { display: flex; min-width: 0; gap: 2px; padding: 2px; border: 1px solid var(--faint); border-radius: 999px; background: rgba(231,236,238,0.04); }
+  .seg-btn { flex: 1; font: 500 10.5px/1 Inter, sans-serif; white-space: nowrap; color: var(--dim); background: none; border: 0; border-radius: 999px; padding: 7px 6px; cursor: pointer; transition: background .15s, color .15s; }
+  .seg-btn:hover { color: var(--ink); }
+  .seg-btn.on { color: #0b0f12; background: var(--ink); }
+  .note { margin: -2px 0 4px 86px; font: 400 10px/1.3 Inter, sans-serif; color: rgba(231,236,238,0.4); min-height: 0; }
+  .note:empty { display: none; }
+  .chip {
+    font: 500 11px/1 Inter, sans-serif; color: var(--ink); background: rgba(231,236,238,0.06);
+    border: 1px solid var(--faint); border-radius: 999px; padding: 8px 11px; cursor: pointer; transition: background .15s, border-color .15s;
+  }
+  .chip:hover { background: rgba(231,236,238,0.14); }
+  .chip.on { border-color: rgba(231,236,238,0.5); background: rgba(231,236,238,0.16); }
+  .chip kbd { font: 500 10px 'JetBrains Mono', monospace; color: var(--dim); margin-left: 5px; }
+
+  #shot { right: 20px; bottom: 20px; padding: 10px 14px; font: 400 11px/1 'JetBrains Mono', monospace; color: var(--dim); letter-spacing: 0.1em; text-transform: uppercase; }
+  #shot b { color: var(--ink); font-weight: 500; margin-left: 8px; }
+
+  #rogueWarn {
+    left: 50%; top: 22px; transform: translate(-50%, -8px); padding: 11px 18px; opacity: 0 !important; transition: opacity .5s, transform .5s;
+    font: 500 11px/1 'JetBrains Mono', monospace; letter-spacing: 0.2em; text-transform: uppercase; color: var(--warn);
+    border-color: rgba(255,155,92,0.35); display: flex; gap: 14px; align-items: center; pointer-events: none;
+  }
+  #rogueWarn.show { opacity: 1 !important; transform: translate(-50%, 0); animation: pulse 1.4s ease-in-out infinite; }
+  #rogueWarn i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+  @keyframes pulse { 50% { border-color: rgba(255,155,92,0.75); } }
+
+  button.secondary {
+    font: 500 13px/1 Inter, sans-serif; letter-spacing: 0.06em; color: var(--ink); background: rgba(231,236,238,0.08);
+    border: 1px solid rgba(231,236,238,0.3); padding: 14px 24px; border-radius: 999px; cursor: pointer; opacity: 0.35; pointer-events: none;
+    transition: background .2s, opacity .6s;
+  }
+  body.ready button.secondary { opacity: 1; pointer-events: auto; }
+  button.secondary:hover { background: rgba(231,236,238,0.16); }
+  .enter-sub { margin-top: 16px; display: flex; gap: 8px; justify-content: center; align-items: center; color: var(--dim); font-size: 12px; }
+  .enter-sub .sep { opacity: .5; }
+  #soundPref[aria-pressed="false"] { color: rgba(231,236,238,0.4); text-decoration: line-through; }
+
+  #veil { position: fixed; inset: 0; z-index: 9; pointer-events: none; opacity: 0; transition: opacity .3s linear;
+    background: radial-gradient(120% 100% at 50% 60%, rgba(150,158,165,0.85), rgba(70,78,86,0.98)); }
+
+  #log { left: 50%; bottom: 96px; transform: translate(-50%, 10px); max-width: min(680px, calc(100vw - 32px)); text-align: center;
+    opacity: 0 !important; transition: opacity .9s ease, transform .9s ease; pointer-events: none; }
+  #log.show { opacity: 1 !important; transform: translate(-50%, 0); }
+  .log-tag { display: inline-block; font: 500 10px/1 'JetBrains Mono', monospace; letter-spacing: .24em; text-transform: uppercase; color: var(--dim); margin-bottom: 10px; }
+  #logText { margin: 0; font: italic 400 clamp(19px, 2.4vw, 26px)/1.35 'Instrument Serif', serif; color: var(--ink); text-shadow: 0 2px 18px rgba(0,0,0,0.65); min-height: 1.35em; }
+
+  #voyageBar { display: none; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 8px 10px 8px 16px; align-items: center; gap: 14px; width: min(460px, calc(100vw - 32px)); }
+  body.voyage #voyageBar { display: flex; }
+  body.voyage #controls, body.voyage #shot, body.flying .hud:not(#log) { opacity: 0 !important; pointer-events: none; }
+  .vb-label { font: 500 10px/1 'JetBrains Mono', monospace; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+  .vb-track { flex: 1; height: 2px; background: rgba(231,236,238,0.18); border-radius: 2px; overflow: hidden; }
+  #voyageFill { height: 100%; background: var(--ink); transform-origin: left; transform: scaleX(0); transition: transform .5s linear; }
+
+  #endCard { position: fixed; inset: 0; z-index: 21; display: grid; place-items: center; background: radial-gradient(120% 90% at 50% 45%, rgba(10,14,18,0.25), rgba(5,7,9,0.8));
+    opacity: 0; visibility: hidden; transition: opacity 1.4s ease, visibility 1.4s; }
+  #endCard.show { opacity: 1; visibility: visible; }
+  .end-inner { text-align: center; padding: 0 24px; }
+  .end-inner h2 { font: 400 clamp(40px, 7vw, 76px)/1 'Instrument Serif', serif; margin: 14px 0 10px; }
+  .end-inner p { color: var(--dim); margin: 0 0 28px; }
+
+  body.photo .hud, body.photo #log { opacity: 0 !important; pointer-events: none; }
+  #photoBar { position: fixed; z-index: 12; left: 50%; bottom: 22px; transform: translateX(-50%); display: none; align-items: center; gap: 16px; padding: 10px 12px 10px 14px; }
+  body.photo #photoBar { display: flex; }
+  .ph-ctl { display: flex; flex-direction: column; gap: 6px; font: 500 9.5px/1 'JetBrains Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); width: 120px; }
+  #phShot { width: 52px; height: 52px; border-radius: 50%; border: 2px solid var(--ink); background: none; padding: 4px; cursor: pointer; }
+  #phShot span { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--ink); transition: transform .1s; }
+  #phShot:active span { transform: scale(0.88); }
+  #shutter { position: fixed; inset: 0; z-index: 30; background: #fff; opacity: 0; pointer-events: none; }
+  #shutter.go { animation: shut .45s ease-out; }
+  @keyframes shut { 0% { opacity: .85; } 100% { opacity: 0; } }
+  #toast { position: fixed; z-index: 31; left: 50%; top: 22px; transform: translate(-50%, -10px); padding: 10px 16px; border-radius: 999px; background: rgba(14,19,23,0.8); border: 1px solid var(--faint);
+    font: 500 12px/1 Inter, sans-serif; color: var(--ink); opacity: 0; transition: opacity .3s, transform .3s; pointer-events: none; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #recBadge { display: none; right: 20px; top: 20px; padding: 9px 13px; font: 500 11px/1 'JetBrains Mono', monospace; letter-spacing: .14em; color: #ff8a7a; align-items: center; gap: 8px; }
+  body.recording #recBadge { display: flex; }
+  #recBadge i { width: 8px; height: 8px; border-radius: 50%; background: #ff4d3d; box-shadow: 0 0 10px #ff4d3d; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  #btnRec.on { border-color: rgba(255,90,70,0.6); color: #ffb3a8; }
+
+  @media (max-width: 720px) {
+    #controls:not(.open) .chip.extra { display: none; }
+    #photoBar { left: 12px; right: 12px; transform: none; bottom: max(12px, env(safe-area-inset-bottom)); justify-content: space-between; gap: 10px; }
+    .ph-ctl { width: 90px; }
+    #recBadge { top: auto; bottom: 150px; right: 12px; }
+    #log { bottom: 128px; }
+    #voyageBar { bottom: max(12px, env(safe-area-inset-bottom)); }
+    #telemetry {
+      top: max(10px, env(safe-area-inset-top)); left: max(10px, env(safe-area-inset-left)); right: auto;
+      min-width: 0; padding: 10px 12px 9px; border-radius: 12px;
+    }
+    #telemetry .eyebrow { font-size: 9px; letter-spacing: 0.22em; }
+    #telemetry .force { font-size: 18px; margin: 6px 0 8px; }
+    .grid { grid-template-columns: repeat(3, auto auto); gap: 4px 8px; font-size: 10px; }
+    .grid dt { font-size: 8.5px; }
+    .grid dd { text-align: left; margin-right: 6px; }
+    .grid dt:nth-of-type(3), .grid dd:nth-of-type(3), .grid dt:nth-of-type(4), .grid dd:nth-of-type(4),
+    .grid dt:nth-of-type(6), .grid dd:nth-of-type(6), .grid dt:nth-of-type(n+7), .grid dd:nth-of-type(n+7) { display: none; }
+    .seg-btn.hold { padding: 9px 8px; }
+    #controls {
+      left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right));
+      bottom: max(10px, env(safe-area-inset-bottom)); width: auto; padding: 10px 12px;
+    }
+    #controls .row:not(.ship-row) { display: none; }
+    #controls .note { margin-left: 0; }
+    #controls.open .row { display: grid; }
+    #controls .btns { margin-top: 0; }
+    #controls.open .btns { margin-top: 10px; }
+    #ctlToggle { display: inline-block; }
+    .chip { padding: 10px 12px; font-size: 12px; }
+    .chip kbd { display: none; }
+    #shot { display: none; }
+    #rogueWarn { top: auto; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 66px); font-size: 10px; letter-spacing: 0.14em; white-space: nowrap; }
+    h1 { margin-top: 14px; }
+    .lede { font-size: 14px; margin-bottom: 26px; }
+  }
+  @media (max-height: 480px) and (orientation: landscape) {
+    #telemetry { display: none; }
+    #controls { left: auto; width: 300px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div id="intro">
+  <div class="intro-inner">
+    <div class="eyebrow">North Atlantic · <span id="introClock">13:20 UTC</span></div>
+    <h1>Storm at <em>Sea</em></h1>
+    <p class="lede">From glassy calm to hurricane, dawn to moonlit night. Container ships stacked high fight their way across the open ocean.</p>
+    <div class="enter-row">
+      <button id="enter" class="primary">Start the voyage</button>
+      <button id="enterFree" class="secondary">Free roam</button>
+    </div>
+    <div class="enter-sub">
+      <button id="soundPref" class="ghost" aria-pressed="true">Sound on</button>
+      <span class="sep">·</span>
+      <span class="hint-inline">3 minutes · Contains flashing lights</span>
+    </div>
+    <div id="loadStatus">Loading…</div>
+    <div class="hint">Headphones recommended</div>
+  </div>
+</div>
+
+<div id="veil" aria-hidden="true"></div>
+<div id="shutter" aria-hidden="true"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="recBadge" class="hud panel"><i></i>REC <span id="recTime">0:15</span></div>
+<div id="photoBar" class="panel" role="toolbar" aria-label="Photo mode">
+  <button id="phExit" class="chip">Exit<kbd>P</kbd></button>
+  <label class="ph-ctl">Lens<input id="phFov" type="range" min="18" max="90" step="1" value="48"></label>
+  <label class="ph-ctl">Exposure<input id="phExp" type="range" min="0.4" max="2.2" step="0.01" value="1"></label>
+  <button id="phShot" aria-label="Take photo"><span></span></button>
+</div>
+<canvas id="glass" aria-hidden="true"></canvas>
+<div id="sheet" aria-hidden="true"></div>
+<div id="bridgeFrame" aria-hidden="true">
+  <div class="console">
+    <div class="scope radar"><i></i></div>
+    <div class="scope ecdis"></div>
+    <div class="readout">HDG <b id="bfHdg">270</b> · SOG <b id="bfSog">10.4</b> kn</div>
+    <div class="scope radar small"><i></i></div>
+  </div>
+</div>
+
+<div id="log" class="hud" aria-live="polite"><span class="log-tag">Captain's log</span><p id="logText"></p></div>
+
+<div id="voyageBar" class="hud panel">
+  <span class="vb-label">Voyage</span>
+  <div class="vb-track"><div id="voyageFill"></div></div>
+  <button id="voyageExit" class="chip">Exit<kbd>Esc</kbd></button>
+</div>
+
+<div id="endCard" role="dialog" aria-label="Voyage complete">
+  <div class="end-inner">
+    <div class="eyebrow">07:10 UTC · 46°N 29°W</div>
+    <h2>Voyage complete</h2>
+    <p>The storm has passed. Ship and crew well.</p>
+    <div class="enter-row">
+      <button id="replay" class="primary">Replay voyage</button>
+      <button id="freeRoam" class="secondary">Free roam</button>
+    </div>
+  </div>
+</div>
+
+<section id="telemetry" class="hud panel">
+  <div class="eyebrow" id="tShip">MV Meridian Star</div>
+  <div class="force" id="tForce">Force 11</div>
+  <dl class="grid">
+    <dt>Sea Hs</dt><dd id="tHs">–</dd>
+    <dt>Wind</dt><dd id="tWind">–</dd>
+    <dt>Heading</dt><dd id="tHdg">–</dd>
+    <dt>Speed</dt><dd id="tSog">–</dd>
+    <dt>Roll</dt><dd id="tRoll">–</dd>
+    <dt>Pitch</dt><dd id="tPitch">–</dd>
+    <dt>Seas</dt><dd id="tSeas">–</dd>
+    <dt>Helm</dt><dd id="tRudder">–</dd>
+  </dl>
+</section>
+
+<div id="rogueWarn" class="hud panel"><i></i>Rogue wave approaching <span id="rogueDist"></span></div>
+
+<section id="controls" class="hud panel">
+  <div class="row ship-row"><label>Ship</label><div class="seg" role="group" aria-label="Ship">
+    <button type="button" class="seg-btn on" data-ship="meridian" aria-pressed="true">Meridian</button>
+    <button type="button" class="seg-btn" data-ship="msc" aria-pressed="false">MSC</button>
+    <button type="button" class="seg-btn" data-ship="cruise" aria-pressed="false">Cruise</button>
+  </div></div>
+  <p id="shipNote" class="note"></p>
+  <div class="row atm-row"><label>Weather</label><div class="seg" role="group" aria-label="Weather">
+    <button type="button" class="seg-btn" data-weather="calm">Calm</button>
+    <button type="button" class="seg-btn" data-weather="rough">Rough</button>
+    <button type="button" class="seg-btn" data-weather="storm">Storm</button>
+    <button type="button" class="seg-btn" data-weather="hurricane">Hurricane</button>
+  </div></div>
+  <div class="row atm-row"><label>Time</label><div class="seg" role="group" aria-label="Time of day">
+    <button type="button" class="seg-btn" data-time="dawn">Dawn</button>
+    <button type="button" class="seg-btn" data-time="day">Day</button>
+    <button type="button" class="seg-btn" data-time="dusk">Dusk</button>
+    <button type="button" class="seg-btn" data-time="night">Night</button>
+    <button type="button" class="seg-btn" data-time="moonlit">Moonlit</button>
+  </div></div>
+  <div class="row atm-row"><label>Helm</label><div class="helm">
+    <button type="button" class="seg-btn hold" id="helmP" aria-label="Port rudder (hold)" title="Port (A)">◀</button>
+    <div class="seg tele" role="group" aria-label="Engine telegraph">
+      <button type="button" class="seg-btn" data-tele="1">Slow</button>
+      <button type="button" class="seg-btn" data-tele="2">Half</button>
+      <button type="button" class="seg-btn" data-tele="3">Full</button>
+      <button type="button" class="seg-btn" data-tele="4">Flank</button>
+    </div>
+    <button type="button" class="seg-btn hold" id="helmS" aria-label="Starboard rudder (hold)" title="Starboard (D)">▶</button>
+  </div></div>
+  <div class="row"><label for="storm">Sea state</label><input id="storm" type="range" min="0.45" max="1.35" step="0.01" value="1"></div>
+  <div class="row"><label for="bolts">Lightning</label><input id="bolts" type="range" min="0" max="3" step="0.05" value="1"></div>
+  <div class="row"><label for="rainAmt">Rain</label><input id="rainAmt" type="range" min="0" max="1.6" step="0.01" value="1"></div>
+  <div class="row"><label for="vol">Volume</label><input id="vol" type="range" min="0" max="1.2" step="0.01" value="0.85"></div>
+  <div class="btns">
+    <button class="chip" id="ctlToggle" aria-expanded="false">Settings</button>
+    <button class="chip" id="btnVoyage">Voyage</button>
+    <button class="chip" id="btnView">Cinematic<kbd>V</kbd></button>
+    <button class="chip" id="btnHorn" aria-label="Ship's horn (hold)">Horn<kbd>B</kbd></button>
+    <button class="chip" id="btnPhoto">Photo<kbd>P</kbd></button>
+    <button class="chip" id="btnShare">Share</button>
+    <button class="chip extra" id="btnRec">Record clip</button>
+    <button class="chip extra" id="btnRogue">Rogue wave<kbd>R</kbd></button>
+    <button class="chip extra" id="btnStrike">Strike<kbd>L</kbd></button>
+    <button class="chip extra on" id="btnCine">Cinematic<kbd>C</kbd></button>
+    <button class="chip" id="btnSound">Sound<kbd>M</kbd></button>
+  </div>
+</section>
+
+<div id="shot" class="hud panel">Camera <b id="shotName">Overhead</b> · 1–6 · H hides UI</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

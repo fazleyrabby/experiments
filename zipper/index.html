@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zipper // 06</title>
+<style>
+  :root { --bg: #1B2740; --ink: #F3E9DC; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas#stage.dragging { cursor: grabbing; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+  }
+  .label.left { left: 28px; }
+  .label.right { right: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.6; }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; }
+    .label.right { right: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label left">
+  <div>Zipper // 06</div>
+  <div class="hint">Grab the pull and drag</div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const FABRIC = '#1B2740';
+const LENGTH = 6.2;                // zipper length
+const PITCH = 0.115;               // tooth spacing on one side
+const Y_BOTTOM = -LENGTH / 2, Y_TOP = LENGTH / 2;
+const SLIDER_MIN = Y_BOTTOM + 0.4, SLIDER_MAX = Y_TOP - 0.15;
+const THROAT = 0.1;                // the two sides start parting this far above the slider centre
+const SPREAD = 1.3;                // how far each side opens
+const FALLOFF = 1.1;               // how quickly it reaches that
+const TOOTH_ROOT = 0.2;            // where teeth meet the tape
+const TAPE_WIDTH = 0.26;
+const OUTER = 10, EXTENT = 8;      // fabric reaches well past the screen edges
+const TEETH = Math.floor(LENGTH / PITCH);
+
+// Lining patterns revealed as it opens: [background, ink, kind]
+const LININGS = [
+  ['#FF5D73', '#FFD23F', 'dots'],
+  ['#FFD23F', '#1238FF', 'stripes'],
+  ['#17B890', '#FFF1E3', 'check'],
+  ['#FF8A1F', '#7C2D12', 'zigzag'],
+  ['#7C4DFF', '#FFC6FF', 'dots'],
+];
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(FABRIC);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+pmrem.dispose();
+
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+const key = new THREE.DirectionalLight(0xFFF4E6, 2.4);
+key.position.set(-4, 5, 6);
+scene.add(key);
+
+// ───────────────────────────── Textures (procedural) ─────────────────────────────
+
+function fabricTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = FABRIC;
+  ctx.fillRect(0, 0, 256, 256);
+  // Twill weave: fine diagonal ribs plus a little grain
+  for (let i = -256; i < 512; i += 4) {
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.05 + Math.random() * 0.05})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i - 256, 256); ctx.stroke();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.16)';
+    ctx.beginPath(); ctx.moveTo(i + 2, 0); ctx.lineTo(i - 254, 256); ctx.stroke();
+  }
+  for (let i = 0; i < 5000; i++) {
+    ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '0,0,0'}, 0.05)`;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 1, 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  return t;
+}
+
+function tapeTexture() {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 32;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#131C30';
+  ctx.fillRect(0, 0, 64, 32);
+  for (let y = 0; y < 32; y += 2) { ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'; ctx.fillRect(0, y, 64, 1); }
+  // One stitch per tile, near the outer edge of the tape
+  ctx.strokeStyle = '#C9A24B'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(50, 7); ctx.lineTo(50, 25); ctx.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+function liningTexture([background, ink, kind]) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = ctx.strokeStyle = ink;
+  if (kind === 'dots') {
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+      ctx.beginPath(); ctx.arc(x * 64 + (y % 2 ? 48 : 16), y * 64 + 32, 13, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (kind === 'stripes') {
+    for (let x = 0; x < 256; x += 64) ctx.fillRect(x, 0, 26, 256);
+  } else if (kind === 'check') {
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) if ((x + y) % 2) ctx.fillRect(x * 32, y * 32, 32, 32);
+  } else {
+    ctx.lineWidth = 12; ctx.lineJoin = 'miter';
+    for (let y = 16; y < 256; y += 64) {
+      ctx.beginPath();
+      for (let x = -32; x <= 288; x += 32) ctx.lineTo(x, y + ((x / 32) % 2 ? 28 : 0));
+      ctx.stroke();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(7, 7);
+  t.anisotropy = 8;
+  return t;
+}
+
+// ───────────────────────────── Zipper shape ─────────────────────────────
+
+let sliderY = SLIDER_MAX - 1.3;    // start slightly open, to invite a pull
+
+// Sideways opening of each half at height y, and its slope
+function opening(y) {
+  const d = y - (sliderY + THROAT);
+  return d <= 0 ? 0 : SPREAD * (1 - Math.exp(-d / FALLOFF));
+}
+function openingSlope(y) {
+  const d = y - (sliderY + THROAT);
+  return d <= 0 ? 0 : (SPREAD / FALLOFF) * Math.exp(-d / FALLOFF);
+}
+
+// ───────────────────────────── Fabric panels & tapes ─────────────────────────────
+// Vertical strips whose inner edge follows the zipper; rebuilt as it moves.
+
+function createStrip(cols, rows, material) {
+  const count = (cols + 1) * (rows + 1);
+  const geometry = new THREE.BufferGeometry();
+  const index = [];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const a = j * (cols + 1) + i, b = a + 1, c = a + cols + 1, d = c + 1;
+    index.push(a, b, c, b, d, c);
+  }
+  geometry.setIndex(index);
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return { geometry, cols, rows };
+}
+
+// side: -1 left, +1 right. inner/outer: closed-state x of the strip's two edges.
+// A fixed outer edge means the strip bunches up as the zipper opens.
+function shapeStrip(strip, side, inner, outer, outerFixed, uvScale, z, firstTime) {
+  const { geometry, cols, rows } = strip;
+  const p = geometry.attributes.position, uv = geometry.attributes.uv;
+  for (let j = 0, n = 0; j <= rows; j++) {
+    const y = -EXTENT + (2 * EXTENT * j) / rows;
+    const off = opening(y);
+    for (let i = 0; i <= cols; i++, n++) {
+      const u = (i / cols) ** 1.6;                       // more columns near the zipper
+      const x0 = inner + (outer - inner) * u;
+      const x = outerFixed ? inner + off + (outer - inner - off) * u : x0 + off;
+      const fold = outerFixed ? 0.09 * off * Math.sin(u * 26 + y * 0.7) * (1 - u) * Math.min(1, u * 6) : 0;
+      p.setXYZ(n, side * x, y, z + fold);
+      if (firstTime) uv.setXY(n, x0 * uvScale[0], y * uvScale[1]);
+    }
+  }
+  p.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+const fabricMap = fabricTexture();
+const fabricMaterial = new THREE.MeshStandardMaterial({
+  map: fabricMap, bumpMap: fabricMap, bumpScale: 1.2, roughness: 0.92, side: THREE.DoubleSide,
+});
+const tapeMaterial = new THREE.MeshStandardMaterial({ map: tapeTexture(), roughness: 0.85, side: THREE.DoubleSide });
+
+const halves = [-1, 1].map((side) => ({
+  side,
+  fabric: createStrip(14, 90, fabricMaterial),
+  tape: createStrip(2, 90, tapeMaterial),
+}));
+
+function shapeFabric(firstTime = false) {
+  for (const h of halves) {
+    shapeStrip(h.fabric, h.side, TOOTH_ROOT + TAPE_WIDTH, OUTER, true, [0.9, 0.9], 0, firstTime);
+    shapeStrip(h.tape, h.side, TOOTH_ROOT, TOOTH_ROOT + TAPE_WIDTH, false, [1 / TAPE_WIDTH, 2.6], 0.004, firstTime);
+  }
+}
+
+// Below the bottom stop the two halves are simply sewn together
+{
+  const w = 2 * TOOTH_ROOT + 0.02, h = EXTENT + Y_BOTTOM;
+  const seam = new THREE.Mesh(new THREE.PlaneGeometry(w, h), tapeMaterial);
+  seam.geometry.attributes.uv.array.forEach((v, i, uv) => { uv[i] = i % 2 ? v * h * 2.6 : v * 0.6; });
+  seam.position.set(0, Y_BOTTOM - h / 2 - 0.05, 0.002);
+  scene.add(seam);
+}
+
+// Lining underneath
+let liningIndex = 0;
+const lining = new THREE.Mesh(
+  new THREE.PlaneGeometry(2 * OUTER, 2 * EXTENT),
+  new THREE.MeshStandardMaterial({ map: liningTexture(LININGS[0]), roughness: 0.8 })
+);
+lining.position.z = -0.35;
+scene.add(lining);
+
+function nextLining() {
+  liningIndex = (liningIndex + 1) % LININGS.length;
+  lining.material.map.dispose();
+  lining.material.map = liningTexture(LININGS[liningIndex]);
+}
+
+// ───────────────────────────── Teeth ─────────────────────────────
+
+const metal = new THREE.MeshStandardMaterial({ color: 0xD0A64A, metalness: 1, roughness: 0.28 });
+
+function roundedRect(w, h, r) {
+  const s = new THREE.Shape();
+  s.moveTo(-w / 2 + r, -h / 2);
+  s.lineTo(w / 2 - r, -h / 2); s.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+  s.lineTo(w / 2, h / 2 - r); s.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+  s.lineTo(-w / 2 + r, h / 2); s.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+  s.lineTo(-w / 2, -h / 2 + r); s.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+  return s;
+}
+const bevel = (depth, size) => ({ depth, bevelEnabled: true, bevelThickness: size, bevelSize: size, bevelSegments: 3, curveSegments: 6 });
+
+const toothGeometry = new THREE.ExtrudeGeometry(roundedRect(0.235, 0.078, 0.03), bevel(0.05, 0.012));
+toothGeometry.translate(0, 0, -0.025);
+const teeth = halves.map((h) => {
+  const mesh = new THREE.InstancedMesh(toothGeometry, metal, TEETH);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return mesh;
+});
+
+const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpP = new THREE.Vector3(), tmpS = new THREE.Vector3(1, 1, 1);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+
+function placeTeeth() {
+  halves.forEach((h, k) => {
+    for (let i = 0; i < TEETH; i++) {
+      const y = Y_BOTTOM + (i + (h.side < 0 ? 0.25 : 0.75)) * PITCH;   // the two sides interleave
+      tmpQ.setFromAxisAngle(Z_AXIS, -h.side * Math.atan(openingSlope(y)));
+      teeth[k].setMatrixAt(i, tmpM.compose(tmpP.set(h.side * (opening(y) + 0.085), y, 0.045), tmpQ, tmpS));
+    }
+    teeth[k].instanceMatrix.needsUpdate = true;
+  });
+}
+
+// Bottom stop
+const stop = new THREE.Mesh(new THREE.ExtrudeGeometry(roundedRect(0.46, 0.16, 0.04), bevel(0.06, 0.015)), metal);
+stop.position.set(0, Y_BOTTOM - 0.06, 0.02);
+scene.add(stop);
+
+// ───────────────────────────── Slider & pull tab ─────────────────────────────
+
+const slider = new THREE.Group();
+scene.add(slider);
+{
+  const body = new THREE.Shape();
+  body.moveTo(-0.36, 0.34); body.lineTo(0.36, 0.34); body.lineTo(0.22, -0.3); body.lineTo(-0.22, -0.3); body.closePath();
+  const bodyMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(body, bevel(0.1, 0.035)), metal);
+  bodyMesh.position.z = 0.06;
+  const bridge = new THREE.Mesh(new THREE.ExtrudeGeometry(roundedRect(0.16, 0.36, 0.06), bevel(0.07, 0.02)), metal);
+  bridge.position.set(0, 0, 0.19);
+  slider.add(bodyMesh, bridge);
+}
+const tab = new THREE.Group();
+{
+  const plate = roundedRect(0.3, 0.92, 0.12);
+  const hole = new THREE.Path();
+  hole.absellipse(0, 0.3, 0.07, 0.1, 0, Math.PI * 2, true);
+  plate.holes.push(hole);
+  const geometry = new THREE.ExtrudeGeometry(plate, bevel(0.035, 0.012));
+  geometry.translate(0, -0.3, 0);   // hangs from the hole
+  tab.add(new THREE.Mesh(geometry, metal));
+}
+tab.position.set(0, 0.02, 0.3);
+slider.add(tab);
+
+// ───────────────────────────── Sound ─────────────────────────────
+// A zipper's sound is a train of tooth clicks, so each tooth passed plays one.
+
+let audio = null, tickBuffers = [], thunkBuffer = null;
+
+// Short struck-object sound: a noise crack ringing a few damped resonances
+function renderStrike(sampleRate, seconds, modes) {
+  const length = Math.floor(sampleRate * seconds);
+  const out = new Float32Array(length), excitation = new Float32Array(length);
+  const crack = 0.0006 * sampleRate;
+  for (let n = 0; n < length && n < crack * 8; n++) excitation[n] = (Math.random() * 2 - 1) * Math.exp(-n / crack);
+  excitation[0] += 1;
+  for (const [freq, decay, gain] of modes) {
+    const r = Math.exp(-1 / (decay * sampleRate));
+    const a1 = 2 * r * Math.cos((2 * Math.PI * freq) / sampleRate), a2 = -r * r;
+    let y1 = 0, y2 = 0;
+    for (let n = 0; n < length; n++) {
+      const y = excitation[n] + a1 * y1 + a2 * y2;
+      y2 = y1; y1 = y;
+      out[n] += gain * (1 - r) * y;
+    }
+  }
+  let peak = 0;
+  for (let n = 0; n < length; n++) peak = Math.max(peak, Math.abs(out[n]));
+  for (let n = 0; n < length; n++) out[n] *= (0.9 / peak) * Math.min(1, (length - n) / (sampleRate * 0.003));
+  return out;
+}
+
+function toBuffer(samples) {
+  const buffer = audio.createBuffer(1, samples.length, audio.sampleRate);
+  buffer.getChannelData(0).set(samples);
+  return buffer;
+}
+
+function initAudio() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  const rand = (a, b) => a + Math.random() * (b - a);
+  for (let i = 0; i < 6; i++) {
+    tickBuffers.push(toBuffer(renderStrike(audio.sampleRate, 0.02, [
+      [rand(2500, 3300), 0.003, 1], [rand(5200, 6600), 0.002, 0.8], [rand(8200, 9600), 0.0012, 0.5],
+    ])));
+  }
+  thunkBuffer = toBuffer(renderStrike(audio.sampleRate, 0.09, [[310, 0.02, 1], [880, 0.012, 0.6], [2400, 0.005, 0.3]]));
+}
+
+function play(buffer, when, rate, level) {
+  const src = audio.createBufferSource();
+  src.buffer = buffer;
+  src.playbackRate.value = rate;
+  const gain = audio.createGain();
+  gain.gain.value = level;
+  src.connect(gain).connect(audio.destination);
+  src.start(when);
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+const hit = new THREE.Vector3();
+const grab = { down: false, id: -1, offsetY: 0, x: 0 };
+let sliderTarget = sliderY;
+let swing = 0, swingVelocity = 0;
+let lastTooth = Math.floor((sliderY - Y_BOTTOM) / (PITCH / 2));
+let zips = 0, lastEnd = 0;   // lastEnd: +1 after reaching the top, -1 the bottom
+
+function pointerOnFabric(e) {
+  ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  return raycaster.ray.intersectPlane(plane, hit);
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  initAudio();
+  if (grab.down || !pointerOnFabric(e)) return;
+  // Generous grab area around the slider and its hanging tab
+  if (Math.abs(hit.x) > 0.8 || hit.y > sliderY + 0.6 || hit.y < sliderY - 1.2) return;
+  grab.down = true; grab.id = e.pointerId; grab.offsetY = sliderY - hit.y; grab.x = hit.x;
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add('dragging');
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!grab.down || e.pointerId !== grab.id || !pointerOnFabric(e)) return;
+  sliderTarget = THREE.MathUtils.clamp(hit.y + grab.offsetY, SLIDER_MIN, SLIDER_MAX);
+  grab.x = hit.x;
+});
+const release = (e) => {
+  if (e.pointerId !== grab.id) return;
+  grab.down = false; grab.id = -1;
+  canvas.classList.remove('dragging');
+};
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+
+function showCount() { statusEl.textContent = `Zips ${String(zips).padStart(3, '0')}`; }
+
+function updateZipper(dt) {
+  const before = sliderY;
+  sliderY += (sliderTarget - sliderY) * (1 - Math.exp(-30 * dt));
+  const speed = Math.abs(sliderY - before) / dt;
+
+  // One click per tooth passed, spread across the frame
+  const tooth = Math.floor((sliderY - Y_BOTTOM) / (PITCH / 2));
+  if (audio && tooth !== lastTooth) {
+    const passed = Math.min(8, Math.abs(tooth - lastTooth));
+    const closing = tooth > lastTooth;
+    for (let k = 0; k < passed; k++) {
+      play(tickBuffers[Math.floor(Math.random() * tickBuffers.length)], audio.currentTime + (k / passed) * dt,
+        (closing ? 1.08 : 0.94) * (0.94 + Math.random() * 0.12) * (1 + Math.min(0.25, speed * 0.012)),
+        0.1 + Math.random() * 0.08);
+    }
+  }
+  lastTooth = tooth;
+
+  // End stops
+  const end = sliderY > SLIDER_MAX - 0.02 ? 1 : sliderY < SLIDER_MIN + 0.02 ? -1 : 0;
+  if (end !== 0 && end !== lastEnd) {
+    if (lastEnd !== 0) { zips++; showCount(); }
+    if (audio && speed > 0.3) play(thunkBuffer, audio.currentTime, end > 0 ? 1.15 : 0.9, Math.min(0.5, 0.15 + speed * 0.03));
+    if (end > 0 && lastEnd < 0) nextLining();   // fully closed again: fresh lining for next time
+    lastEnd = end;
+  }
+
+  // The tab leans toward the finger while held, then swings back
+  const lean = grab.down ? THREE.MathUtils.clamp(Math.atan2(grab.x, 0.9), -0.9, 0.9) : 0;
+  swingVelocity += ((lean - swing) * 140 - swingVelocity * (grab.down ? 22 : 5)) * dt;
+  swingVelocity += (sliderY - before) * (grab.down ? 0 : 6);
+  swing += swingVelocity * dt;
+  tab.rotation.z = swing;
+
+  slider.position.set(0, sliderY, 0);
+  shapeFabric();
+  placeTeeth();
+}
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitH = (LENGTH / 2 + 0.9) / Math.tan(halfFov);
+  const fitW = 2.2 / (Math.tan(halfFov) * camera.aspect);
+  camera.position.set(0, 0, Math.max(fitH, fitW));
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+shapeFabric(true);
+showCount();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+function frame() {
+  updateZipper(Math.min(clock.getDelta(), 0.05));
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="zipper"></script>
+</body>
+</html>

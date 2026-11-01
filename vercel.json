@@ -1,0 +1,335 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "routes": [
+    {
+      "src": "^/tesla-roadster$",
+      "status": 308,
+      "headers": {
+        "Location": "/tesla-roadster/"
+      }
+    },
+    {
+      "src": "^/tesla-roadster/$",
+      "dest": "/tesla-roadster/dist/index.html"
+    },
+    {
+      "src": "^/tesla-roadster/(.+)$",
+      "dest": "/tesla-roadster/dist/$1"
+    },
+    {
+      "src": "^/optimusprime$",
+      "status": 308,
+      "headers": {
+        "Location": "/optimusprime/"
+      }
+    },
+    {
+      "src": "^/optimusprime/$",
+      "dest": "/optimusprime/dist/index.html"
+    },
+    {
+      "src": "^/optimusprime/(.+)$",
+      "dest": "/optimusprime/dist/$1"
+    },
+    {
+      "src": "^/gundam$",
+      "status": 308,
+      "headers": {
+        "Location": "/gundam/"
+      }
+    },
+    {
+      "src": "^/gundam/$",
+      "dest": "/gundam/dist/index.html"
+    },
+    {
+      "src": "^/gundam/(.+)$",
+      "dest": "/gundam/dist/$1"
+    },
+    {
+      "src": "^/typewriter$",
+      "status": 308,
+      "headers": {
+        "Location": "/typewriter/"
+      }
+    },
+    {
+      "src": "^/typewriter/$",
+      "dest": "/typewriter/dist/index.html"
+    },
+    {
+      "src": "^/typewriter/(.+)$",
+      "dest": "/typewriter/dist/$1"
+    },
+    {
+      "src": "^/mechanical-watch$",
+      "status": 308,
+      "headers": {
+        "Location": "/mechanical-watch/"
+      }
+    },
+    {
+      "src": "^/mechanical-watch/$",
+      "dest": "/mechanical-watch/dist/index.html"
+    },
+    {
+      "src": "^/mechanical-watch/(.+)$",
+      "dest": "/mechanical-watch/dist/$1"
+    },
+    {
+      "src": "^/v8engine$",
+      "status": 308,
+      "headers": {
+        "Location": "/v8engine/"
+      }
+    },
+    {
+      "src": "^/v8engine/$",
+      "dest": "/v8enginebreakdown/dist/index.html"
+    },
+    {
+      "src": "^/v8engine/(.+)$",
+      "dest": "/v8enginebreakdown/dist/$1"
+    },
+    {
+      "src": "^/millennium-falcon$",
+      "status": 308,
+      "headers": {
+        "Location": "/millennium-falcon/"
+      }
+    },
+    {
+      "src": "^/millennium-falcon/$",
+      "dest": "/millenium falcon/dist/index.html"
+    },
+    {
+      "src": "^/millennium-falcon/(.+)$",
+      "dest": "/millenium falcon/dist/$1"
+    },
+    {
+      "src": "^/lego-lamborghini$",
+      "status": 308,
+      "headers": {
+        "Location": "/lego-lamborghini/"
+      }
+    },
+    {
+      "src": "^/lego-lamborghini/$",
+      "dest": "/lego-lamborghini/dist/index.html"
+    },
+    {
+      "src": "^/lego-lamborghini/(.+)$",
+      "dest": "/lego-lamborghini/dist/$1"
+    },
+    {
+      "src": "^/simforge$",
+      "status": 308,
+      "headers": {
+        "Location": "/simforge/"
+      }
+    },
+    {
+      "src": "^/simforge/$",
+      "dest": "/SimForge/dist/index.html"
+    },
+    {
+      "src": "^/simforge/(about|simulations)(?:/[^/.]+)?/?$",
+      "dest": "/SimForge/dist/index.html"
+    },
+    {
+      "src": "^/simforge/(.+)$",
+      "dest": "/SimForge/dist/$1"
+    },
+    {
+      "src": "^/lego-spaceship$",
+      "status": 308,
+      "headers": {
+        "Location": "/lego-spaceship/"
+      }
+    },
+    {
+      "src": "^/lego-spaceship/$",
+      "dest": "/lego-spaceship/dist/index.html"
+    },
+    {
+      "src": "^/lego-spaceship/(.+)$",
+      "dest": "/lego-spaceship/dist/$1"
+    },
+    {
+      "src": "^/rts$",
+      "status": 308,
+      "headers": {
+        "Location": "/rts/"
+      }
+    },
+    {
+      "src": "^/rts/$",
+      "dest": "/rts/dist/index.html"
+    },
+    {
+      "src": "^/rts/(.+)$",
+      "dest": "/rts/dist/$1"
+    },
+    {
+      "src": "^/skybound$",
+      "status": 308,
+      "headers": {
+        "Location": "/skybound/"
+      }
+    },
+    {
+      "src": "^/skybound/$",
+      "dest": "/SKYBOUND/dist/index.html"
+    },
+    {
+      "src": "^/skybound/(.+)$",
+      "dest": "/SKYBOUND/dist/$1"
+    },
+    {
+      "src": "^/boatride$",
+      "status": 308,
+      "headers": {
+        "Location": "/boatride/"
+      }
+    },
+    {
+      "src": "^/boatride/$",
+      "dest": "/boatride/dist/index.html"
+    },
+    {
+      "src": "^/boatride/(.+)$",
+      "dest": "/boatride/dist/$1"
+    },
+    {
+      "src": "^/stillwater-diorama/dist(?:/index\\.html)?/?$",
+      "status": 308,
+      "headers": {
+        "Location": "/stillwater-diorama/"
+      }
+    },
+    {
+      "src": "^/stillwater-diorama/dist/(.+)$",
+      "status": 308,
+      "headers": {
+        "Location": "/stillwater-diorama/$1"
+      }
+    },
+    {
+      "src": "^/stillwater-diorama$",
+      "status": 308,
+      "headers": {
+        "Location": "/stillwater-diorama/"
+      }
+    },
+    {
+      "src": "^/stillwater-diorama/$",
+      "dest": "/stillwater-diorama/dist/index.html"
+    },
+    {
+      "src": "^/stillwater-diorama/(.+)$",
+      "dest": "/stillwater-diorama/dist/$1"
+    },
+    {
+      "src": "^/little-spider/dist(?:/index\\.html)?/?$",
+      "status": 308,
+      "headers": {
+        "Location": "/little-spider/"
+      }
+    },
+    {
+      "src": "^/little-spider/dist/(.+)$",
+      "status": 308,
+      "headers": {
+        "Location": "/little-spider/$1"
+      }
+    },
+    {
+      "src": "^/little-spider$",
+      "status": 308,
+      "headers": {
+        "Location": "/little-spider/"
+      }
+    },
+    {
+      "src": "^/little-spider/$",
+      "dest": "/little-spider/dist/index.html"
+    },
+    {
+      "src": "^/little-spider/(.+)$",
+      "dest": "/little-spider/dist/$1"
+    },
+    {
+      "src": "^/ctg-explorer/dist(?:/index\\.html)?/?$",
+      "status": 308,
+      "headers": {
+        "Location": "/ctg-explorer/"
+      }
+    },
+    {
+      "src": "^/ctg-explorer/dist/(.+)$",
+      "status": 308,
+      "headers": {
+        "Location": "/ctg-explorer/$1"
+      }
+    },
+    {
+      "src": "^/ctg-explorer$",
+      "status": 308,
+      "headers": {
+        "Location": "/ctg-explorer/"
+      }
+    },
+    {
+      "src": "^/ctg-explorer/$",
+      "dest": "/ctg-explorer/dist/index.html"
+    },
+    {
+      "src": "^/ctg-explorer/(.+)$",
+      "dest": "/ctg-explorer/dist/$1"
+    },
+    {
+      "src": "^/salar-de-uyuni/dist(?:/index\\.html)?/?$",
+      "status": 308,
+      "headers": {
+        "Location": "/salar-de-uyuni/"
+      }
+    },
+    {
+      "src": "^/salar-de-uyuni/dist/(.+)$",
+      "status": 308,
+      "headers": {
+        "Location": "/salar-de-uyuni/$1"
+      }
+    },
+    {
+      "src": "^/salar-de-uyuni$",
+      "status": 308,
+      "headers": {
+        "Location": "/salar-de-uyuni/"
+      }
+    },
+    {
+      "src": "^/salar-de-uyuni/$",
+      "dest": "/salar-de-uyuni/dist/index.html"
+    },
+    {
+      "src": "^/salar-de-uyuni/(.+)$",
+      "dest": "/salar-de-uyuni/dist/$1"
+    },
+    {
+      "src": "^/highland-express$",
+      "status": 308,
+      "headers": {
+        "Location": "/highland-express/"
+      }
+    },
+    {
+      "src": "^/highland-express/$",
+      "dest": "/highland-express/dist/index.html"
+    },
+    {
+      "src": "^/highland-express/(.+)$",
+      "dest": "/highland-express/dist/$1"
+    }
+  ]
+}

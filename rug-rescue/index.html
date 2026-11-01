@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rug Rescue // 16</title>
+<style>
+  :root { --bg: #d9d4cb; --ink: #23201c; --chip: rgba(255, 255, 255, 0.82); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: none; }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(130% 100% at 50% 45%, transparent 55%, rgba(40, 30, 20, 0.22) 100%);
+  }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.left { left: 28px; }
+  .label.right { left: 28px; top: 24px; bottom: auto; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.6; }
+  .label .touch { display: none; }
+  @media (hover: none) {
+    .label .mouse { display: none; }
+    .label .touch { display: inline; }
+  }
+  .dock {
+    position: fixed; right: 22px; bottom: 22px;
+    display: flex; gap: 8px; padding: 6px; border-radius: 999px;
+    background: var(--chip); box-shadow: 0 6px 24px rgba(40, 30, 20, 0.18);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .dock button {
+    all: unset; cursor: pointer; display: flex; align-items: center; gap: 7px;
+    padding: 8px 14px 8px 10px; border-radius: 999px; color: var(--ink);
+    font: 600 10px/1 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif; letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .dock button svg { width: 20px; height: 20px; flex: none; }
+  .dock button kbd { font: inherit; opacity: 0.4; }
+  .dock button[aria-pressed="true"] { background: var(--ink); color: #f4efe6; }
+  .dock button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  @media (max-width: 720px) {
+    .dock { right: auto; left: 50%; transform: translateX(-50%); bottom: 74px; }
+    .dock button { padding: 9px; }
+    .dock button span, .dock button kbd { display: none; }
+  }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; right: 18px; }
+    .label.right { top: 16px; left: 18px; right: 120px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+<div class="label left">
+  <div>Rug Rescue // 16</div>
+  <div class="hint">
+    <span class="mouse">Pour, scrub, then pull the squeegee<br>Scroll or 1 · 2 · 3 to switch tools / N for a new rug</span>
+    <span class="touch">Pour, scrub, then pull the squeegee<br>Tap a tool to switch</span>
+  </div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+<nav class="dock" aria-label="Tools">
+  <button type="button" data-tool="water" aria-pressed="true" title="Watering can (1)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h9v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M14 11l5-5"/><path d="M18 4.5l2 2"/><path d="M8 9V6a2 2 0 0 1 4 0"/><path d="M20.5 10v1M19 12.5v1M21.5 13v1"/></svg>
+    <span>Water</span><kbd>1</kbd>
+  </button>
+  <button type="button" data-tool="squeegee" aria-pressed="false" title="Squeegee (2)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17h16"/><path d="M6 14h12v3H6z"/><path d="M12 14V3"/></svg>
+    <span>Squeegee</span><kbd>2</kbd>
+  </button>
+  <button type="button" data-tool="brush" aria-pressed="false" title="Scrub brush (3)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="7" rx="3.5"/><path d="M6 13v4M9 13v5M12 13v5M15 13v5M18 13v4"/></svg>
+    <span>Brush</span><kbd>3</kbd>
+  </button>
+  <button type="button" data-action="new" title="New rug (N)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
+    <span>New rug</span><kbd>N</kbd>
+  </button>
+</nav>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const IS_TOUCH = matchMedia('(hover: none)').matches;
+const PORTRAIT = window.innerHeight > window.innerWidth * 1.1;
+const DOMAIN = PORTRAIT ? new THREE.Vector2(1.0, 1.6) : new THREE.Vector2(1.6, 1.0);   // the floor, in metres-ish
+const SIM = PORTRAIT ? new THREE.Vector2(IS_TOUCH ? 400 : 640, IS_TOUCH ? 640 : 1024) : new THREE.Vector2(1024, 640);
+const PX = DOMAIN.x / SIM.x;                       // world size of one sim cell
+const RUG = { halfLen: 0.46, halfWid: 0.305, fringe: 0.045 };
+const RUG_LONG = PORTRAIT ? new THREE.Vector2(0, 1) : new THREE.Vector2(1, 0);
+const STEPS = 6;                                   // water substeps per frame
+const SQUEEGEE_HALF = 0.22;                        // half the blade length
+const RUG_TEX = { w: 1024, body: 1536, fringe: 76 };
+
+// ───────────────────────────── Rug artwork ─────────────────────────────
+
+// A hand-knotted rug, drawn fresh from a seed: borders, a field pattern,
+// a central medallion, corner spandrels, dye variation and a fringe.
+const PALETTES = [
+  { name: 'Heriz red', field: '#8f2320', border: '#1f2b52', ivory: '#efe2c4', gold: '#d6a043', teal: '#2e6e69', dark: '#2a1b16', rose: '#c8705c', sky: '#6f8fb5', guard: '#b6432e' },
+  { name: 'Indigo Kashan', field: '#1d2b57', border: '#8c2524', ivory: '#eee0c2', gold: '#d9a947', teal: '#3b7a72', dark: '#1a1512', rose: '#cf7d6b', sky: '#88a6c9', guard: '#2f4d7a' },
+  { name: 'Ivory Oushak', field: '#e8d6b4', border: '#b45a45', ivory: '#f5ead2', gold: '#cf9a4c', teal: '#7f9c86', dark: '#4a3328', rose: '#d99a83', sky: '#9fb2c0', guard: '#c98a5b' },
+  { name: 'Saffron Bakhtiari', field: '#b5782b', border: '#2d3f3a', ivory: '#f0e3c6', gold: '#e9bc5d', teal: '#3f6f5c', dark: '#2b1e14', rose: '#a8442f', sky: '#7c98a3', guard: '#7c2f22' },
+  { name: 'Rose Tabriz', field: '#b85a5e', border: '#2a3550', ivory: '#f2e6d0', gold: '#d8ad5a', teal: '#4f7d78', dark: '#2d1d1e', rose: '#e3a497', sky: '#8aa0bf', guard: '#6e2b37' },
+];
+
+function mulberry(seed) {
+  return () => {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function drawRug(seed) {
+  const rand = mulberry(seed);
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+  const pal = PALETTES[seed % PALETTES.length];
+  const W = RUG_TEX.w, BH = RUG_TEX.body, F = RUG_TEX.fringe, H = BH + 2 * F;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const c = canvas.getContext('2d');
+  c.lineJoin = 'round'; c.lineCap = 'round';
+  const top = F, bottom = F + BH;
+
+  // Shapes
+  const outline = (w = 2.5) => { c.lineWidth = w; c.strokeStyle = pal.dark; c.stroke(); };
+  const fill = (col) => { c.fillStyle = col; c.fill(); };
+  const circle = (x, y, r) => { c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); };
+  const petalPath = (x, y, len, wid, a) => {
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const P = (u, v) => [x + ca * u - sa * v, y + sa * u + ca * v];
+    c.beginPath();
+    c.moveTo(...P(0, 0));
+    c.quadraticCurveTo(...P(len * 0.45, wid), ...P(len, 0));
+    c.quadraticCurveTo(...P(len * 0.45, -wid), ...P(0, 0));
+  };
+  const rosette = (x, y, r, n, cols) => {
+    for (let i = 0; i < n; i++) { petalPath(x, y, r, r * 0.42, (i / n) * Math.PI * 2); fill(cols[0]); outline(1.6); }
+    for (let i = 0; i < n; i++) { petalPath(x, y, r * 0.62, r * 0.22, (i / n + 0.5 / n) * Math.PI * 2); fill(cols[1]); outline(1.2); }
+    circle(x, y, r * 0.3); fill(cols[2]); outline(1.6);
+    circle(x, y, r * 0.12); fill(cols[0]);
+  };
+  const lobed = (x, y, r, lobes, depth, rot = 0) => {
+    c.beginPath();
+    for (let i = 0; i <= 240; i++) {
+      const t = (i / 240) * Math.PI * 2;
+      const rr = r * (1 - depth + depth * Math.abs(Math.cos((t * lobes) / 2 + rot)));
+      const px = x + Math.cos(t) * rr, py = y + Math.sin(t) * rr;
+      i ? c.lineTo(px, py) : c.moveTo(px, py);
+    }
+    c.closePath();
+  };
+  const star = (x, y, r1, r2, n, rot = 0) => {
+    c.beginPath();
+    for (let i = 0; i < n * 2; i++) {
+      const t = rot + (i / (n * 2)) * Math.PI * 2, r = i % 2 ? r2 : r1;
+      i ? c.lineTo(x + Math.cos(t) * r, y + Math.sin(t) * r) : c.moveTo(x + Math.cos(t) * r, y + Math.sin(t) * r);
+    }
+    c.closePath();
+  };
+  const palmette = (x, y, s, a, cols) => {
+    for (let i = -2; i <= 2; i++) { petalPath(x, y, s * (1 - Math.abs(i) * 0.12), s * 0.2, a + i * 0.32); fill(i % 2 ? cols[1] : cols[0]); outline(1.4); }
+    circle(x, y, s * 0.22); fill(cols[2]); outline(1.4);
+  };
+  const boteh = (x, y, s, a, cols) => {
+    c.save(); c.translate(x, y); c.rotate(a); c.scale(s, s);
+    c.beginPath();
+    c.moveTo(0, 0.5);
+    c.bezierCurveTo(-0.55, 0.45, -0.5, -0.25, 0, -0.35);
+    c.bezierCurveTo(0.25, -0.42, 0.42, -0.62, 0.3, -0.8);
+    c.bezierCurveTo(0.7, -0.55, 0.62, 0.45, 0, 0.5);
+    c.closePath();
+    c.restore();
+    fill(cols[0]); outline(1.6);
+    c.save(); c.translate(x, y); c.rotate(a); c.scale(s * 0.55, s * 0.55);
+    c.beginPath(); c.moveTo(0, 0.5); c.bezierCurveTo(-0.55, 0.45, -0.5, -0.25, 0, -0.35); c.bezierCurveTo(0.55, -0.3, 0.6, 0.45, 0, 0.5); c.closePath();
+    c.restore();
+    fill(cols[1]); outline(1.1);
+    circle(x, y + s * 0.08, s * 0.09); fill(cols[2]);
+  };
+  const leaf = (x, y, len, a, col) => { petalPath(x, y, len, len * 0.28, a); fill(col); outline(1.2); };
+
+  // Base
+  c.fillStyle = pal.field;
+  c.fillRect(0, top, W, BH);
+
+  // ── Field pattern ──
+  const margin = 196;                 // border width, total
+  const fx0 = margin, fx1 = W - margin, fy0 = top + margin, fy1 = bottom - margin;
+  const style = pick(['trellis', 'herati', 'boteh']);
+  c.save();
+  c.beginPath(); c.rect(fx0, fy0, fx1 - fx0, fy1 - fy0); c.clip();
+  if (style === 'trellis') {
+    const s = 92;
+    c.strokeStyle = pal.dark; c.lineWidth = 3;
+    for (let k = -20; k < 40; k++) {
+      c.beginPath(); c.moveTo(fx0 + k * s, fy0); c.lineTo(fx0 + k * s + (fy1 - fy0), fy1); c.stroke();
+      c.beginPath(); c.moveTo(fx0 + k * s, fy0); c.lineTo(fx0 + k * s - (fy1 - fy0), fy1); c.stroke();
+    }
+    for (let y = fy0 - s; y < fy1 + s; y += s / 2) for (let x = fx0 - s; x < fx1 + s; x += s) {
+      const ox = ((Math.round((y - fy0) / (s / 2)) % 2) ? s / 2 : 0);
+      rosette(x + ox, y, 15, 6, [pal.ivory, pal.gold, pal.rose]);
+      for (let i = 0; i < 4; i++) leaf(x + ox, y, 26, i * Math.PI / 2 + Math.PI / 4, pal.teal);
+    }
+  } else if (style === 'herati') {
+    const s = 84;
+    for (let y = fy0; y < fy1 + s; y += s) for (let x = fx0; x < fx1 + s; x += s) {
+      const ox = (Math.round((y - fy0) / s) % 2) ? s / 2 : 0;
+      for (let i = 0; i < 4; i++) leaf(x + ox, y, 34, i * Math.PI / 2 + 0.35, i % 2 ? pal.teal : pal.sky);
+      star(x + ox, y, 11, 6, 4); fill(pal.ivory); outline(1.4);
+      rosette(x + ox + s / 2, y + s / 2, 10, 5, [pal.gold, pal.rose, pal.ivory]);
+    }
+  } else {
+    const s = 96;
+    let row = 0;
+    for (let y = fy0; y < fy1 + s; y += s * 0.75, row++) for (let x = fx0; x < fx1 + s; x += s) {
+      const ox = row % 2 ? s / 2 : 0;
+      boteh(x + ox, y, 40, row % 2 ? 0.4 : -0.4, row % 2 ? [pal.ivory, pal.rose, pal.dark] : [pal.gold, pal.teal, pal.ivory]);
+    }
+  }
+  c.restore();
+
+  // ── Spandrels: quarter medallions in the field's corners ──
+  for (const [sx, sy] of [[fx0, fy0], [fx1, fy0], [fx0, fy1], [fx1, fy1]]) {
+    c.save();
+    c.beginPath(); c.rect(fx0, fy0, fx1 - fx0, fy1 - fy0); c.clip();
+    lobed(sx, sy, 210, 14, 0.14); fill(pal.ivory); outline(3);
+    lobed(sx, sy, 150, 10, 0.18); fill(pal.border); outline(2.2);
+    const inward = Math.atan2(sy > fy0 ? -1 : 1, sx > fx0 ? -1 : 1);
+    for (let i = 0; i < 9; i++) {
+      const t = inward - Math.PI / 4 + (i / 8) * Math.PI / 2;
+      palmette(sx + Math.cos(t) * 108, sy + Math.sin(t) * 108, 24, t, [pal.gold, pal.rose, pal.ivory]);
+    }
+    rosette(sx, sy, 58, 8, [pal.gold, pal.field, pal.ivory]);
+    c.restore();
+  }
+
+  // ── Central medallion with pendants ──
+  const cx = W / 2, cy = top + BH / 2;
+  for (const dir of [-1, 1]) {
+    const py = cy + dir * 330;
+    c.beginPath(); c.moveTo(cx - 10, cy + dir * 200); c.lineTo(cx + 10, cy + dir * 200); c.lineTo(cx + 6, py); c.lineTo(cx - 6, py); c.closePath();
+    fill(pal.ivory); outline(2);
+    lobed(cx, py, 62, 8, 0.2); fill(pal.ivory); outline(2.6);
+    lobed(cx, py, 40, 6, 0.2); fill(pal.teal); outline(2);
+    rosette(cx, py, 24, 6, [pal.gold, pal.rose, pal.ivory]);
+    palmette(cx, py + dir * 64, 30, dir > 0 ? Math.PI / 2 : -Math.PI / 2, [pal.gold, pal.rose, pal.dark]);
+  }
+  lobed(cx, cy, 262, 16, 0.12); fill(pal.ivory); outline(3.4);
+  lobed(cx, cy, 232, 16, 0.12); fill(pal.border); outline(2.4);
+  for (let i = 0; i < 16; i++) {
+    const t = (i / 16) * Math.PI * 2;
+    palmette(cx + Math.cos(t) * 190, cy + Math.sin(t) * 190, 30, t, i % 2 ? [pal.gold, pal.rose, pal.ivory] : [pal.ivory, pal.sky, pal.gold]);
+  }
+  circle(cx, cy, 150); fill(pal.guard); outline(2.6);
+  for (let i = 0; i < 24; i++) { const t = (i / 24) * Math.PI * 2; circle(cx + Math.cos(t) * 136, cy + Math.sin(t) * 136, 5); fill(pal.ivory); }
+  star(cx, cy, 124, 84, 8, Math.PI / 8); fill(pal.ivory); outline(2.6);
+  star(cx, cy, 98, 70, 8); fill(pal.teal); outline(2);
+  for (let i = 0; i < 8; i++) { const t = (i / 8) * Math.PI * 2; leaf(cx, cy, 84, t + Math.PI / 8, pal.gold); }
+  rosette(cx, cy, 48, 8, [pal.ivory, pal.rose, pal.border]);
+
+  // ── Borders ──
+  const band = (inset, width, bg) => {
+    c.fillStyle = bg;
+    c.beginPath();
+    c.rect(inset, top + inset, W - 2 * inset, BH - 2 * inset);
+    c.rect(inset + width, top + inset + width, W - 2 * (inset + width), BH - 2 * (inset + width));
+    c.fill('evenodd');
+  };
+  const rule = (inset, col, w = 5) => { c.strokeStyle = col; c.lineWidth = w; c.strokeRect(inset, top + inset, W - 2 * inset, BH - 2 * inset); };
+  // Walks a motif around a band: calls fn(x, y, angle) at even spacing on each side
+  const around = (inset, spacing, fn) => {
+    const x0 = inset, x1 = W - inset, y0 = top + inset, y1 = bottom - inset;
+    for (const [ax, ay, bx, by, ang] of [[x0, y0, x1, y0, 0], [x1, y0, x1, y1, Math.PI / 2], [x1, y1, x0, y1, Math.PI], [x0, y1, x0, y0, -Math.PI / 2]]) {
+      const len = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.round(len / spacing));
+      for (let i = 0; i < n; i++) { const t = (i + 0.5) / n; fn(ax + (bx - ax) * t, ay + (by - ay) * t, ang, i); }
+    }
+  };
+
+  band(0, 16, pal.dark);                                  // overcast edge
+  band(16, 30, pal.ivory);                                // outer guard
+  around(31, 30, (x, y, a, i) => { star(x, y, 9, 4, 4, a); fill(i % 2 ? pal.guard : pal.teal); });
+  rule(46, pal.dark, 4);
+  band(48, 104, pal.border);                              // main border
+  {
+    // Meandering vine through the main border
+    const mid = 100;
+    c.strokeStyle = pal.gold; c.lineWidth = 5;
+    around(mid, 6, (x, y, a, i) => {
+      const off = Math.sin(i * 0.33) * 22;
+      const nx = -Math.sin(a), ny = Math.cos(a);
+      c.beginPath(); circle(x + nx * off, y + ny * off, 2.6); c.fillStyle = pal.gold; c.fill();
+    });
+    around(mid, 96, (x, y, a, i) => {
+      if (i % 2) palmette(x, y, 34, a + Math.PI / 2, [pal.ivory, pal.rose, pal.gold]);
+      else rosette(x, y, 28, 8, [pal.ivory, pal.guard, pal.gold]);
+    });
+    for (const [x, y] of [[mid, top + mid], [W - mid, top + mid], [mid, bottom - mid], [W - mid, bottom - mid]]) {
+      lobed(x, y, 40, 8, 0.2); fill(pal.ivory); outline(2.4);
+      rosette(x, y, 26, 8, [pal.gold, pal.guard, pal.ivory]);
+    }
+  }
+  rule(152, pal.dark, 4);
+  band(154, 30, pal.guard);                               // inner guard
+  around(169, 26, (x, y, a, i) => { circle(x, y, 6); fill(i % 2 ? pal.ivory : pal.gold); outline(1.2); });
+  rule(184, pal.ivory, 5);
+  rule(192, pal.dark, 3);
+
+  // ── Abrash: natural dye lots show as soft horizontal bands ──
+  c.globalCompositeOperation = 'multiply';
+  for (let y = top; y < bottom;) {
+    const h = 30 + rand() * 160, k = 0.86 + rand() * 0.14;
+    c.fillStyle = `rgb(${255 * k}, ${255 * (k + (1 - k) * 0.3)}, ${255 * (k + (1 - k) * 0.5)})`;
+    c.globalAlpha = 0.5 + rand() * 0.5;
+    c.fillRect(0, y, W, h);
+    y += h;
+  }
+  c.globalAlpha = 1;
+  c.globalCompositeOperation = 'source-over';
+
+  // ── Kilim ends and fringe ──
+  for (const [y0, dir] of [[top, -1], [bottom, 1]]) {
+    c.fillStyle = pal.ivory;
+    c.fillRect(0, dir < 0 ? y0 - 18 : y0, W, 18);
+    c.fillStyle = pal.guard;
+    c.fillRect(0, dir < 0 ? y0 - 12 : y0 + 6, W, 4);
+    for (let x = 6; x < W - 4; x += 7) {
+      const len = F - 22 - rand() * 14;
+      const sway = (rand() - 0.5) * 10;
+      const base = dir < 0 ? y0 - 18 : y0 + 18;
+      c.strokeStyle = `hsl(42, ${18 + rand() * 12}%, ${86 + rand() * 8}%)`;
+      c.lineWidth = 3.4;
+      c.beginPath();
+      c.moveTo(x, base);
+      c.quadraticCurveTo(x + sway * 0.4, base + dir * len * 0.5, x + sway, base + dir * len);
+      c.stroke();
+    }
+  }
+  return { canvas, name: pal.name, style };
+}
+
+// ───────────────────────────── Renderer ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH ? 2 : 1.75));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.82;
+
+const quadScene = new THREE.Scene();
+const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+quad.frustumCulled = false;
+quadScene.add(quad);
+
+const target = (filter = THREE.LinearFilter) => new THREE.WebGLRenderTarget(SIM.x, SIM.y, {
+  type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: filter, magFilter: filter, depthBuffer: false,
+});
+// state: water depth, dirt carried in the water, foam, grime in the rug or on the floor
+// flux:  water flowing out to the left, right, down and up
+// soak:  wetness, agitation
+const state = [target(), target()], flux = [target(THREE.NearestFilter), target(THREE.NearestFilter)], soak = [target(), target()];
+const probe = new THREE.WebGLRenderTarget(64, 40, { type: THREE.UnsignedByteType, depthBuffer: false });
+const probePixels = new Uint8Array(64 * 40 * 4);
+
+function run(material, out) {
+  quad.material = material;
+  renderer.setRenderTarget(out);
+  renderer.render(quadScene, quadCam);
+}
+
+// ───────────────────────────── Shaders ─────────────────────────────
+
+const VERT = /* glsl */`
+in vec3 position;
+in vec2 uv;
+out vec2 vUv;
+void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+const COMMON = /* glsl */`
+precision highp float;
+precision highp int;
+uniform vec2 uSim;          // sim size in cells
+uniform vec2 uDomain;       // floor size in world units
+uniform vec2 uRugC;         // rug centre
+uniform vec2 uRugLong;      // rug's long axis
+uniform vec3 uRugSize;      // half length, half width, fringe length
+const float CS = ${((1.6 / 1024) / PX).toFixed(5)};   // cells per desktop-sized cell
+float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; } return s; }
+// Rug-local coordinates: x across, y along; returns body mask in z, rug+fringe mask in w
+vec4 rugLocal(vec2 P) {
+  vec2 d = P - uRugC;
+  vec2 across = vec2(-uRugLong.y, uRugLong.x);
+  float y = dot(d, uRugLong), x = dot(d, across);
+  float body = step(abs(x), uRugSize.y) * step(abs(y), uRugSize.x);
+  float whole = step(abs(x), uRugSize.y) * step(abs(y), uRugSize.x + uRugSize.z);
+  return vec4(x, y, body, whole);
+}
+vec2 cellToWorld(vec2 cell) { return cell / uSim * uDomain; }
+`;
+
+const SIM_COMMON = COMMON + /* glsl */`
+uniform sampler2D uState;
+uniform sampler2D uFlux;
+uniform sampler2D uSoak;
+vec4 S(ivec2 p) { return texelFetch(uState, clamp(p, ivec2(0), ivec2(uSim) - 1), 0); }
+vec4 Fx(ivec2 p) { return texelFetch(uFlux, clamp(p, ivec2(0), ivec2(uSim) - 1), 0); }
+bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(uSim.x) && p.y < int(uSim.y); }
+// Squeegee blade, in cells: centre, push direction, half length
+uniform vec2 uBladeC;
+uniform vec2 uBladeN;
+uniform float uBladeL;
+uniform float uBladeOn;
+bool blocked(vec2 a, vec2 b) {
+  if (uBladeOn < 0.5) return false;
+  vec2 t = vec2(-uBladeN.y, uBladeN.x);
+  float va = dot(a - uBladeC, uBladeN), vb = dot(b - uBladeC, uBladeN);
+  return va * vb <= 0.0 && abs(dot(a - uBladeC, t)) < uBladeL + 1.5;
+}
+`;
+
+const shader = (fragment, uniforms = {}) => new THREE.RawShaderMaterial({
+  glslVersion: THREE.GLSL3, vertexShader: VERT, fragmentShader: fragment, depthTest: false, depthWrite: false,
+  uniforms: {
+    uSim: { value: SIM }, uDomain: { value: DOMAIN },
+    uRugC: { value: DOMAIN.clone().multiplyScalar(0.5) }, uRugLong: { value: RUG_LONG },
+    uRugSize: { value: new THREE.Vector3(RUG.halfLen, RUG.halfWid, RUG.fringe) },
+    uState: { value: null }, uFlux: { value: null }, uSoak: { value: null },
+    uBladeC: { value: new THREE.Vector2() }, uBladeN: { value: new THREE.Vector2(0, 1) }, uBladeL: { value: SQUEEGEE_HALF / PX }, uBladeOn: { value: 0 },
+    ...uniforms,
+  },
+});
+
+// Starting state: a grimy rug, a muddy floor and a few brown puddles
+const initMat = shader(SIM_COMMON + /* glsl */`
+uniform float uSeed;
+out vec4 outColor;
+void main() {
+  vec2 P = cellToWorld(gl_FragCoord.xy);
+  vec4 r = rugLocal(P);
+  vec2 s = vec2(uSeed * 7.13, uSeed * 3.71);
+  float grime;
+  if (r.w > 0.5) {
+    float edge = 1.0 - smoothstep(0.0, 0.12, uRugSize.y - abs(r.x));
+    grime = 0.74 + 0.2 * fbm(P * 5.0 + s) + 0.1 * edge;
+    for (int i = 0; i < 5; i++) {    // a few dark stains
+      vec2 c = uRugC + (vec2(hash12(s + float(i)), hash12(s + float(i) + 9.0)) - 0.5) * vec2(0.8, 0.5) * (uRugLong.x > 0.5 ? vec2(1.0, 1.0) : vec2(0.62, 1.6));
+      float rad = 0.04 + 0.06 * hash12(s + float(i) * 3.0);
+      grime += 0.25 * smoothstep(rad, rad * 0.3, length(P - c) * (0.85 + 0.3 * noise(P * 30.0)));
+    }
+  } else {
+    float d = length(max(abs(vec2(r.x, r.y)) - vec2(uRugSize.y, uRugSize.x + uRugSize.z), 0.0));
+    grime = smoothstep(0.42, 0.75, fbm(P * 2.4 + s)) * 0.55 + 0.4 * exp(-d / 0.07) * fbm(P * 9.0 + s);
+  }
+  // Muddy puddles on the tiles, already as dirty as water gets, kept clear of the rug
+  vec2 q = abs(vec2(r.x, r.y)) - vec2(uRugSize.y, uRugSize.x + uRugSize.z);
+  float clearOfRug = smoothstep(0.02, 0.08, length(max(q, 0.0)));
+  float puddle = smoothstep(0.58, 0.74, fbm(P * 1.7 + s + 11.0)) * clearOfRug;
+  float h = 0.035 * puddle;
+  outColor = vec4(h, h * 1.2, 0.0, clamp(grime, 0.0, 1.0));
+}`, { uSeed: { value: 1 } });
+const zeroMat = shader(`precision highp float; out vec4 outColor; void main() { outColor = vec4(0.0); }`);
+
+// Virtual-pipe shallow water: every cell pushes water to lower neighbours, with momentum
+const fluxMat = shader(SIM_COMMON + /* glsl */`
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 s = S(p);
+  float h = s.x;
+  if (h < 0.0012) { outColor = vec4(0.0); return; }   // a thin film stays put
+  vec4 r = rugLocal(cellToWorld(gl_FragCoord.xy));
+  ivec2 dirs[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+  vec4 f = Fx(p);
+  float damp = mix(0.96, 0.82, r.z);            // the pile holds water back
+  float k = mix(0.7, 0.3, r.z);
+  float o[4];
+  for (int i = 0; i < 4; i++) {
+    ivec2 q = p + dirs[i];
+    float hn = inside(q) ? S(q).x : 0.0;
+    float v = max(0.0, f[i] * damp + k * (h - hn) * 0.25);
+    if (blocked(gl_FragCoord.xy, gl_FragCoord.xy + vec2(dirs[i]))) v = 0.0;
+    o[i] = v;
+  }
+  float total = o[0] + o[1] + o[2] + o[3];
+  float scale = total > h * 0.98 ? h * 0.98 / total : 1.0;
+  outColor = vec4(o[0], o[1], o[2], o[3]) * scale;
+}`);
+
+// Moves water (and the dirt and foam it carries), adds tool effects, dissolves grime
+const stateMat = shader(SIM_COMMON + /* glsl */`
+uniform vec3 uPour;     // cell x, cell y, rate (per step)
+uniform vec4 uBrush;    // cell x, cell y, radius, strength
+uniform float uDt;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 s = S(p);
+  vec4 f = Fx(p);
+  float h = s.x, m = s.y, foam = s.z, d = s.w;
+  float outflow = f.x + f.y + f.z + f.w;
+  float c = m / max(h, 1e-4), fc = foam / max(h, 0.01);
+  float h2 = h - outflow, m2 = m - outflow * c, foam2 = foam - outflow * min(fc, 1.5);
+  ivec2 nb[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+  int back[4] = int[4](0, 1, 2, 3);   // neighbour to my right sends its left flux, etc.
+  for (int i = 0; i < 4; i++) {
+    ivec2 q = p + nb[i];
+    if (!inside(q)) continue;
+    float inflow = Fx(q)[back[i]];
+    vec4 sq = S(q);
+    h2 += inflow;
+    m2 += inflow * sq.y / max(sq.x, 1e-4);
+    foam2 += inflow * min(sq.z / max(sq.x, 0.01), 1.5);
+  }
+
+  vec2 cell = gl_FragCoord.xy;
+  vec4 r = rugLocal(cellToWorld(cell));
+  // Watering can: soapy water, with a little foam
+  if (uPour.z > 0.0) {
+    float g = exp(-dot(cell - uPour.xy, cell - uPour.xy) / (40.0 * 40.0 * CS * CS));
+    h2 += uPour.z * g;
+    foam2 += uPour.z * g * 0.015;
+  }
+  float agit = texelFetch(uSoak, p, 0).y;
+  // Brush: froths soapy water
+  if (uBrush.w > 0.0) {
+    float g = exp(-dot(cell - uBrush.xy, cell - uBrush.xy) / (uBrush.z * uBrush.z));
+    foam2 += uBrush.w * g * min(h2, 0.05) * 0.5;
+  }
+  // Grime lets go into the water: slowly when soaking, fast when worked
+  float wet = smoothstep(0.0, 0.012, h2);
+  float rate = (0.22 + 2.8 * agit) * wet * mix(1.6, 1.0, r.w) * uDt;
+  float capacity = max(0.0, (1.2 * h2 - m2) / 0.22);
+  float dd = min(d * rate, capacity);
+  d -= dd;
+  m2 += dd * 0.22;
+
+  foam2 *= exp(-0.5 * uDt);
+  outColor = vec4(max(h2, 0.0), clamp(m2, 0.0, max(h2, 0.0) * 1.3), max(foam2, 0.0), d);
+}`, { uPour: { value: new THREE.Vector3() }, uBrush: { value: new THREE.Vector4() }, uDt: { value: 1 / 240 } });
+
+// Wetness lingers in the pile; agitation comes from the brush, the stream and the blade
+const soakMat = shader(SIM_COMMON + /* glsl */`
+uniform vec3 uPour;
+uniform vec4 uBrush;
+uniform vec4 uSweep;     // squeegee this frame: from, to (cells)
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 w = texelFetch(uSoak, p, 0);
+  vec4 s = S(p);
+  vec2 cell = gl_FragCoord.xy;
+  vec4 r = rugLocal(cellToWorld(cell));
+  float wet = max(w.x - mix(0.004, 0.0006, r.w), smoothstep(0.001, 0.015, s.x));
+  float agit = w.y * 0.9;
+  if (uPour.z > 0.0) agit += 0.25 * exp(-dot(cell - uPour.xy, cell - uPour.xy) / (24.0 * 24.0 * CS * CS));
+  if (uBrush.w > 0.0) agit += uBrush.w * exp(-dot(cell - uBrush.xy, cell - uBrush.xy) / (uBrush.z * uBrush.z));
+  // The pile remembers which way it was last combed, and slowly springs back
+  vec2 comb = w.zw * mix(0.9995, 0.9985, wet);
+  if (uBladeOn > 0.5) {
+    vec2 t = vec2(-uBladeN.y, uBladeN.x);
+    float v = dot(cell - uSweep.zw, uBladeN), u = dot(cell - uSweep.zw, t);
+    float len = length(uSweep.zw - uSweep.xy);
+    if (abs(u) < uBladeL && v <= 2.0 && v >= -len - 2.0) { agit += 0.35; comb = mix(comb, uBladeN, 0.85); }
+  }
+  if (uBrush.w > 0.0) {
+    float g = exp(-dot(cell - uBrush.xy, cell - uBrush.xy) / (uBrush.z * uBrush.z));
+    comb *= 1.0 - 0.25 * g;
+  }
+  outColor = vec4(wet, min(agit, 1.5), comb);
+}`, { uPour: { value: new THREE.Vector3() }, uBrush: { value: new THREE.Vector4() }, uSweep: { value: new THREE.Vector4() } });
+
+// One step of the squeegee: whatever it passes over is gathered into a wave just ahead of the blade
+const squeegeeMat = shader(SIM_COMMON + /* glsl */`
+uniform float uDelta;   // distance moved this step, in cells
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 s = S(p);
+  vec2 P = gl_FragCoord.xy;
+  vec2 t = vec2(-uBladeN.y, uBladeN.x);
+  float u = dot(P - uBladeC, t), v = dot(P - uBladeC, uBladeN);
+  float edge = smoothstep(uBladeL, uBladeL - 3.0, abs(u));
+  if (edge <= 0.0) { outColor = s; return; }
+  const float BAND = 28.0 * CS, FALL = 9.0 * CS;
+  if (v >= -uDelta && v <= 0.0) {
+    // Swept: a damp film is all that is left behind
+    vec3 keep = mix(vec3(1.0), vec3(0.02, 0.02, 0.25), edge);
+    outColor = vec4(s.xyz * keep, s.w);
+    return;
+  }
+  if (v > 0.0 && v <= BAND) {
+    vec3 gathered = vec3(0.0);
+    for (int k = 0; k < 4; k++) {
+      float vk = -uDelta * (float(k) + 0.5) / 4.0;
+      vec4 q = S(ivec2(floor(uBladeC + t * u + uBladeN * vk)));
+      gathered += q.xyz;
+    }
+    gathered *= uDelta / 4.0;
+    float w = exp(-v / FALL) / (FALL * (1.0 - exp(-BAND / FALL)));
+    outColor = vec4(s.xyz + gathered * vec3(0.98, 0.98, 0.75) * w * edge, s.w);
+    return;
+  }
+  outColor = s;
+}`, { uDelta: { value: 0 } });
+
+// Averages over the rug for the "% clean" read-out
+const probeMat = shader(SIM_COMMON + /* glsl */`
+out vec4 outColor;
+void main() {
+  vec2 base = floor(gl_FragCoord.xy) / vec2(64.0, 40.0);
+  float grime = 0.0, rug = 0.0, water = 0.0;
+  for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) {
+    vec2 uv = base + (vec2(i, j) + 0.5) / vec2(256.0, 160.0);
+    vec2 P = uv * uDomain;
+    vec4 r = rugLocal(P);
+    vec4 s = texture(uState, uv);
+    grime += min(1.0, s.w + s.y / 0.22) * r.z; rug += r.z; water += s.x;
+  }
+  outColor = vec4(rug > 0.0 ? grime / rug : 0.0, rug / 16.0, min(1.0, water / 16.0 * 8.0), 1.0);
+}`);
+
+// ───────────────────────────── Scene ─────────────────────────────
+
+// The floor lies in x/z. Sim coordinates P map to world (P.x, y, DOMAIN.y - P.y),
+// so "up" on the sim is away from the camera.
+const RUG_BASE_Y = 0.005;          // backing thickness
+const PILE = 0.017;                // pile height
+const WATER_SCALE = 0.09;          // sim water depth to world height
+const toWorld3 = (p, y = 0) => new THREE.Vector3(p.x, y, DOMAIN.y - p.y);
+const dirToWorld = (d) => new THREE.Vector3(d.x, 0, -d.y);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a2724);
+const camera = new THREE.PerspectiveCamera(32, 1, 0.02, 20);
+{
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromScene(new RoomEnvironment(), 0.03).texture;
+  pm.dispose();
+}
+
+// One light rig, shared by the custom shaders and three's materials
+const LIGHT = {
+  key: { dir: new THREE.Vector3(0.45, 1.0, 0.5).normalize(), color: new THREE.Color(1.0, 0.95, 0.88).multiplyScalar(1.7) },
+  fill: { dir: new THREE.Vector3(-0.85, 0.45, 0.35).normalize(), color: new THREE.Color(0.72, 0.8, 1.0).multiplyScalar(0.55) },
+  rim: { dir: new THREE.Vector3(-0.25, 0.55, -1.0).normalize(), color: new THREE.Color(1.0, 0.9, 0.82).multiplyScalar(1.1) },
+  sky: new THREE.Color(0.86, 0.88, 0.95).multiplyScalar(0.42),
+  ground: new THREE.Color(0.62, 0.56, 0.5).multiplyScalar(0.28),
+};
+for (const l of [LIGHT.key, LIGHT.fill, LIGHT.rim]) {
+  const d = new THREE.DirectionalLight(l.color, Math.PI * 0.7);   // three's lit materials divide by PI
+  d.position.copy(l.dir).multiplyScalar(5);
+  scene.add(d);
+}
+scene.add(new THREE.HemisphereLight(LIGHT.sky, LIGHT.ground, Math.PI));
+
+const v3 = (c) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`;
+const d3 = (d) => `vec3(${d.x.toFixed(4)}, ${d.y.toFixed(4)}, ${d.z.toFixed(4)})`;
+const LIGHT_GLSL = /* glsl */`
+const vec3 KEY_DIR = ${d3(LIGHT.key.dir)}, KEY_COL = ${v3(LIGHT.key.color)};
+const vec3 FILL_DIR = ${d3(LIGHT.fill.dir)}, FILL_COL = ${v3(LIGHT.fill.color)};
+const vec3 RIM_DIR = ${d3(LIGHT.rim.dir)}, RIM_COL = ${v3(LIGHT.rim.color)};
+const vec3 SKY = ${v3(LIGHT.sky)}, GROUND = ${v3(LIGHT.ground)};
+// A studio to reflect: dim walls, a big softbox overhead, a window strip to the left
+vec3 envColor(vec3 R) {
+  vec3 c = mix(vec3(0.16, 0.15, 0.14), vec3(0.62, 0.63, 0.66), smoothstep(-0.2, 0.7, R.y));
+  vec2 q = R.xz / max(R.y, 0.08);
+  c += vec3(2.4, 2.3, 2.15) * smoothstep(0.55, 0.42, max(abs(q.x - 0.1) * 0.8, abs(q.y + 0.62))) * step(0.0, R.y);
+  c += vec3(1.3, 1.4, 1.6) * smoothstep(0.22, 0.0, abs(R.x + 0.75)) * smoothstep(0.05, 0.3, R.y) * smoothstep(0.85, 0.55, R.y);
+  return c;
+}
+float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+`;
+// The shared GLSL from the simulation, minus its precision lines (ShaderMaterial adds its own)
+const SHARED_GLSL = COMMON.replace(/precision[^;]*;/g, '');
+const rugUniforms = () => ({
+  uDomain: { value: DOMAIN }, uSim: { value: SIM },
+  uRugC: { value: DOMAIN.clone().multiplyScalar(0.5) }, uRugLong: { value: RUG_LONG },
+  uRugSize: { value: new THREE.Vector3(RUG.halfLen, RUG.halfWid, RUG.fringe) },
+  uState: { value: null }, uSoak: { value: null },
+});
+
+// ───────────────────────────── Floor ─────────────────────────────
+
+const floorMat = new THREE.ShaderMaterial({
+  uniforms: rugUniforms(),
+  vertexShader: /* glsl */`
+    varying vec3 vWorld;
+    void main() { vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: SHARED_GLSL + LIGHT_GLSL + /* glsl */`
+    uniform sampler2D uState;
+    uniform sampler2D uSoak;
+    varying vec3 vWorld;
+    void main() {
+      vec2 P = vec2(vWorld.x, uDomain.y - vWorld.z);
+      vec2 uv = P / uDomain;
+      vec4 s = texture2D(uState, uv);
+      vec4 k = texture2D(uSoak, uv);
+      // Glazed tiles with crisp grout and a soft bevel
+      const float TILE = 0.3, GROUT = 0.0017;
+      vec2 g = (P + vec2(0.07, 0.11)) / TILE, id = floor(g), f = fract(g);
+      vec2 e2 = min(f, 1.0 - f) * TILE;
+      float edge = min(e2.x, e2.y);
+      float aa = fwidth(edge) * 0.75 + 1e-6;
+      float grout = 1.0 - smoothstep(GROUT - aa, GROUT + aa, edge);
+      float bevel = smoothstep(GROUT, GROUT + 0.006, edge);
+      vec3 tile = vec3(0.86, 0.85, 0.82) * (0.955 + 0.07 * hash12(id));
+      float vein = abs(fbm(P * 4.0 + id * 3.1) - 0.5);
+      tile *= 1.0 - 0.07 * smoothstep(0.035, 0.0, vein);
+      vec3 alb = mix(tile, vec3(0.5, 0.47, 0.43), grout);
+      vec2 toward = vec2(f.x < 0.5 ? -1.0 : 1.0, f.y < 0.5 ? -1.0 : 1.0) * vec2(step(e2.x, e2.y), step(e2.y, e2.x));
+      vec3 N = normalize(vec3(toward.x * (1.0 - bevel) * 0.5, 1.0, -toward.y * (1.0 - bevel) * 0.5));
+      // Mud film, darker where wet
+      float grime = s.w;
+      vec3 mud = vec3(0.34, 0.25, 0.16) * (0.75 + 0.5 * fbm(P * 55.0));
+      alb = mix(alb, mud, smoothstep(0.03, 0.9, grime) * 0.85);
+      float wet = k.x;
+      alb *= mix(1.0, 0.8, wet);
+      // The rug sits on the floor and shades it
+      vec4 r = rugLocal(P);
+      vec2 qd = abs(r.xy) - vec2(uRugSize.y, uRugSize.x + uRugSize.z * 0.3);
+      float out1 = length(max(qd, 0.0));
+      float ao = 1.0 - 0.5 * exp(-out1 / 0.012) * step(0.0, max(qd.x, qd.y));
+      vec3 V = normalize(cameraPosition - vWorld);
+      vec3 col = alb * (SKY * 1.1 + KEY_COL * max(dot(N, KEY_DIR), 0.0) * 0.5 + FILL_COL * max(dot(N, FILL_DIR), 0.0) * 0.6) * ao;
+      float gloss = mix(mix(0.5, 0.04, grout), 1.0, wet) * (1.0 - smoothstep(0.1, 0.9, grime) * 0.75);
+      float F = 0.04 + 0.96 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+      col += envColor(reflect(-V, N)) * F * gloss * ao;
+      col += KEY_COL * pow(max(dot(N, normalize(KEY_DIR + V)), 0.0), mix(90.0, 600.0, wet)) * gloss * 0.5;
+      gl_FragColor = vec4(col, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+});
+{
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(DOMAIN.x + 3, DOMAIN.y + 3), floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(DOMAIN.x / 2, 0, DOMAIN.y / 2);
+  scene.add(floor);
+}
+
+// ───────────────────────────── Rug ─────────────────────────────
+
+const rugTexUniform = { value: null };
+const rugCentre = toWorld3(DOMAIN.clone().multiplyScalar(0.5));
+const rugSizeX = PORTRAIT ? RUG.halfWid * 2 : RUG.halfLen * 2;
+const rugSizeZ = PORTRAIT ? RUG.halfLen * 2 : RUG.halfWid * 2;
+
+// Backing: the woven base you glimpse between tufts, and the bound edge
+const edgeMat = new THREE.MeshStandardMaterial({ color: 0x2a1c16, roughness: 0.9 });
+const rugEdge = new THREE.Mesh(new RoundedBoxGeometry(rugSizeX + 0.006, RUG_BASE_Y, rugSizeZ + 0.006, 2, 0.002), edgeMat);
+rugEdge.position.set(rugCentre.x, RUG_BASE_Y / 2, rugCentre.z);
+scene.add(rugEdge);
+const baseMat = new THREE.ShaderMaterial({
+  uniforms: { ...rugUniforms(), uRug: rugTexUniform },
+  vertexShader: /* glsl */`
+    varying vec3 vWorld;
+    void main() { vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: SHARED_GLSL + LIGHT_GLSL + /* glsl */`
+    uniform sampler2D uState;
+    uniform sampler2D uRug;
+    varying vec3 vWorld;
+    void main() {
+      vec2 P = vec2(vWorld.x, uDomain.y - vWorld.z);
+      vec4 r = rugLocal(P);
+      vec2 uv = vec2(r.x / (2.0 * uRugSize.y) + 0.5, r.y / (2.0 * (uRugSize.x + uRugSize.z)) + 0.5);
+      vec3 c = texture2D(uRug, uv).rgb * 0.32;
+      float grime = texture2D(uState, P / uDomain).w;
+      c = mix(c, vec3(0.13, 0.11, 0.09), smoothstep(0.05, 0.9, grime) * 0.8);
+      gl_FragColor = vec4(c * (SKY + KEY_COL * 0.25), 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+});
+{
+  const base = new THREE.Mesh(new THREE.PlaneGeometry(rugSizeX, rugSizeZ), baseMat);
+  base.rotation.x = -Math.PI / 2;
+  base.position.set(rugCentre.x, RUG_BASE_Y + 0.0002, rugCentre.z);
+  scene.add(base);
+}
+
+// Pile: tufts of yarn, each a cluster of fibres sharing one knot's colour.
+// Every fibre is a camera-facing ribbon bent along a curve, lit like hair.
+const BLADE_UNIFORMS = {
+  uBladeP: { value: new THREE.Vector2(-9, -9) }, uBladeN: { value: new THREE.Vector2(0, 1) },
+  uBladeHalf: { value: SQUEEGEE_HALF }, uBladeOn: { value: 0 },
+  uBrushP: { value: new THREE.Vector3(-9, -9, 0) },
+};
+const pileMat = new THREE.ShaderMaterial({
+  uniforms: { ...rugUniforms(), uRug: rugTexUniform, uTime: { value: 0 }, uBaseY: { value: RUG_BASE_Y }, ...BLADE_UNIFORMS },
+  side: THREE.DoubleSide,
+  alphaToCoverage: true,
+  vertexShader: SHARED_GLSL + /* glsl */`
+    uniform sampler2D uState;
+    uniform sampler2D uSoak;
+    uniform sampler2D uRug;
+    uniform float uTime, uBaseY;
+    uniform vec2 uBladeP, uBladeN;
+    uniform float uBladeHalf, uBladeOn;
+    uniform vec3 uBrushP;
+    attribute vec4 aRoot;    // P.x, P.y, random, random
+    attribute vec4 aTuft;    // tuft centre P.x, P.y, colour uv
+    attribute vec4 aShape;   // length, width, kind (0 pile, 1 fringe), fringe side
+    varying vec3 vColor;
+    varying vec3 vTangent;
+    varying vec3 vWorld;
+    varying float vT;
+    varying vec4 vDirt;      // grime, dirty water in the pile, wetness, foam
+    void main() {
+      float t = position.y, side = position.x;
+      vec2 P = aRoot.xy;
+      vec2 suv = P / uDomain;
+      vec4 s = texture2D(uState, suv);
+      vec4 k = texture2D(uSoak, suv);
+      float wet = k.x, rnd = aRoot.z, rnd2 = aRoot.w;
+      vec3 root = vec3(P.x, uBaseY, uDomain.y - P.y);
+      float len = aShape.x;
+      vec3 P1, P2;
+      if (aShape.z < 0.5) {
+        vec2 away = P - aTuft.xy;
+        float al = length(away);
+        away = al > 1e-6 ? away / al : vec2(0.0);
+        vec2 nap = vec2(cos(rnd * 6.2831), sin(rnd * 6.2831)) * 0.16 + uRugLong * 0.12;
+        vec2 lean = away * (0.45 + 0.35 * rnd2) + nap + k.zw * 0.85;
+        // Wet yarn clumps into points and lies down the way it was combed
+        lean = mix(lean, k.zw * 1.05 + nap * 0.5 - away * 0.2, wet * 0.75);
+        lean += vec2(sin(uTime * 1.2 + rnd * 6.28 + P.x * 18.0), cos(uTime * 0.9 + rnd2 * 6.28)) * 0.03 * (1.0 - wet);
+        if (uBladeOn > 0.5) {   // pressed flat under the squeegee
+          vec2 tb = vec2(-uBladeN.y, uBladeN.x);
+          float u = dot(P - uBladeP, tb), v = dot(P - uBladeP, uBladeN);
+          float f = smoothstep(uBladeHalf, uBladeHalf - 0.01, abs(u)) * smoothstep(0.04, 0.0, v) * smoothstep(-0.02, 0.0, v);
+          lean += uBladeN * f * 2.6;
+          len *= 1.0 - 0.6 * f;
+        }
+        if (uBrushP.z > 0.5) {  // ruffled by the bristles
+          float f = exp(-dot(P - uBrushP.xy, P - uBrushP.xy) / 0.003);
+          lean += vec2(sin(uTime * 38.0 + rnd * 20.0), cos(uTime * 33.0 + rnd2 * 20.0)) * f;
+          len *= 1.0 - 0.35 * f;
+        }
+        len *= 1.0 - 0.3 * wet;
+        vec3 dir = normalize(vec3(lean.x, 1.0, -lean.y));
+        P1 = root + vec3(0.0, len * 0.55, 0.0) + vec3(dir.x, 0.0, dir.z) * len * 0.12;
+        P2 = root + dir * len;
+      } else {
+        // Fringe: cotton warps lying on the floor beyond the rug's ends
+        vec2 o = uRugLong * aShape.w;
+        vec2 wob = vec2(-o.y, o.x) * (rnd - 0.5) * 0.5;
+        vec3 out3 = normalize(vec3(o.x + wob.x, 0.0, -(o.y + wob.y)));
+        P1 = root + out3 * len * 0.35 + vec3(0.0, 0.002, 0.0);
+        P2 = root + out3 * len;
+        P2.y = 0.0012;
+      }
+      float it = 1.0 - t;
+      vec3 pos = it * it * root + 2.0 * it * t * P1 + t * t * P2;
+      vec3 tg = normalize(2.0 * it * (P1 - root) + 2.0 * t * (P2 - P1));
+      vec3 V = normalize(cameraPosition - pos);
+      vec3 sideV = cross(tg, V);
+      float sl = length(sideV);
+      sideV = sl > 1e-5 ? sideV / sl : vec3(1.0, 0.0, 0.0);
+      pos += sideV * side * aShape.y * (1.0 - 0.75 * t) * 0.5;
+      vT = t;
+      vTangent = tg;
+      vWorld = pos;
+      vColor = texture2D(uRug, aTuft.zw).rgb * (0.86 + 0.26 * rnd);
+      float conc = clamp(s.y / max(s.x, 1e-4), 0.0, 1.0);
+      vDirt = vec4(s.w, conc * smoothstep(0.0, 0.022, s.x), wet, s.z);
+      gl_Position = projectionMatrix * viewMatrix * vec4(pos, 1.0);
+    }`,
+  fragmentShader: LIGHT_GLSL + /* glsl */`
+    varying vec3 vColor;
+    varying vec3 vTangent;
+    varying vec3 vWorld;
+    varying float vT;
+    varying vec4 vDirt;
+    // Hair shading: wrapped diffuse plus two shifted highlights along the fibre
+    vec3 fibre(vec3 L, vec3 C, vec3 T, vec3 N, vec3 V, vec3 alb, float ao, float shine) {
+      float wrap = clamp((dot(N, L) + 0.5) / 1.5, 0.0, 1.0);
+      float tl = dot(T, L);
+      vec3 diff = alb * wrap * mix(1.0, sqrt(max(0.0, 1.0 - tl * tl)), 0.45) * ao;
+      vec3 H = normalize(L + V);
+      float th1 = dot(normalize(T - N * 0.1), H), th2 = dot(normalize(T + N * 0.25), H);
+      float s1 = pow(sqrt(max(0.0, 1.0 - th1 * th1)), mix(60.0, 220.0, shine)) * mix(0.045, 0.4, shine);
+      float s2 = pow(sqrt(max(0.0, 1.0 - th2 * th2)), 18.0) * 0.08;
+      return C * (diff + (vec3(s1) + alb * s2) * (0.3 + 0.7 * vT));
+    }
+    void main() {
+      vec3 T = normalize(vTangent);
+      vec3 N = vec3(0.0, 1.0, 0.0);
+      vec3 V = normalize(cameraPosition - vWorld);
+      float wet = vDirt.z;
+      vec3 alb = vColor;
+      // Dust settles on the tips; dirty water sits low in the pile
+      vec3 dust = vec3(0.21, 0.18, 0.145) * (0.8 + 0.45 * lum(alb));
+      alb = mix(alb, dust, smoothstep(0.03, 0.85, vDirt.x) * mix(0.84, 0.97, vT));
+      alb = mix(alb, vec3(0.2, 0.13, 0.07), vDirt.y * (1.0 - 0.55 * vT) * 0.85);
+      alb = mix(vec3(lum(alb)), alb, 1.0 + 0.25 * wet) * mix(1.0, 0.58, wet);
+      alb = max(alb, 0.0);
+      float ao = mix(0.12, 1.0, pow(vT, 0.85));
+      vec3 col = alb * mix(GROUND, SKY, 0.7) * ao * 1.1;
+      col += fibre(KEY_DIR, KEY_COL, T, N, V, alb, ao, wet);
+      col += fibre(FILL_DIR, FILL_COL, T, N, V, alb, ao, wet);
+      col += fibre(RIM_DIR, RIM_COL, T, N, V, alb, ao, wet) * 0.7;
+      // Soap suds caught in the pile
+      col = mix(col, vec3(0.9), clamp(vDirt.w * 1.5, 0.0, 0.6) * vT);
+      float alpha = 1.0 - smoothstep(0.55, 1.0, vT) * 0.8;
+      gl_FragColor = vec4(col, alpha);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+});
+
+function buildPile() {
+  const spacing = IS_TOUCH ? 0.0056 : 0.0039;
+  const perTuft = IS_TOUCH ? 5 : 7;
+  const across = new THREE.Vector2(-RUG_LONG.y, RUG_LONG.x);
+  const centre = DOMAIN.clone().multiplyScalar(0.5);
+  const nx = Math.floor((RUG.halfWid * 2) / spacing), ny = Math.floor((RUG.halfLen * 2) / spacing);
+  const fringeStep = 0.0026, fringePer = 2;
+  const nFringe = Math.floor((RUG.halfWid * 2) / fringeStep) * 2 * fringePer;
+  const count = nx * ny * perTuft + nFringe;
+  const root = new Float32Array(count * 4), tuft = new Float32Array(count * 4), shape = new Float32Array(count * 4);
+  const totalLen = 2 * (RUG.halfLen + RUG.fringe);
+  const rand = mulberry(7);
+  let k = 0;
+  const P = new THREE.Vector2();
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const x = -RUG.halfWid + (i + 0.5) * spacing + (rand() - 0.5) * spacing * 0.3;
+    const y = -RUG.halfLen + (j + 0.5) * spacing + (rand() - 0.5) * spacing * 0.3;
+    const u = x / (2 * RUG.halfWid) + 0.5, v = y / totalLen + 0.5;
+    const cx = centre.x + across.x * x + RUG_LONG.x * y, cy = centre.y + across.y * x + RUG_LONG.y * y;
+    const tuftLen = PILE * (0.85 + rand() * 0.3);
+    for (let n = 0; n < perTuft; n++) {
+      const a = rand() * Math.PI * 2, r = Math.sqrt(rand()) * spacing * 0.5;
+      P.set(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      root.set([P.x, P.y, rand(), rand()], k * 4);
+      tuft.set([cx, cy, u, v], k * 4);
+      shape.set([tuftLen * (0.82 + rand() * 0.3), spacing * 0.62 * (0.8 + rand() * 0.4), 0, 0], k * 4);
+      k++;
+    }
+  }
+  const kilim = (RUG_TEX.fringe - 9) / (RUG_TEX.body + 2 * RUG_TEX.fringe);
+  for (const end of [-1, 1]) {
+    for (let x = -RUG.halfWid + fringeStep / 2; x < RUG.halfWid && k < count; x += fringeStep) {
+      for (let n = 0; n < fringePer && k < count; n++) {
+        const xx = x + (rand() - 0.5) * fringeStep * 0.6;
+        const px = centre.x + across.x * xx + RUG_LONG.x * end * RUG.halfLen;
+        const py = centre.y + across.y * xx + RUG_LONG.y * end * RUG.halfLen;
+        root.set([px, py, rand(), rand()], k * 4);
+        tuft.set([px, py, xx / (2 * RUG.halfWid) + 0.5, end < 0 ? kilim : 1 - kilim], k * 4);
+        shape.set([RUG.fringe * (0.8 + rand() * 0.35), 0.0024, 1, end], k * 4);
+        k++;
+      }
+    }
+  }
+  const SEG = 3;
+  const pos = new Float32Array((SEG + 1) * 2 * 3), index = [];
+  for (let i = 0; i <= SEG; i++) {
+    pos.set([-1, i / SEG, 0, 1, i / SEG, 0], i * 6);
+    if (i < SEG) index.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+  }
+  const g = new THREE.InstancedBufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setIndex(index);
+  g.setAttribute('aRoot', new THREE.InstancedBufferAttribute(root, 4));
+  g.setAttribute('aTuft', new THREE.InstancedBufferAttribute(tuft, 4));
+  g.setAttribute('aShape', new THREE.InstancedBufferAttribute(shape, 4));
+  g.instanceCount = k;
+  const mesh = new THREE.Mesh(g, pileMat);
+  mesh.frustumCulled = false;
+  return mesh;
+}
+scene.add(buildPile());
+
+// ───────────────────────────── Water surface ─────────────────────────────
+
+const waterMat = new THREE.ShaderMaterial({
+  uniforms: { ...rugUniforms(), uTime: { value: 0 } },
+  transparent: true,
+  depthWrite: false,
+  vertexShader: SHARED_GLSL + /* glsl */`
+    uniform sampler2D uState;
+    varying vec3 vWorld;
+    varying vec2 vP;
+    void main() {
+      vec4 w = modelMatrix * vec4(position, 1.0);
+      vec2 P = vec2(w.x, uDomain.y - w.z);
+      float h = texture2D(uState, P / uDomain).x;
+      vec4 r = rugLocal(P);
+      float standing = max(0.0, h - 0.022 * r.w);
+      w.y = 0.0012 + h * ${WATER_SCALE.toFixed(3)} + r.z * (${RUG_BASE_Y.toFixed(4)} + ${PILE.toFixed(4)} * mix(0.65, 1.05, smoothstep(0.0, 0.04, standing)));
+      vWorld = w.xyz;
+      vP = P;
+      gl_Position = projectionMatrix * viewMatrix * w;
+    }`,
+  fragmentShader: SHARED_GLSL + LIGHT_GLSL + /* glsl */`
+    uniform sampler2D uState;
+    uniform float uTime;
+    varying vec3 vWorld;
+    varying vec2 vP;
+    float bubbles(vec2 P, float scale, float amount, out vec2 local, out float rad) {
+      vec2 g = P * scale, id = floor(g), f = fract(g);
+      float best = 0.0; local = vec2(0.0); rad = 1.0;
+      for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+        vec2 o = vec2(i, j), cid = id + o;
+        if (hash12(cid + 9.2) > amount) continue;
+        vec2 ctr = o + 0.15 + 0.7 * vec2(hash12(cid + 3.1), hash12(cid + 7.7));
+        float r = 0.2 + 0.32 * hash12(cid + 1.3);
+        float d = length(f - ctr);
+        if (d < r && r - d > best - 1.0) { best = 1.0; local = (f - ctr) / r; rad = r; }
+      }
+      return best;
+    }
+    void main() {
+      vec2 P = vP, uv = P / uDomain;
+      vec4 s = texture2D(uState, uv);
+      vec4 r = rugLocal(P);
+      float standing = s.x - 0.022 * r.w;
+      float vis = smoothstep(0.0012, 0.007, standing);
+      float foam = clamp(s.z * 1.5, 0.0, 0.7) * smoothstep(0.3, 0.7, fbm(P * 22.0 + 3.0) + s.z);
+      if (vis < 0.002 && foam < 0.01) discard;
+      float conc = clamp(s.y / max(s.x, 1e-4), 0.0, 1.3);
+      float e = 3.0 / uSim.x;
+      float hL = texture2D(uState, uv - vec2(e, 0.0)).x, hR = texture2D(uState, uv + vec2(e, 0.0)).x;
+      float hD = texture2D(uState, uv - vec2(0.0, e)).x, hU = texture2D(uState, uv + vec2(0.0, e)).x;
+      float span = 2.0 * e * uDomain.x;
+      vec2 grad = vec2(hR - hL, hU - hD) / span * ${WATER_SCALE.toFixed(3)};
+      // Tiny ripples so the surface catches the light
+      vec2 rip = (vec2(noise(P * 90.0 + uTime * 0.6) - 0.5, noise(P * 90.0 - uTime * 0.5 + 4.0) - 0.5) * 0.12
+               + vec2(noise(P * 260.0 - uTime * 1.2) - 0.5, noise(P * 260.0 + uTime * 1.0 + 9.0) - 0.5) * 0.04) * vis;
+      vec3 N = normalize(vec3(-grad.x + rip.x, 1.0, grad.y + rip.y));
+      vec3 V = normalize(cameraPosition - vWorld);
+      float F = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+      vec3 tea = vec3(0.5, 0.36, 0.2), mudW = vec3(0.22, 0.15, 0.085);
+      vec3 tint = mix(tea, mudW, smoothstep(0.05, 0.4, conc)) * (0.9 + 0.2 * fbm(P * 26.0 + s.x * 30.0));
+      float opacity = (1.0 - exp(-standing * conc * 75.0)) * 0.92;
+      vec3 col = tint * (SKY * 1.1 + KEY_COL * 0.3) * (1.0 - 0.35 * smoothstep(0.0, 0.08, standing));
+      float refl = mix(0.1, 0.035, opacity) + F * 1.2;
+      col = mix(col, envColor(reflect(-V, N)), refl);
+      float glint = pow(max(dot(N, normalize(KEY_DIR + V)), 0.0), 260.0) * 2.2 + pow(max(dot(N, normalize(FILL_DIR + V)), 0.0), 200.0) * 0.8;
+      col += KEY_COL * glint;
+      float alpha = max(opacity, max(refl * 0.75, glint)) * vis;
+      // Suds: little lit spheres
+      if (foam > 0.01) {
+        vec2 lc; float rad;
+        float b = max(bubbles(P, 300.0, foam, lc, rad), 0.0);
+        if (b > 0.0) {
+          vec3 bn = normalize(vec3(lc.x, sqrt(max(0.0, 1.0 - dot(lc, lc))), -lc.y));
+          vec3 froth = mix(vec3(0.95, 0.95, 0.94), vec3(0.7, 0.58, 0.44), smoothstep(0.1, 0.9, conc));
+          vec3 bc = froth * (SKY * 1.2 + KEY_COL * max(dot(bn, KEY_DIR), 0.0) * 0.45);
+          bc += KEY_COL * pow(max(dot(bn, normalize(KEY_DIR + V)), 0.0), 120.0) * 0.6;
+          bc *= mix(0.65, 1.0, smoothstep(1.0, 0.7, length(lc)));
+          col = mix(col, bc, 0.95);
+          alpha = max(alpha, 0.95);
+        }
+      }
+      gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+});
+{
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(DOMAIN.x, DOMAIN.y, Math.round(SIM.x / 3), Math.round(SIM.y / 3)), waterMat);
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(DOMAIN.x / 2, 0, DOMAIN.y / 2);
+  water.renderOrder = 1;
+  scene.add(water);
+}
+
+// ───────────────────────────── Tools ─────────────────────────────
+
+function radialTexture(soft = 0.5) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 64 * (1 - soft), 64, 64, 64);
+  grad.addColorStop(0, 'rgba(0,0,0,1)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const SHADOW_TEX = radialTexture(0.85);
+function blobShadow(w, d, opacity) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: SHADOW_TEX, transparent: true, opacity, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2;
+  m.scale.set(w, d, 1);
+  m.renderOrder = 2;
+  m.userData.base = opacity;
+  scene.add(m);
+  return m;
+}
+
+const MAT = {
+  teal: new THREE.MeshPhysicalMaterial({ color: 0x1f8b74, roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.18 }),
+  tealDark: new THREE.MeshPhysicalMaterial({ color: 0x136152, roughness: 0.4, clearcoat: 0.4 }),
+  rubber: new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.55 }),
+  alu: new THREE.MeshStandardMaterial({ color: 0xd3d7dc, metalness: 1, roughness: 0.24 }),
+  can: new THREE.MeshPhysicalMaterial({ color: 0x2e9a63, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.1, side: THREE.DoubleSide }),
+  canDark: new THREE.MeshPhysicalMaterial({ color: 0x1f7149, roughness: 0.35, clearcoat: 0.6 }),
+  steel: new THREE.MeshStandardMaterial({ color: 0xc4c8cc, metalness: 1, roughness: 0.32 }),
+  bristle: new THREE.MeshStandardMaterial({ color: 0xe0c98f, roughness: 0.65 }),
+  grip: new THREE.MeshPhysicalMaterial({ color: 0x2b2b2e, roughness: 0.45, clearcoat: 0.3 }),
+};
+
+// Squeegee. Local axes: x along the blade, +z the way it pushes, y up.
+const squeegee = { group: new THREE.Group(), pole: new THREE.Group(), blade: null, sway: new THREE.Vector2(), swayV: new THREE.Vector2(), flex: 0, lift: 1, pos: new THREE.Vector2(), dir: new THREE.Vector2(0, 1), last: new THREE.Vector2() };
+{
+  const L = SQUEEGEE_HALF * 2;
+  const frame = new THREE.Mesh(new RoundedBoxGeometry(L * 1.02, 0.028, 0.03, 3, 0.009), MAT.teal);
+  frame.position.set(0, 0.034, -0.004);
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(L * 0.99, 0.006, 0.012), MAT.tealDark);
+  lip.position.set(0, 0.021, 0.008);
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(L, 0.024, 0.0045), MAT.rubber);
+  blade.geometry.translate(0, -0.012, 0);  // hangs from its top edge, so it can flex
+  const bladeHolder = new THREE.Group();
+  bladeHolder.position.set(0, 0.024, 0.009);
+  bladeHolder.add(blade);
+  squeegee.blade = bladeHolder;
+  const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, 0.05, 20), MAT.tealDark);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.0085, 0.0085, 1.6, 20), MAT.alu);
+  pole.position.y = 0.8;
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 20), MAT.teal);
+  grip.position.y = 1.35;
+  socket.position.y = 0.02;
+  squeegee.pole.add(socket, pole, grip);
+  squeegee.pole.position.set(0, 0.045, -0.01);
+  squeegee.group.add(frame, lip, bladeHolder, squeegee.pole);
+  squeegee.group.rotation.order = 'YXZ';
+  scene.add(squeegee.group);
+  squeegee.shadow = blobShadow(L * 1.25, 0.09, 0.42);
+  squeegee.poleShadow = blobShadow(0.05, 0.9, 0.18);
+}
+
+// Watering can. Local axes: spout towards +x, y up.
+const can = { group: new THREE.Group(), body: new THREE.Group(), tilt: 0, rose: new THREE.Vector3(0.205, 0.152, 0), roseDir: new THREE.Vector3(0.6, 0.8, 0).normalize() };
+{
+  const prof = [[0, 0], [0.058, 0], [0.066, 0.006], [0.07, 0.02], [0.07, 0.1], [0.064, 0.116], [0.046, 0.126], [0.036, 0.128], [0.036, 0.134]].map(([x, y]) => new THREE.Vector2(x, y));
+  const body = new THREE.Mesh(new THREE.LatheGeometry(prof, 48), MAT.can);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.004, 10, 40), MAT.canDark);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 0.134;
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.0075, 12, 40, Math.PI * 1.15), MAT.canDark);
+  handle.position.set(-0.03, 0.105, 0);
+  handle.rotation.z = Math.PI * 0.08;
+  const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0.055, 0.03, 0), new THREE.Vector3(0.14, 0.05, 0), new THREE.Vector3(0.198, 0.143, 0));
+  const spout = new THREE.Mesh(new THREE.TubeGeometry(curve, 30, 0.0075, 14), MAT.can);
+  const holes = document.createElement('canvas');
+  holes.width = holes.height = 128;
+  const hg = holes.getContext('2d');
+  hg.fillStyle = '#d6dadd'; hg.fillRect(0, 0, 128, 128);
+  hg.fillStyle = '#2a2d30';
+  for (let ring = 0; ring < 4; ring++) for (let i = 0; i < 6 + ring * 7; i++) {
+    const a = (i / (6 + ring * 7)) * Math.PI * 2, rr = ring * 14;
+    hg.beginPath(); hg.arc(64 + Math.cos(a) * rr, 64 + Math.sin(a) * rr, 3, 0, Math.PI * 2); hg.fill();
+  }
+  const roseTex = new THREE.CanvasTexture(holes);
+  roseTex.colorSpace = THREE.SRGBColorSpace;
+  const roseMats = [MAT.steel, new THREE.MeshStandardMaterial({ map: roseTex, metalness: 0.9, roughness: 0.35 }), MAT.steel];
+  const rose = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.012, 0.022, 28), roseMats);
+  rose.position.copy(can.rose);
+  rose.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), can.roseDir);
+  can.body.add(body, rim, handle, spout, rose);
+  can.group.add(can.body);
+  scene.add(can.group);
+  can.shadow = blobShadow(0.2, 0.16, 0.35);
+}
+
+// Scrub brush. Local axes: x along the block, y up.
+const brushTool = { group: new THREE.Group(), bristles: null, phase: 0, speed: 0, pos: new THREE.Vector2(), yaw: 0, press: 0 };
+{
+  const grain = document.createElement('canvas');
+  grain.width = 256; grain.height = 64;
+  const gg = grain.getContext('2d');
+  gg.fillStyle = '#a8743f'; gg.fillRect(0, 0, 256, 64);
+  for (let i = 0; i < 70; i++) {
+    gg.strokeStyle = `rgba(${90 + Math.random() * 40}, ${55 + Math.random() * 25}, ${25 + Math.random() * 15}, ${0.25 + Math.random() * 0.35})`;
+    gg.lineWidth = 0.6 + Math.random() * 1.6;
+    gg.beginPath();
+    const y = Math.random() * 64;
+    gg.moveTo(0, y);
+    for (let x = 0; x <= 256; x += 16) gg.lineTo(x, y + Math.sin(x * 0.03 + i) * 3);
+    gg.stroke();
+  }
+  const woodTex = new THREE.CanvasTexture(grain);
+  woodTex.colorSpace = THREE.SRGBColorSpace;
+  const wood = new THREE.MeshPhysicalMaterial({ map: woodTex, roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.4 });
+  const block = new THREE.Mesh(new RoundedBoxGeometry(0.15, 0.028, 0.072, 4, 0.011), wood);
+  block.position.y = 0.044;
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.0075, 12, 30, Math.PI), MAT.grip);
+  handle.position.y = 0.056;
+  const bristleGeo = new THREE.CylinderGeometry(0.0013, 0.0016, 0.032, 5);
+  bristleGeo.translate(0, -0.016, 0);
+  const bristles = new THREE.InstancedMesh(bristleGeo, MAT.bristle, 22 * 9);
+  const m = new THREE.Matrix4();
+  let n = 0;
+  for (let i = 0; i < 22; i++) for (let j = 0; j < 9; j++) {
+    m.makeTranslation(-0.066 + i * 0.0063 + (Math.random() - 0.5) * 0.002, 0, -0.028 + j * 0.007 + (Math.random() - 0.5) * 0.002);
+    bristles.setMatrixAt(n++, m);
+  }
+  const bristleRoot = new THREE.Group();
+  bristleRoot.position.y = 0.031;
+  bristleRoot.add(bristles);
+  brushTool.bristles = bristleRoot;
+  brushTool.group.add(block, handle, bristleRoot);
+  scene.add(brushTool.group);
+  brushTool.shadow = blobShadow(0.22, 0.13, 0.4);
+}
+
+// Water drops: the can's stream, splashes, and drips off the squeegee
+const DROPS = 320;
+const dropMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8),
+  new THREE.MeshPhysicalMaterial({ color: 0xe8f4fb, roughness: 0.04, transparent: true, opacity: 0.6, envMapIntensity: 2.5, clearcoat: 1 }), DROPS);
+dropMesh.frustumCulled = false;
+dropMesh.renderOrder = 3;
+scene.add(dropMesh);
+const drops = Array.from({ length: DROPS }, () => ({ p: new THREE.Vector3(), v: new THREE.Vector3(), life: 0, size: 0, splash: false }));
+let nextDrop = 0;
+function spawnDrop(p, v, size, life, splash = false) {
+  const d = drops[nextDrop];
+  nextDrop = (nextDrop + 1) % DROPS;
+  d.p.copy(p); d.v.copy(v); d.size = size; d.life = life; d.splash = splash;
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const pointer = new THREE.Vector2(DOMAIN.x * 0.5, DOMAIN.y * 0.3);
+let down = false, inside = false, tool = 'water';
+const raycaster = new THREE.Raycaster();
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.012);
+const ndc = new THREE.Vector2(), hit = new THREE.Vector3();
+
+function pointAt(e) {
+  const rect = canvas.getBoundingClientRect();
+  ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  if (raycaster.ray.intersectPlane(floorPlane, hit)) {
+    pointer.set(THREE.MathUtils.clamp(hit.x, 0.01, DOMAIN.x - 0.01), THREE.MathUtils.clamp(DOMAIN.y - hit.z, 0.01, DOMAIN.y - 0.01));
+  }
+}
+const onRug = (p) => {
+  const d = p.clone().sub(DOMAIN.clone().multiplyScalar(0.5));
+  const along = d.dot(RUG_LONG), acrossD = d.x * -RUG_LONG.y + d.y * RUG_LONG.x;
+  return Math.abs(along) < RUG.halfLen && Math.abs(acrossD) < RUG.halfWid;
+};
+const surfaceY = (p) => (onRug(p) ? RUG_BASE_Y + PILE * 0.45 : 0);
+
+canvas.addEventListener('pointermove', (e) => { pointAt(e); inside = true; });
+canvas.addEventListener('pointerdown', (e) => {
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+  pointAt(e);
+  inside = true;
+  down = true;
+  squeegee.last.copy(pointer);
+  squeegee.pos.copy(pointer);
+  startAudio();
+});
+const lift = (e) => {
+  if (down && tool === 'squeegee') drip();
+  down = false;
+  if (e.pointerType !== 'mouse') inside = false;
+};
+canvas.addEventListener('pointerup', lift);
+canvas.addEventListener('pointercancel', lift);
+canvas.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !down) inside = false; });
+
+const TOOLS = ['water', 'squeegee', 'brush'];
+function setTool(name) {
+  tool = name;
+  for (const b of document.querySelectorAll('.dock [data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
+}
+for (const b of document.querySelectorAll('.dock button')) {
+  b.addEventListener('click', () => { if (b.dataset.tool) setTool(b.dataset.tool); else newRug(); });
+}
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (Math.abs(e.deltaY) < 4) return;
+  const i = TOOLS.indexOf(tool);
+  setTool(TOOLS[(i + (e.deltaY > 0 ? 1 : TOOLS.length - 1)) % TOOLS.length]);
+}, { passive: false });
+window.addEventListener('keydown', (e) => {
+  if (e.key === '1') setTool('water');
+  else if (e.key === '2') setTool('squeegee');
+  else if (e.key === '3') setTool('brush');
+  else if (e.key === 'n' || e.key === 'N') newRug();
+  else if (e.key === 'm' || e.key === 'M') { muted = !muted; if (master) master.gain.setTargetAtTime(muted ? 0 : 1, audio.currentTime, 0.05); }
+});
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, master = null, muted = false;
+const voices = {};
+function startAudio() {
+  if (audio) { audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  master = audio.createGain();
+  master.connect(audio.destination);
+  const buffer = audio.createBuffer(1, audio.sampleRate * 2, audio.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const voice = (type, freq, q) => {
+    const src = audio.createBufferSource();
+    src.buffer = buffer; src.loop = true;
+    const filter = audio.createBiquadFilter();
+    filter.type = type; filter.frequency.value = freq; filter.Q.value = q;
+    const gain = audio.createGain();
+    gain.gain.value = 0;
+    src.connect(filter).connect(gain).connect(master);
+    src.start(0, Math.random() * 2);
+    return { gain, filter };
+  };
+  voices.pour = voice('bandpass', 1300, 0.5);
+  voices.splash = voice('lowpass', 520, 0.7);
+  voices.squeegee = voice('bandpass', 420, 1.6);
+  voices.brush = voice('highpass', 2600, 0.6);
+}
+function setVoice(name, level, freq) {
+  const v = voices[name];
+  if (!v) return;
+  v.gain.gain.setTargetAtTime(level, audio.currentTime, 0.04);
+  if (freq) v.filter.frequency.setTargetAtTime(freq, audio.currentTime, 0.05);
+}
+
+// ───────────────────────────── Rugs ─────────────────────────────
+
+let rugInfo = null, rugSeed = 0, baseline = null, cleanPct = 0, probeTimer = 0;
+function newRug(seed) {
+  rugSeed = seed ?? Math.floor(Math.random() * 9000) + 1000;
+  const art = drawRug(rugSeed);
+  if (rugTexUniform.value) rugTexUniform.value.dispose();
+  const tex = new THREE.CanvasTexture(art.canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.flipY = false;
+  rugTexUniform.value = tex;
+  edgeMat.color.set(PALETTES[rugSeed % PALETTES.length].dark);
+  rugInfo = art;
+  initMat.uniforms.uSeed.value = rugSeed % 97 + 0.5;
+  run(initMat, state[0]);
+  run(zeroMat, flux[0]); run(zeroMat, flux[1]);
+  run(zeroMat, soak[0]); run(zeroMat, soak[1]);
+  baseline = null;
+  cleanPct = 0;
+  try { history.replaceState(null, '', `?rug=${rugSeed}`); } catch { /* sandboxed */ }
+}
+
+// ───────────────────────────── Simulation step ─────────────────────────────
+
+const ALL = [initMat, fluxMat, stateMat, soakMat, squeegeeMat, probeMat];
+const setAll = (name, value) => { for (const m of ALL) m.uniforms[name].value = value; };
+const toCell = (v) => new THREE.Vector2(v.x / PX, v.y / PX);
+
+function simulate(dt) {
+  const pouring = down && tool === 'water' && inside;
+  const scrubbing = down && tool === 'brush' && inside;
+  const wiping = down && tool === 'squeegee';
+  const pourCell = toCell(pointer);
+  const rate = pouring ? 1.1 * dt / STEPS : 0;
+  stateMat.uniforms.uPour.value.set(pourCell.x, pourCell.y, rate);
+  soakMat.uniforms.uPour.value.set(pourCell.x, pourCell.y, rate);
+  const brushCell = toCell(brushTool.pos);
+  const scrub = scrubbing ? Math.min(1, 0.35 + brushTool.speed * 0.6) : 0;
+  stateMat.uniforms.uBrush.value.set(brushCell.x, brushCell.y, 0.06 / PX, scrub * 0.5);
+  soakMat.uniforms.uBrush.value.set(brushCell.x, brushCell.y, 0.06 / PX, scrub * 0.25);
+  stateMat.uniforms.uDt.value = dt / STEPS;
+
+  // Squeegee: walk the blade from where it was to where it is, a few cells at a time
+  setAll('uBladeOn', wiping ? 1 : 0);
+  let pushed = 0;
+  if (wiping) {
+    const from = toCell(squeegee.last), to = toCell(squeegee.pos);
+    const dist = from.distanceTo(to);
+    const n = Math.min(28, Math.ceil(dist / 3));
+    setAll('uBladeN', squeegee.dir);
+    soakMat.uniforms.uSweep.value.set(from.x, from.y, to.x, to.y);
+    for (let i = 1; i <= n; i++) {
+      const c = from.clone().lerp(to, i / n);
+      setAll('uBladeC', c);
+      squeegeeMat.uniforms.uDelta.value = dist / n;
+      squeegeeMat.uniforms.uState.value = state[0].texture;
+      run(squeegeeMat, state[1]);
+      state.reverse();
+    }
+    setAll('uBladeC', to);
+    pushed = dist;
+  }
+
+  for (let i = 0; i < STEPS; i++) {
+    fluxMat.uniforms.uState.value = state[0].texture;
+    fluxMat.uniforms.uFlux.value = flux[0].texture;
+    run(fluxMat, flux[1]);
+    flux.reverse();
+    stateMat.uniforms.uState.value = state[0].texture;
+    stateMat.uniforms.uFlux.value = flux[0].texture;
+    stateMat.uniforms.uSoak.value = soak[0].texture;
+    run(stateMat, state[1]);
+    state.reverse();
+  }
+  soakMat.uniforms.uState.value = state[0].texture;
+  soakMat.uniforms.uSoak.value = soak[0].texture;
+  run(soakMat, soak[1]);
+  soak.reverse();
+  soakMat.uniforms.uSweep.value.set(0, 0, 0, 0);
+
+  if (audio) {
+    setVoice('pour', pouring ? 0.22 : 0);
+    setVoice('splash', pouring ? 0.35 : 0);
+    setVoice('squeegee', wiping ? Math.min(0.5, pushed * 0.012) : 0, 380 + pushed * 6);
+    setVoice('brush', scrubbing ? Math.min(0.28, 0.06 + brushTool.speed * 0.25) * (0.7 + 0.3 * Math.sin(brushTool.phase * 2)) : 0);
+  }
+}
+
+function readProbe(dt) {
+  probeTimer -= dt;
+  if (probeTimer > 0) return;
+  probeTimer = 0.4;
+  probeMat.uniforms.uState.value = state[0].texture;
+  run(probeMat, probe);
+  renderer.readRenderTargetPixels(probe, 0, 0, 64, 40, probePixels);
+  let grime = 0, rug = 0;
+  for (let i = 0; i < 64 * 40; i++) {
+    const weight = probePixels[i * 4 + 1] / 255;
+    grime += (probePixels[i * 4] / 255) * weight;
+    rug += weight;
+  }
+  const avg = rug ? grime / rug : 0;
+  if (baseline === null) baseline = avg;
+  cleanPct = THREE.MathUtils.clamp(1 - avg / Math.max(baseline, 1e-3), 0, 1);
+}
+
+let lastStatus = '';
+function updateStatus() {
+  const pct = Math.round(cleanPct * 100);
+  const tail = pct >= 96 ? 'Rescued ✦' : `${pct}% clean`;
+  const text = `Rug №${rugSeed} · ${rugInfo.name} / ${tail}`;
+  if (text !== lastStatus) statusEl.textContent = lastStatus = text;
+}
+
+// ───────────────────────────── Tool motion ─────────────────────────────
+
+function placeShadow(m, p, height, yaw, show) {
+  const L = LIGHT.key.dir;
+  m.visible = show;
+  m.position.set(p.x - (L.x / L.y) * height * 0.6, surfaceY(new THREE.Vector2(p.x, DOMAIN.y - p.z)) + PILE + 0.004, p.z - (L.z / L.y) * height * 0.6);
+  m.rotation.z = yaw;
+  m.material.opacity = m.userData.base * THREE.MathUtils.clamp(1.2 - height * 4, 0.35, 1);
+}
+
+function drip() {
+  const g = squeegee.group;
+  for (let i = 0; i < 10; i++) {
+    const local = new THREE.Vector3((Math.random() - 0.5) * SQUEEGEE_HALF * 1.8, 0.004, 0.012);
+    spawnDrop(local.applyMatrix4(g.matrixWorld), new THREE.Vector3(0, -0.05 - Math.random() * 0.1, 0), 0.0022 + Math.random() * 0.0015, 0.5 + Math.random() * 0.4);
+  }
+}
+
+const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+function updateTools(dt, time) {
+  // ── Squeegee: turns to face the pull, blade flexes back, pole lags and sways
+  const sq = squeegee;
+  const wiping = down && tool === 'squeegee';
+  const move = pointer.clone().sub(sq.pos);
+  if (wiping && move.length() > PX * 0.6) {
+    const target = move.clone().normalize();
+    if (sq.dir.dot(target) < -0.3) sq.dir.copy(target);
+    else sq.dir.rotateAround(new THREE.Vector2(), Math.atan2(sq.dir.x * target.y - sq.dir.y * target.x, sq.dir.dot(target)) * Math.min(1, dt * 14));
+  }
+  const speed = move.length() / Math.max(dt, 1e-3);
+  sq.last.copy(sq.pos);
+  sq.pos.copy(pointer);
+  sq.lift += ((wiping ? 0 : 1) - sq.lift) * Math.min(1, dt * 12);
+  sq.flex += ((wiping ? Math.min(0.55, speed * 0.6) : 0) - sq.flex) * Math.min(1, dt * 10);
+  // pole: a damped spring pushed by the blade's motion
+  const accel = new THREE.Vector2(move.x, move.y).multiplyScalar(-40);
+  sq.swayV.addScaledVector(accel, dt).addScaledVector(sq.sway, -90 * dt).multiplyScalar(Math.exp(-6 * dt));
+  sq.sway.addScaledVector(sq.swayV, dt);
+  const show = tool === 'squeegee' && inside;
+  sq.group.visible = show;
+  const yaw = Math.atan2(sq.dir.x, -sq.dir.y);
+  const baseY = surfaceY(sq.pos) + sq.lift * (0.035 + Math.sin(time * 2.2) * 0.003);
+  const w = toWorld3(sq.pos, baseY);
+  sq.group.position.copy(w);
+  sq.group.rotation.set(0, yaw, 0);
+  sq.group.rotation.x = -sq.flex * 0.12;
+  sq.blade.rotation.x = sq.flex;                       // rubber trails behind
+  const lean = THREE.MathUtils.degToRad(52);
+  const swayLocal = new THREE.Vector2(sq.sway.x, sq.sway.y).rotateAround(new THREE.Vector2(), -yaw);
+  sq.pole.rotation.set(-lean + THREE.MathUtils.clamp(swayLocal.y, -0.3, 0.3), 0, THREE.MathUtils.clamp(-swayLocal.x, -0.3, 0.3));
+  sq.group.updateMatrixWorld();
+  placeShadow(sq.shadow, w, sq.lift * 0.035 + 0.01, yaw, show);
+  const poleMid = new THREE.Vector3(0, 0.4, 0).applyMatrix4(sq.pole.matrixWorld);
+  placeShadow(sq.poleShadow, poleMid, 0.3, yaw, show);
+  pileMat.uniforms.uBladeOn.value = wiping ? 1 : 0;
+  pileMat.uniforms.uBladeP.value.copy(sq.pos);
+  pileMat.uniforms.uBladeN.value.copy(sq.dir);
+  if (wiping && speed > 0.15 && Math.random() < 0.5) {   // spray flicks off the ends
+    const local = new THREE.Vector3((Math.random() < 0.5 ? -1 : 1) * SQUEEGEE_HALF, 0.006, 0.02);
+    spawnDrop(local.applyMatrix4(sq.group.matrixWorld), dirToWorld(sq.dir).multiplyScalar(0.25).add(new THREE.Vector3(0, 0.25, 0)), 0.0016, 0.35, true);
+  }
+
+  // ── Watering can: hovers with a gentle bob, tips forward to pour
+  const pouring = down && tool === 'water' && inside;
+  can.group.visible = tool === 'water' && inside;
+  can.tilt += ((pouring ? 0.62 : 0.12) - can.tilt) * Math.min(1, dt * 7);
+  can.body.rotation.z = -can.tilt;
+  // place the can so the rose sits up and to the left of where the water lands
+  const target3 = toWorld3(pointer, surfaceY(pointer));
+  const roseWorldWanted = target3.clone().add(new THREE.Vector3(-0.07, 0.17 + Math.sin(time * 1.8) * 0.004, 0.03));
+  const roseLocal = can.rose.clone().applyAxisAngle(new THREE.Vector3(0, 0, 1), -can.tilt).applyAxisAngle(up, 0.35);
+  can.group.position.copy(roseWorldWanted).sub(roseLocal);
+  can.group.rotation.y = 0.35;
+  can.group.updateMatrixWorld();
+  const roseWorld = can.rose.clone().applyMatrix4(can.body.matrixWorld);
+  placeShadow(can.shadow, can.group.position.clone().add(new THREE.Vector3(0.02, 0, 0)), 0.18, 0, can.group.visible);
+  if (pouring) {
+    const T = 0.24, g = -2.2;
+    for (let i = 0; i < 6; i++) {
+      const aim = target3.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.05, 0, (Math.random() - 0.5) * 0.05));
+      const start = roseWorld.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.01, (Math.random() - 0.5) * 0.02));
+      const v = aim.clone().sub(start).multiplyScalar(1 / T);
+      v.y -= 0.5 * g * T;
+      spawnDrop(start, v, 0.0018 + Math.random() * 0.0012, T * (0.95 + Math.random() * 0.1));
+    }
+  }
+
+  // ── Brush: follows with a little lag, faces its motion, scrubs back and forth when pressed
+  const b = brushTool;
+  const prev = b.pos.clone();
+  b.pos.lerp(pointer, Math.min(1, dt * 26));
+  const bmove = b.pos.clone().sub(prev);
+  const bspeed = bmove.length() / Math.max(dt, 1e-3);
+  b.speed += (bspeed - b.speed) * Math.min(1, dt * 8);
+  const scrubbing = down && tool === 'brush';
+  if (scrubbing) b.phase += dt * 24;
+  b.press += ((scrubbing ? 1 : 0) - b.press) * Math.min(1, dt * 14);
+  b.group.visible = tool === 'brush' && inside;
+  const by = surfaceY(b.pos) + (1 - b.press) * 0.03 + 0.004 - b.press * 0.006;
+  const bw = toWorld3(b.pos, by);
+  const wobble = scrubbing ? Math.sin(b.phase) : 0;
+  b.group.position.copy(bw).add(dirToWorld(new THREE.Vector2(Math.cos(b.phase), Math.sin(b.phase * 1.3))).multiplyScalar(scrubbing ? 0.006 : 0));
+  b.group.rotation.set(wobble * 0.04, 0.5 + wobble * 0.22, Math.cos(b.phase * 0.5) * 0.03 * b.press);
+  b.bristles.scale.y = 1 - b.press * 0.18;
+  b.bristles.rotation.z = THREE.MathUtils.clamp(-bmove.x * 30, -0.25, 0.25);
+  b.bristles.rotation.x = THREE.MathUtils.clamp(-bmove.y * 30, -0.25, 0.25);
+  placeShadow(b.shadow, bw, 0.02 + (1 - b.press) * 0.03, 0.5, b.group.visible);
+  pileMat.uniforms.uBrushP.value.set(b.pos.x, b.pos.y, scrubbing ? 1 : 0);
+
+  // ── Drops: fall, then splash or vanish into the water
+  for (let i = 0; i < DROPS; i++) {
+    const d = drops[i];
+    if (d.life <= 0) { dropMesh.setMatrixAt(i, tmpM.makeScale(0, 0, 0)); continue; }
+    d.life -= dt;
+    d.v.y -= 2.2 * dt;
+    d.p.addScaledVector(d.v, dt);
+    const floorY = surfaceY(new THREE.Vector2(d.p.x, DOMAIN.y - d.p.z)) + 0.002;
+    if (d.p.y < floorY) {
+      if (!d.splash && Math.random() < 0.35) {
+        spawnDrop(d.p.clone().setY(floorY + 0.002), new THREE.Vector3((Math.random() - 0.5) * 0.35, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.35), d.size * 0.55, 0.25, true);
+      }
+      d.life = 0;
+    }
+    const sp = d.v.length();
+    tmpQ.setFromUnitVectors(up, sp > 1e-4 ? d.v.clone().divideScalar(sp) : up);
+    tmpS.set(d.size, d.size * (1 + Math.min(4, sp * 3)), d.size);
+    dropMesh.setMatrixAt(i, tmpM.compose(d.p, tmpQ, tmpS));
+  }
+  dropMesh.instanceMatrix.needsUpdate = true;
+}
+
+// ───────────────────────────── Camera & loop ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  // A phone filming from above and in front: frame the rug with a little floor around it
+  const elevation = THREE.MathUtils.degToRad(PORTRAIT ? 66 : 58);
+  const half = THREE.MathUtils.degToRad(camera.fov / 2);
+  const needW = (PORTRAIT ? RUG.halfWid : RUG.halfLen + RUG.fringe) * 2 + 0.26;
+  const needD = (PORTRAIT ? RUG.halfLen + RUG.fringe : RUG.halfWid) * 2 + 0.3;
+  const dist = Math.max(needW / 2 / (Math.tan(half) * camera.aspect), (needD * Math.sin(elevation)) / 2 / Math.tan(half)) * 1.04;
+  const target = new THREE.Vector3(DOMAIN.x / 2, 0, DOMAIN.y / 2 + 0.02);
+  camera.position.set(target.x, Math.sin(elevation) * dist, target.z + Math.cos(elevation) * dist);
+  camera.lookAt(target);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+const params = new URLSearchParams(location.search);
+newRug(Number(params.get('rug')) || undefined);
+
+const clock = new THREE.Clock();
+const SIM_MATS = [floorMat, baseMat, pileMat, waterMat];
+function frame() {
+  const dt = Math.min(clock.getDelta(), 1 / 30);
+  const time = clock.elapsedTime;
+  updateTools(dt, time);
+  simulate(dt);
+  readProbe(dt);
+  for (const m of SIM_MATS) {
+    m.uniforms.uState.value = state[0].texture;
+    m.uniforms.uSoak.value = soak[0].texture;
+  }
+  pileMat.uniforms.uTime.value = time;
+  waterMat.uniforms.uTime.value = time;
+  renderer.setRenderTarget(null);
+  renderer.render(scene, camera);
+  updateStatus();
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="rug-rescue"></script>
+</body>
+</html>

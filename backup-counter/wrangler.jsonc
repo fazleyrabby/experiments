@@ -1,0 +1,11 @@
+{
+  "name": "experiments-visit-backup",
+  "account_id": "2c331d400c7bbb939525bcd7305085fd",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-10",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "VISITS", "class_name": "VisitLedger" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VisitLedger"] }]
+}

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gummy Squish // 11</title>
+<style>
+  :root { --bg: #DDEBB4; --ink: #2B2722; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas#stage.dragging { cursor: grabbing; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.left { left: 28px; }
+  .label.right { right: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.5; }
+  /* Too narrow for both bottom labels side by side: the counter moves to the top left */
+  @media (max-width: 820px) {
+    .label.left { right: 28px; }
+    .label.right { top: 24px; bottom: auto; left: 28px; right: auto; text-align: left; }
+  }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; right: 18px; }
+    .label.right { top: 16px; left: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label left">
+  <div>Gummy Squish // 11</div>
+  <div class="hint">Press to squish / Tap to boop / Two fingers to squeeze<br>Double-click for a new flavour</div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const BG = '#DDEBB4';
+const STEP = 1 / 120;
+const GRAVITY = 14;
+const STIFFNESS = 0.085;          // pull toward the matched shape, per step (lower = wobblier)
+const STRETCH = 0.72;             // how much whole-body squash is allowed to persist (0 rigid .. 1 floppy)
+const DAMPING = 0.7;              // velocity lost per second
+const FLOOR_FRICTION = 0.55;
+const GRAB_RADIUS = 1.0;
+const GRAB_PULL = 0.32;           // how hard a finger drags the candy with it, per step
+const RIGHTING = 0.07;            // how firmly it rolls back onto its base, per step
+const PRESS_DEPTH = 0.4;          // how far a held finger sinks in
+const BOOP_TIME = 0.22;           // a press shorter than this (seconds) is a boop
+const LATTICE = [7, 4, 6];        // physics particles along x, y, z
+const FLAVOURS = [0xFFB52E, 0x4F9BFF, 0xB26BF0, 0x6FCB2E, 0xFF7F9C];
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+pmrem.dispose();
+
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+const key = new THREE.DirectionalLight(0xFFF6EA, 2.3);
+key.position.set(-4, 9, 5);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.radius = 7;
+key.shadow.bias = -0.0006;
+Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 30 });
+scene.add(key, new THREE.HemisphereLight(0xFFFFFF, 0xD6E2A8, 0.6));
+
+// Tabletop: draws nothing but the shadow, so the table is exactly the backdrop colour
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.ShadowMaterial({ opacity: 0.22 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// ───────────────────────────── Shape ─────────────────────────────
+// Two cheeks and a bit of back, blended, sitting on a flat base at y = 0.
+
+const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
+const smax = (a, b, k) => -smin(-a, -b, k);
+const blob = (x, y, z, cx, cy, cz, rx, ry, rz) => (Math.hypot((x - cx) / rx, (y - cy) / ry, (z - cz) / rz) - 1) * Math.min(rx, ry, rz);
+
+// Signed distance to the candy's surface (negative inside)
+function shape(x, y, z) {
+  let d = smin(blob(x, y, z, -0.46, 0.48, 0.12, 0.6, 0.62, 0.7), blob(x, y, z, 0.46, 0.48, 0.12, 0.6, 0.62, 0.7), 0.1);
+  d = smin(d, blob(x, y, z, 0, 0.32, -0.4, 0.8, 0.46, 0.55), 0.3);
+  return smax(d, -y, 0.1);
+}
+
+function buildCandyGeometry() {
+  // Push an icosphere out to the surface: every vertex travels along its ray from a point inside
+  let g = new THREE.IcosahedronGeometry(1, 22);
+  g.deleteAttribute('normal'); g.deleteAttribute('uv');
+  g = mergeVertices(g, 1e-4);   // welded, so normals stay smooth as it deforms
+  const p = g.attributes.position, dir = new THREE.Vector3();
+  const origin = [0, 0.35, 0];
+  for (let i = 0; i < p.count; i++) {
+    dir.fromBufferAttribute(p, i).normalize();
+    let near = 0, far = 2.4;
+    for (let step = 0; step < 26; step++) {
+      const mid = (near + far) / 2;
+      if (shape(origin[0] + dir.x * mid, origin[1] + dir.y * mid, origin[2] + dir.z * mid) < 0) near = mid; else far = mid;
+    }
+    p.setXYZ(i, origin[0] + dir.x * near, origin[1] + dir.y * near, origin[2] + dir.z * near);
+  }
+  p.setUsage(THREE.DynamicDrawUsage);
+  g.computeBoundingBox();
+  return g;
+}
+
+const candyGeometry = buildCandyGeometry();
+
+// ───────────────────────────── Soft body ─────────────────────────────
+// A lattice of particles boxed round the shape, held together by shape matching:
+// each step, find the best-fit rotation (plus some stretch) of the rest shape
+// onto the particles and pull every particle part-way to where that says it should be.
+
+const box = candyGeometry.boundingBox.clone();
+box.min.x -= 0.03; box.max.x += 0.03; box.max.y += 0.03; box.min.z -= 0.03; box.max.z += 0.03;
+box.min.y = 0;                                  // the base rests exactly on the bottom layer
+const boxSize = box.getSize(new THREE.Vector3());
+const SPACING = [boxSize.x / (LATTICE[0] - 1), boxSize.y / (LATTICE[1] - 1), boxSize.z / (LATTICE[2] - 1)];
+const COUNT = LATTICE[0] * LATTICE[1] * LATTICE[2];
+const HEIGHT = boxSize.y;
+
+const rest = new Float32Array(COUNT * 3);       // rest positions, relative to their centre
+const solid = new Uint8Array(COUNT);            // only particles in or near the candy collide
+const pos = new Float32Array(COUNT * 3);
+const prev = new Float32Array(COUNT * 3);
+const vel = new Float32Array(COUNT * 3);
+const restCentre = new THREE.Vector3();
+const restInertia = [0, 0, 0];
+const bodyRotation = new THREE.Quaternion();    // warm start for the rotation fit
+const bounds = { x: 4, z: 1.8 };                // invisible walls
+let impact = 0;                                 // strongest floor hit this step
+
+{
+  const world = new Float32Array(COUNT * 3);
+  for (let k = 0, i = 0; k < LATTICE[2]; k++) for (let j = 0; j < LATTICE[1]; j++) for (let l = 0; l < LATTICE[0]; l++, i++) {
+    world[i * 3] = box.min.x + l * SPACING[0];
+    world[i * 3 + 1] = box.min.y + j * SPACING[1];
+    world[i * 3 + 2] = box.min.z + k * SPACING[2];
+    restCentre.x += world[i * 3] / COUNT; restCentre.y += world[i * 3 + 1] / COUNT; restCentre.z += world[i * 3 + 2] / COUNT;
+    solid[i] = shape(world[i * 3], world[i * 3 + 1], world[i * 3 + 2]) < Math.min(...SPACING) * 0.6 ? 1 : 0;
+  }
+  for (let i = 0; i < COUNT; i++) {
+    rest[i * 3] = world[i * 3] - restCentre.x; rest[i * 3 + 1] = world[i * 3 + 1] - restCentre.y; rest[i * 3 + 2] = world[i * 3 + 2] - restCentre.z;
+    for (let a = 0; a < 3; a++) restInertia[a] += rest[i * 3 + a] ** 2;
+  }
+}
+
+function dropCandy() {
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, (Math.random() - 0.5) * 0.5, 0));
+  const v = new THREE.Vector3();
+  for (let i = 0; i < COUNT; i++) {
+    v.set(rest[i * 3], rest[i * 3 + 1], rest[i * 3 + 2]).applyQuaternion(q);
+    pos[i * 3] = v.x; pos[i * 3 + 1] = v.y - rest[1] + 1.6; pos[i * 3 + 2] = v.z;
+  }
+  vel.fill(0);
+  bodyRotation.copy(q);
+}
+
+// Scratch for the shape match
+const A = new Float32Array(9), R = new Float32Array(9), T = new Float32Array(9);
+const mR = new THREE.Matrix4(), dq = new THREE.Quaternion(), axis = new THREE.Vector3();
+const righting = new THREE.Quaternion(), IDENTITY = new THREE.Quaternion();
+
+function extractRotation() {
+  // Mueller et al., "A Robust Method to Extract the Rotational Part of Deformations"
+  for (let iter = 0; iter < 4; iter++) {
+    mR.makeRotationFromQuaternion(bodyRotation);
+    const e = mR.elements;   // column-major
+    let ox = 0, oy = 0, oz = 0, dot = 0;
+    for (let c = 0; c < 3; c++) {
+      const rx = e[c * 4], ry = e[c * 4 + 1], rz = e[c * 4 + 2];
+      const ax = A[c], ay = A[3 + c], az = A[6 + c];   // A is row-major: column c
+      ox += ry * az - rz * ay; oy += rz * ax - rx * az; oz += rx * ay - ry * ax;
+      dot += rx * ax + ry * ay + rz * az;
+    }
+    const scale = 1 / (Math.abs(dot) + 1e-9);
+    ox *= scale; oy *= scale; oz *= scale;
+    const w = Math.hypot(ox, oy, oz);
+    if (w < 1e-9) break;
+    bodyRotation.premultiply(dq.setFromAxisAngle(axis.set(ox / w, oy / w, oz / w), w)).normalize();
+  }
+  mR.makeRotationFromQuaternion(bodyRotation);
+  const e = mR.elements;
+  R[0] = e[0]; R[1] = e[4]; R[2] = e[8];
+  R[3] = e[1]; R[4] = e[5]; R[5] = e[9];
+  R[6] = e[2]; R[7] = e[6]; R[8] = e[10];
+}
+
+// Up to two fingers can hold the candy at once
+const hands = [0, 1].map(() => ({
+  id: -1, dragging: false, startX: 0, startY: 0, downAt: 0,
+  weight: new Float32Array(COUNT), offset: new Float32Array(COUNT * 3),
+  target: new THREE.Vector3(), hit: new THREE.Vector3(), push: new THREE.Vector3(), plane: new THREE.Plane(),
+}));
+const centre = new THREE.Vector3();
+
+function stepBody(dt) {
+  const damp = Math.exp(-DAMPING * dt);
+  for (let i = 0; i < COUNT * 3; i += 3) {
+    prev[i] = pos[i]; prev[i + 1] = pos[i + 1]; prev[i + 2] = pos[i + 2];
+    vel[i] *= damp; vel[i + 1] = (vel[i + 1] - GRAVITY * dt) * damp; vel[i + 2] *= damp;
+    pos[i] += vel[i] * dt; pos[i + 1] += vel[i + 1] * dt; pos[i + 2] += vel[i + 2] * dt;
+  }
+
+  // Shape match
+  let cx = 0, cy = 0, cz = 0;
+  for (let i = 0; i < COUNT * 3; i += 3) { cx += pos[i]; cy += pos[i + 1]; cz += pos[i + 2]; }
+  cx /= COUNT; cy /= COUNT; cz /= COUNT;
+  centre.set(cx, cy, cz);
+  A.fill(0);
+  for (let i = 0; i < COUNT * 3; i += 3) {
+    const px = pos[i] - cx, py = pos[i + 1] - cy, pz = pos[i + 2] - cz;
+    const qx = rest[i] / restInertia[0], qy = rest[i + 1] / restInertia[1], qz = rest[i + 2] / restInertia[2];
+    A[0] += px * qx; A[1] += px * qy; A[2] += px * qz;
+    A[3] += py * qx; A[4] += py * qy; A[5] += py * qz;
+    A[6] += pz * qx; A[7] += pz * qy; A[8] += pz * qz;
+  }
+  extractRotation();
+  // Linear fit, volume-normalised, blended with the pure rotation
+  const det = A[0] * (A[4] * A[8] - A[5] * A[7]) - A[1] * (A[3] * A[8] - A[5] * A[6]) + A[2] * (A[3] * A[7] - A[4] * A[6]);
+  const norm = det > 0.05 ? 1 / Math.cbrt(det) : 0;
+  const blend = norm > 0 ? STRETCH : 0;
+  for (let n = 0; n < 9; n++) T[n] = blend * A[n] * norm + (1 - blend) * R[n];
+
+  // Weighted base: turn the goal a little toward sitting upright and facing you, so it always comes back
+  righting.copy(bodyRotation).invert();          // rotation from current pose back to the rest pose
+  righting.slerp(IDENTITY, 1 - RIGHTING);
+  mR.makeRotationFromQuaternion(righting);
+  const d = mR.elements;
+  for (let c = 0; c < 3; c++) {
+    const t0 = T[c], t1 = T[3 + c], t2 = T[6 + c];
+    T[c] = d[0] * t0 + d[4] * t1 + d[8] * t2;
+    T[3 + c] = d[1] * t0 + d[5] * t1 + d[9] * t2;
+    T[6 + c] = d[2] * t0 + d[6] * t1 + d[10] * t2;
+  }
+
+  impact = 0;
+  for (let i = 0, n = 0; i < COUNT * 3; i += 3, n++) {
+    const qx = rest[i], qy = rest[i + 1], qz = rest[i + 2];
+    pos[i] += STIFFNESS * (T[0] * qx + T[1] * qy + T[2] * qz + cx - pos[i]);
+    pos[i + 1] += STIFFNESS * (T[3] * qx + T[4] * qy + T[5] * qz + cy - pos[i + 1]);
+    pos[i + 2] += STIFFNESS * (T[6] * qx + T[7] * qy + T[8] * qz + cz - pos[i + 2]);
+
+    for (const hand of hands) {
+      if (hand.id === -1 || hand.weight[n] <= 0) continue;
+      const w = hand.weight[n] * GRAB_PULL;
+      pos[i] += w * (hand.target.x + hand.offset[i] - pos[i]);
+      pos[i + 1] += w * (hand.target.y + hand.offset[i + 1] - pos[i + 1]);
+      pos[i + 2] += w * (hand.target.z + hand.offset[i + 2] - pos[i + 2]);
+    }
+
+    if (solid[n]) {
+      // Floor (sticky) and invisible walls
+      if (pos[i + 1] < 0) {
+        impact = Math.max(impact, -vel[i + 1]);
+        pos[i + 1] = 0;
+        pos[i] = prev[i] + (pos[i] - prev[i]) * (1 - FLOOR_FRICTION);
+        pos[i + 2] = prev[i + 2] + (pos[i + 2] - prev[i + 2]) * (1 - FLOOR_FRICTION);
+      }
+      if (pos[i] < -bounds.x) pos[i] = -bounds.x; else if (pos[i] > bounds.x) pos[i] = bounds.x;
+      if (pos[i + 2] < -bounds.z) pos[i + 2] = -bounds.z; else if (pos[i + 2] > bounds.z) pos[i + 2] = bounds.z;
+    }
+
+    vel[i] = (pos[i] - prev[i]) / dt; vel[i + 1] = (pos[i + 1] - prev[i + 1]) / dt; vel[i + 2] = (pos[i + 2] - prev[i + 2]) / dt;
+  }
+}
+
+// ───────────────────────────── Skin ─────────────────────────────
+// The visible mesh rides on the lattice: every vertex is a trilinear blend of
+// the eight particles around its rest position.
+
+const skinIndex = new Uint16Array(candyGeometry.attributes.position.count * 8);
+const skinWeight = new Float32Array(skinIndex.length);
+{
+  const p = candyGeometry.attributes.position;
+  const lo = [box.min.x, box.min.y, box.min.z];
+  for (let v = 0; v < p.count; v++) {
+    const u = [p.getX(v), p.getY(v), p.getZ(v)].map((x, a) => (x - lo[a]) / SPACING[a]);
+    const cell = u.map((x, a) => Math.min(LATTICE[a] - 2, Math.max(0, Math.floor(x))));
+    const f = u.map((x, a) => Math.min(1, Math.max(0, x - cell[a])));
+    for (let c = 0; c < 8; c++) {
+      const dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1;
+      skinIndex[v * 8 + c] = ((cell[2] + dz) * LATTICE[1] + (cell[1] + dy)) * LATTICE[0] + (cell[0] + dx);
+      skinWeight[v * 8 + c] = (dx ? f[0] : 1 - f[0]) * (dy ? f[1] : 1 - f[1]) * (dz ? f[2] : 1 - f[2]);
+    }
+  }
+}
+
+// Gummy candy: glossy outside, cloudy inside, colour that deepens with thickness
+const candyMaterial = new THREE.MeshPhysicalMaterial({
+  transmission: 0.5,         // half see-through, half milky body colour
+  thickness: 1.1,
+  ior: 1.4,
+  roughness: 0.3,            // the cloudiness: light scatters on its way through
+  clearcoat: 1,              // while the skin itself stays wet-glossy
+  clearcoatRoughness: 0.05,
+  attenuationDistance: 1.4,
+  emissiveIntensity: 0.14,   // a little light held inside
+  envMapIntensity: 1.2,
+});
+const candy = new THREE.Mesh(candyGeometry, candyMaterial);
+candy.frustumCulled = false;
+candy.castShadow = true;
+scene.add(candy);
+
+let flavour = -1;
+function nextFlavour() {
+  flavour = (flavour + 1) % FLAVOURS.length;
+  const c = new THREE.Color(FLAVOURS[flavour]);
+  candyMaterial.attenuationColor.copy(c);
+  candyMaterial.emissive.copy(c);
+  candyMaterial.color.copy(c).lerp(new THREE.Color(0xFFFFFF), 0.35);   // pastel, like the sweets
+}
+
+function updateSkin() {
+  const p = candyGeometry.attributes.position.array;
+  for (let v = 0, n = p.length / 3; v < n; v++) {
+    let x = 0, y = 0, z = 0;
+    for (let c = v * 8, end = c + 8; c < end; c++) {
+      const q = skinIndex[c] * 3, w = skinWeight[c];
+      x += pos[q] * w; y += pos[q + 1] * w; z += pos[q + 2] * w;
+    }
+    p[v * 3] = x; p[v * 3 + 1] = y; p[v * 3 + 2] = z;
+  }
+  candyGeometry.attributes.position.needsUpdate = true;
+  candyGeometry.computeVertexNormals();
+  candyGeometry.computeBoundingSphere();   // keeps raycasts against the deformed mesh correct
+}
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, noiseBuffer = null, lastBlup = 0;
+
+function initAudio() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  noiseBuffer = audio.createBuffer(1, audio.sampleRate * 0.3, audio.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+}
+
+// Soft wobbly "blup" for presses and landings
+function playBlup(strength, pitch = 1) {
+  if (!audio || audio.currentTime - lastBlup < 0.09) return;
+  lastBlup = audio.currentTime;
+  const t = audio.currentTime, level = Math.min(0.5, 0.08 + strength * 0.06);
+  const osc = audio.createOscillator();
+  osc.frequency.setValueAtTime(150 * pitch, t);
+  osc.frequency.exponentialRampToValueAtTime(62 * pitch, t + 0.16);
+  const wobble = audio.createOscillator(), depth = audio.createGain();
+  wobble.frequency.value = 11; depth.gain.value = 14 * pitch;
+  wobble.connect(depth).connect(osc.frequency);
+  const gain = audio.createGain();
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(level, t + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+  osc.connect(gain).connect(audio.destination);
+  osc.start(t); wobble.start(t); osc.stop(t + 0.36); wobble.stop(t + 0.36);
+}
+
+// Boop: a sharp smack over a soft thud
+function playBoop() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  const src = audio.createBufferSource();
+  src.buffer = noiseBuffer;
+  const band = audio.createBiquadFilter();
+  band.type = 'bandpass'; band.frequency.value = 1500 + Math.random() * 500; band.Q.value = 0.8;
+  const smack = audio.createGain();
+  smack.gain.setValueAtTime(0.7, t);
+  smack.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+  src.connect(band).connect(smack).connect(audio.destination);
+  src.start(t, Math.random() * 0.1); src.stop(t + 0.1);
+
+  const osc = audio.createOscillator();
+  osc.frequency.setValueAtTime(190, t);
+  osc.frequency.exponentialRampToValueAtTime(70, t + 0.12);
+  const thud = audio.createGain();
+  thud.gain.setValueAtTime(0.4, t);
+  thud.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+  osc.connect(thud).connect(audio.destination);
+  osc.start(t); osc.stop(t + 0.2);
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const viewDir = new THREE.Vector3();
+let squishes = 0, boops = 0;
+
+function showCount() {
+  statusEl.textContent = `Squishes ${String(squishes).padStart(3, '0')} · Boops ${String(boops).padStart(3, '0')}`;
+}
+
+function setRay(e) {
+  ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+}
+
+// Shove the candy near `point` along `direction`
+function impulse(point, direction, strength) {
+  for (let i = 0; i < COUNT; i++) {
+    const d = Math.hypot(pos[i * 3] - point.x, pos[i * 3 + 1] - point.y, pos[i * 3 + 2] - point.z);
+    const w = Math.max(0, 1 - d / GRAB_RADIUS);
+    if (w <= 0) continue;
+    vel[i * 3] += direction.x * strength * w; vel[i * 3 + 1] += direction.y * strength * w; vel[i * 3 + 2] += direction.z * strength * w;
+  }
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  initAudio();
+  const hand = hands.find((h) => h.id === -1);
+  if (!hand) return;
+  setRay(e);
+  const hits = raycaster.intersectObject(candy);
+  if (hits.length === 0) return;
+  const point = hits[0].point;
+
+  let any = false;
+  for (let i = 0; i < COUNT; i++) {
+    const d = Math.hypot(pos[i * 3] - point.x, pos[i * 3 + 1] - point.y, pos[i * 3 + 2] - point.z);
+    const w = Math.max(0, 1 - d / GRAB_RADIUS);
+    hand.weight[i] = w * w;
+    hand.offset[i * 3] = pos[i * 3] - point.x; hand.offset[i * 3 + 1] = pos[i * 3 + 1] - point.y; hand.offset[i * 3 + 2] = pos[i * 3 + 2] - point.z;
+    if (w > 0) any = true;
+  }
+  if (!any) return;
+
+  // Holding still presses a dent in; dragging carries the grabbed spot on a camera-facing plane
+  hand.hit.copy(point);
+  hand.push.copy(raycaster.ray.direction);
+  camera.getWorldDirection(viewDir);
+  hand.plane.setFromNormalAndCoplanarPoint(viewDir, point);
+  hand.target.copy(point).addScaledVector(hand.push, PRESS_DEPTH);
+  hand.target.y = Math.max(0.12, hand.target.y);
+  hand.id = e.pointerId; hand.startX = e.clientX; hand.startY = e.clientY;
+  hand.dragging = false; hand.downAt = performance.now();
+  canvas.setPointerCapture(e.pointerId);
+  impulse(point, hand.push, 3);
+  playBlup(1.5, 1.5);
+  squishes++;
+  showCount();
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  const hand = hands.find((h) => h.id === e.pointerId);
+  if (!hand) return;
+  if (!hand.dragging && Math.hypot(e.clientX - hand.startX, e.clientY - hand.startY) > 5) {
+    hand.dragging = true;
+    canvas.classList.add('dragging');
+  }
+  if (!hand.dragging) return;
+  setRay(e);
+  if (raycaster.ray.intersectPlane(hand.plane, hand.target)) hand.target.y = Math.max(0.12, hand.target.y);
+});
+
+const letGo = (e) => {
+  const hand = hands.find((h) => h.id === e.pointerId);
+  if (!hand) return;
+  // A quick tap is a boop: sharp shove, loud smack, long jiggle
+  if (!hand.dragging && (performance.now() - hand.downAt) / 1000 < BOOP_TIME) {
+    impulse(hand.hit, hand.push, 7);
+    playBoop();
+    if (navigator.vibrate) navigator.vibrate(12);
+    boops++;
+    showCount();
+  }
+  hand.id = -1; hand.dragging = false;
+  if (hands.every((h) => h.id === -1)) canvas.classList.remove('dragging');
+};
+canvas.addEventListener('pointerup', letGo);
+canvas.addEventListener('pointercancel', letGo);
+canvas.addEventListener('dblclick', () => { nextFlavour(); dropCandy(); });
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const distance = 6.6 * Math.max(1, 0.85 / camera.aspect);
+  camera.position.set(0, 0.4 * distance, distance);
+  camera.lookAt(0, HEIGHT * 0.45, 0);
+  camera.updateProjectionMatrix();
+  // Walls sit just inside the edges of the view
+  bounds.x = Math.max(1.4, Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * distance * camera.aspect - 0.4);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+let accumulator = 0;
+nextFlavour();
+dropCandy();
+showCount();
+
+function frame() {
+  accumulator += Math.min(clock.getDelta(), 0.05);
+  let hardest = 0;
+  for (let steps = 0; accumulator >= STEP && steps < 6; steps++, accumulator -= STEP) {
+    stepBody(STEP);
+    hardest = Math.max(hardest, impact);
+  }
+  if (accumulator > STEP) accumulator = 0;
+  if (hardest > 2.5) playBlup(hardest);
+
+  updateSkin();
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="gummy-squish"></script>
+</body>
+</html>

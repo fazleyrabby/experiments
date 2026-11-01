@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kinetic Sand // 15</title>
+<style>
+  :root { --bg: #ebe5dc; --ink: #2b2722; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: none; }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 95% at 50% 45%, transparent 55%, rgba(60, 45, 30, 0.16) 100%);
+  }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.left { left: 28px; }
+  .label.right { left: 28px; top: 24px; bottom: auto; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.55; }
+  .label .touch { display: none; }
+  @media (hover: none) {
+    .label .mouse { display: none; }
+    .label .touch { display: inline; }
+  }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; right: 18px; }
+    .label.right { top: 16px; left: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+<div class="label left">
+  <div>Kinetic Sand // 15</div>
+  <div class="hint">
+    <span class="mouse">Drag to slice / Hold still to press in / Scroll to angle the blade<br>Double-click for a new block / Space to shake</span>
+    <span class="touch">Drag to slice / Hold still to press in<br>Double-tap for a new block / Shake to scatter crumbs</span>
+  </div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+// The sand lives in a voxel field. Marching cubes turns it into a surface,
+// stretched to a box that just holds the block (cells are not cubes).
+const N = 64, H = N / 2, N2 = N * N, N3 = N2 * N;
+const SX = 1.15, SY = 0.6, SZ = 0.85, PY = 0.5;      // half-extents and centre height of the field
+const DX = 2 * SX / N, DY = 2 * SY / N, DZ = 2 * SZ / N;
+const BLOCK = { hx: 0.8, hy: 0.475, hz: 0.52, r: 0.05 };
+const TOP_Y = BLOCK.hy * 2;
+const RAMP = 0.05;            // how far the field takes to fall from sand to air
+const KERF = 0.024;           // half-width of the slot a blade leaves
+const BLADE = 0.5;            // blade length
+const CUT_TONE = 0.84;        // freshly cut faces are denser and darker
+const MAX_TILT = THREE.MathUtils.degToRad(35);
+const TRAY = { hx: 1.86, hz: 1.36 };   // the tray's top, where crumbs can rest
+const GROUND = -0.12;
+const MAX_GRAINS = 16000;
+const GRAINS_PER_CHUNK = 4500;
+const IS_TOUCH = matchMedia('(hover: none)').matches;
+
+const SOLIDS = [
+  ['Mint', ['#9fe3c8']], ['Lilac', ['#c9b6f2']], ['Peach', ['#ffc4a3']],
+  ['Sky', ['#a9d6f5']], ['Butter', ['#f5e2a0']], ['Rose', ['#f6b3cb']],
+];
+const STRIPES = [
+  ['Sorbet', ['#f6b3cb', '#ffc4a3', '#f5e2a0', '#9fe3c8']],
+  ['Lagoon', ['#a9d6f5', '#9fe3c8', '#c9b6f2']],
+  ['Dusk', ['#c9b6f2', '#f6b3cb', '#ffc4a3']],
+];
+
+const cellX = (x) => (x - H) / H * SX;
+const cellY = (y) => (y - H) / H * SY + PY;
+const cellZ = (z) => (z - H) / H * SZ;
+const toIx = (w) => Math.round(w / SX * H + H);
+const toIy = (w) => Math.round((w - PY) / SY * H + H);
+const toIz = (w) => Math.round(w / SZ * H + H);
+const clampI = (i) => Math.min(N - 2, Math.max(1, i));
+const hash = (n) => { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); };
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xebe5dc);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+pmrem.dispose();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 60);
+
+const sun = new THREE.DirectionalLight(0xfff1e2, 2.4);
+sun.position.set(2.2, 5, 3.2);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -2.6, right: 2.6, top: 2.6, bottom: -2.6, near: 1, far: 12 });
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.02;
+scene.add(sun, new THREE.HemisphereLight(0xffffff, 0xd8cdbf, 1.0));
+
+const tray = new THREE.Mesh(
+  new RoundedBoxGeometry(TRAY.hx * 2 + 0.04, 0.12, TRAY.hz * 2 + 0.04, 4, 0.05),
+  new THREE.MeshStandardMaterial({ color: 0xf7f4ef, roughness: 0.55, envMapIntensity: 0.4 })
+);
+tray.position.y = -0.06;
+tray.receiveShadow = true;
+scene.add(tray);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.ShadowMaterial({ opacity: 0.16 }));
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.12;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ───────────────────────────── Sand material ─────────────────────────────
+
+// Vertex colours carry the sand's colour; a fine hash adds grain to colour and normal.
+const sandMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0, envMapIntensity: 0.35 });
+sandMaterial.onBeforeCompile = (shader) => {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vGrainPos;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>\nvGrainPos = position * vec3(${SX * 110}, ${SY * 110}, ${SZ * 110});`);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', /* glsl */`#include <common>
+      varying vec3 vGrainPos;
+      float grainHash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }`)
+    .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
+      vec3 grainCell = floor(vGrainPos);
+      diffuseColor.rgb *= 0.86 + 0.24 * grainHash(grainCell);`)
+    .replace('#include <normal_fragment_maps>', /* glsl */`#include <normal_fragment_maps>
+      vec3 grainTilt = vec3(grainHash(grainCell + 1.7), grainHash(grainCell + 3.1), grainHash(grainCell + 5.3)) - 0.5;
+      normal = normalize(normal + grainTilt * 0.55);`);
+};
+
+function makeSand(maxPolys) {
+  const mc = new MarchingCubes(N, sandMaterial, false, true, maxPolys);
+  mc.isolation = 0.5;
+  mc.scale.set(SX, SY, SZ);
+  mc.position.set(0, PY, 0);
+  mc.castShadow = mc.receiveShadow = true;
+  mc.frustumCulled = false;
+  return mc;
+}
+
+function remesh(mc) {
+  const cache = mc.normal_cache;
+  for (let i = 0; i < N3; i++) cache[i * 3] = 0;   // marching cubes only recomputes normals it sees as empty
+  mc.update();
+}
+
+// ───────────────────────────── The block ─────────────────────────────
+
+const block = makeSand(90000);
+const blockGroup = new THREE.Group();
+blockGroup.add(block);
+scene.add(blockGroup);
+const field = block.field, palette = block.palette;
+const toned = new Uint8Array(N3);
+let dirty = false;
+let blockName = '', blockCount = 0;
+let slices = 0;
+
+function pickLook() {
+  blockCount++;
+  if (blockCount === 1) return { name: 'Sorbet layers', colors: STRIPES[0][1], pattern: 'layers' };
+  if (Math.random() < 0.5) {
+    const [name, colors] = STRIPES[Math.floor(Math.random() * STRIPES.length)];
+    const pattern = Math.random() < 0.6 ? 'layers' : 'tilted';
+    return { name: `${name} ${pattern === 'layers' ? 'layers' : 'bands'}`, colors, pattern };
+  }
+  const [name, colors] = SOLIDS[Math.floor(Math.random() * SOLIDS.length)];
+  return { name, colors, pattern: 'solid' };
+}
+
+function fillBlock() {
+  const look = pickLook();
+  blockName = look.name;
+  slices = 0;
+  const colors = look.colors.map((c) => new THREE.Color(c));
+  const phase = Math.random() * 6.28;
+  const band = 0.115;
+  toned.fill(0);
+  for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const q = x + y * N + z * N2;
+    const wx = cellX(x), wy = cellY(y), wz = cellZ(z);
+    // Rounded box distance
+    const qx = Math.abs(wx) - BLOCK.hx + BLOCK.r, qy = Math.abs(wy - BLOCK.hy) - BLOCK.hy + BLOCK.r, qz = Math.abs(wz) - BLOCK.hz + BLOCK.r;
+    const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0));
+    const sdf = outside + Math.min(Math.max(qx, qy, qz), 0) - BLOCK.r;
+    field[q] = THREE.MathUtils.clamp(0.5 - sdf / RAMP, 0, 1);
+
+    let index = 0;
+    if (look.pattern !== 'solid') {
+      const lean = look.pattern === 'tilted' ? wx * 0.7 : 0;
+      const wave = 0.022 * Math.sin(wx * 5 + phase) + 0.015 * Math.sin(wz * 7 + phase * 2);
+      index = ((Math.floor((wy + lean + wave + 2) / band) % colors.length) + colors.length) % colors.length;
+    }
+    const jitter = 0.97 + 0.06 * hash(q);
+    palette[q * 3] = colors[index].r * jitter;
+    palette[q * 3 + 1] = colors[index].g * jitter;
+    palette[q * 3 + 2] = colors[index].b * jitter;
+  }
+  dirty = true;
+}
+
+// Removes sand along a blade swept from a to b (on the top face), down to bottomY.
+// The blade can be tilted about its own length, so the cut leans as it goes down.
+function carve(ax, az, bx, bz, bottomY, rough) {
+  const tanT = Math.tan(knife.tilt);
+  const nx = -knife.dir.z, nz = knife.dir.x;   // blade normal
+  const reach = KERF + RAMP + Math.abs(tanT) * (TOP_Y + 0.1) + 0.04;
+  const x0 = clampI(toIx(Math.min(ax, bx) - reach)), x1 = clampI(toIx(Math.max(ax, bx) + reach));
+  const z0 = clampI(toIz(Math.min(az, bz) - reach)), z1 = clampI(toIz(Math.max(az, bz) + reach));
+  const y0 = clampI(toIy(bottomY - RAMP)), y1 = clampI(toIy(TOP_Y + RAMP * 2));
+  const abx = bx - ax, abz = bz - az, len2 = abx * abx + abz * abz || 1e-9;
+  let changed = false;
+  for (let z = z0; z <= z1; z++) for (let y = y0; y <= y1; y++) {
+    const wy = cellY(y), shift = (wy - TOP_Y) * tanT, wz = cellZ(z) - nz * shift;
+    const row = y * N + z * N2;
+    for (let x = x0; x <= x1; x++) {
+      const q = row + x;
+      if (field[q] === 0) continue;
+      const wx = cellX(x) - nx * shift;
+      const t = Math.min(1, Math.max(0, ((wx - ax) * abx + (wz - az) * abz) / len2));
+      let d = Math.hypot(wx - ax - abx * t, wz - az - abz * t);
+      if (rough) d += (hash(q * 1.31) - 0.5) * rough * 0.03;
+      const dist = Math.max(d - KERF, bottomY - wy);
+      const v = Math.min(1, Math.max(0, 0.5 + dist / RAMP));
+      if (v < field[q]) { field[q] = v; changed = true; }
+      if (dist < 0.045 && !toned[q]) {
+        toned[q] = 1;
+        palette[q * 3] *= CUT_TONE; palette[q * 3 + 1] *= CUT_TONE; palette[q * 3 + 2] *= CUT_TONE;
+      }
+    }
+  }
+  if (changed) dirty = true;
+  return changed;
+}
+
+// Highest sand in a column, for crumbs landing on the block
+function blockTop(wx, wz) {
+  const x = toIx(wx), z = toIz(wz);
+  if (x < 1 || x > N - 2 || z < 1 || z > N - 2) return -1;
+  for (let y = toIy(TOP_Y + 0.05); y > 0; y--) if (field[x + y * N + z * N2] >= 0.5) return cellY(y);
+  return -1;
+}
+function insideBlock(wx, wy, wz) {
+  const x = toIx(wx), y = toIy(wy), z = toIz(wz);
+  if (x < 1 || x > N - 2 || y < 1 || y > N - 2 || z < 1 || z > N - 2) return false;
+  return field[x + y * N + z * N2] >= 0.5;
+}
+
+// ───────────────────────────── Separation ─────────────────────────────
+
+// After a stroke, flood-fill the sand. The biggest piece stays; every other
+// piece leans away and topples (or, if it is only a crumb, falls as grains).
+const labels = new Int32Array(N3);
+const queue = new Int32Array(N3);
+
+function separate() {
+  labels.fill(0);
+  const pieces = [];
+  let tail = 0;
+  for (let q = 0; q < N3; q++) {
+    if (field[q] < 0.5 || labels[q]) continue;
+    const id = pieces.length + 1;
+    const start = tail;
+    labels[q] = id;
+    queue[tail++] = q;
+    let sx = 0, sz = 0;
+    for (let head = start; head < tail; head++) {
+      const c = queue[head];
+      const x = c % N, z = (c / N2) | 0;
+      sx += cellX(x); sz += cellZ(z);
+      for (const n of [c - 1, c + 1, c - N, c + N, c - N2, c + N2]) {
+        if (field[n] >= 0.5 && !labels[n]) { labels[n] = id; queue[tail++] = n; }
+      }
+    }
+    const count = tail - start;
+    pieces.push({ start, end: tail, count, cx: sx / count, cz: sz / count });
+  }
+  if (pieces.length < 2) return;
+
+  pieces.sort((a, b) => b.count - a.count);
+  const main = pieces[0];
+  for (const piece of pieces.slice(1)) {
+    const cells = queue.slice(piece.start, piece.end);
+    if (piece.count < 60 || !chunkPool.length) {
+      spawnGrains(cells, null, 1);
+    } else {
+      launchChunk(cells, piece, main);
+    }
+    for (const q of cells) field[q] = 0;
+  }
+  slices++;
+  dirty = true;
+}
+
+// ───────────────────────────── Toppling chunks ─────────────────────────────
+
+const chunkPool = [];
+const chunks = [];
+for (let i = 0; i < 3; i++) {
+  const mc = makeSand(60000);
+  const group = new THREE.Group();
+  group.add(mc);
+  group.visible = false;
+  scene.add(group);
+  chunkPool.push({ mc, group });
+}
+
+function launchChunk(cells, piece, main) {
+  const { mc, group } = chunkPool.pop();
+  const own = new Uint8Array(N3);
+  for (const q of cells) own[q] = 1;
+  // Keep this piece's sand, and the thin air around it so the surface stays smooth
+  for (let q = 0; q < N3; q++) {
+    const v = field[q];
+    mc.field[q] = own[q] ? v : (v < 0.5 ? v : 0);
+  }
+  mc.palette.set(palette);
+  remesh(mc);
+
+  // It leans away from the block, pivoting on its outer bottom edge
+  const away = new THREE.Vector2(piece.cx - main.cx, piece.cz - main.cz);
+  if (away.lengthSq() < 1e-6) away.set(0, 1);
+  away.normalize();
+  let reach = -Infinity;
+  for (const q of cells) reach = Math.max(reach, cellX(q % N) * away.x + cellZ((q / N2) | 0) * away.y);
+  const centre = piece.cx * away.x + piece.cz * away.y;
+  const pivot = new THREE.Vector3(piece.cx + away.x * (reach - centre), 0, piece.cz + away.y * (reach - centre));
+  const axis = new THREE.Vector3(away.y, 0, -away.x);   // up × away: tips the top outwards
+
+  group.position.copy(pivot);
+  group.quaternion.identity();
+  mc.position.set(-pivot.x, PY, -pivot.z);
+  group.visible = true;
+  chunks.push({ mc, group, cells, pivot, axis, away, theta: 0, omega: 0.35, age: 0 });
+}
+
+function updateChunks(dt) {
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const c = chunks[i];
+    c.age += dt;
+    c.omega += 5.5 * (Math.sin(c.theta) + 0.12) * dt;
+    c.theta += c.omega * dt;
+    const slide = 0.035 * Math.min(1, c.age / 0.2);
+    c.group.position.set(c.pivot.x + c.away.x * slide, 0, c.pivot.z + c.away.y * slide);
+    c.group.quaternion.setFromAxisAngle(c.axis, c.theta);
+    if (c.theta >= 1.25) {
+      c.group.updateMatrixWorld(true);
+      spawnGrains(c.cells, c, Math.min(1, GRAINS_PER_CHUNK / c.cells.length));
+      c.group.visible = false;
+      chunkPool.push({ mc: c.mc, group: c.group });
+      chunks.splice(i, 1);
+      thump(Math.min(1, c.cells.length / 9000));
+      hiss(Math.min(1, c.cells.length / 6000));
+    }
+  }
+}
+
+// ───────────────────────────── Grains ─────────────────────────────
+
+const grainMaterial = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, envMapIntensity: 0.3, flatShading: true });
+const grains = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.55, 0), grainMaterial, MAX_GRAINS);
+grains.castShadow = grains.receiveShadow = true;
+grains.frustumCulled = false;
+scene.add(grains);
+const g = {
+  pos: new Float32Array(MAX_GRAINS * 3), vel: new Float32Array(MAX_GRAINS * 3),
+  rot: new Float32Array(MAX_GRAINS * 4), size: new Float32Array(MAX_GRAINS),
+  shape: new Float32Array(MAX_GRAINS * 3),   // uneven stretch, so crumbs are lumps rather than beads
+  state: new Uint8Array(MAX_GRAINS),   // 0 unused, 1 falling, 2 resting
+};
+let nextGrain = 0, grainsDirty = false;
+const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+const tmpColor = new THREE.Color();
+for (let i = 0; i < MAX_GRAINS; i++) { grains.setMatrixAt(i, zeroMatrix); grains.setColorAt(i, tmpColor.setRGB(1, 1, 1)); }
+
+// A height map of the crumbs on the tray, so they pile up instead of overlapping
+const HF = 0.02, HFX = Math.ceil(2 * TRAY.hx / HF) + 1, HFZ = Math.ceil(2 * TRAY.hz / HF) + 1;
+const heights = new Float32Array(HFX * HFZ);
+const column = (x, z) => Math.min(HFX - 1, Math.max(0, Math.floor((x + TRAY.hx) / HF))) + Math.min(HFZ - 1, Math.max(0, Math.floor((z + TRAY.hz) / HF))) * HFX;
+
+function writeGrain(i) {
+  const m = grains.instanceMatrix.array, o = i * 16, s = g.size[i];
+  const ax = s * g.shape[i * 3], ay = s * g.shape[i * 3 + 1], az = s * g.shape[i * 3 + 2];
+  const x = g.rot[i * 4], y = g.rot[i * 4 + 1], z = g.rot[i * 4 + 2], w = g.rot[i * 4 + 3];
+  const x2 = x + x, y2 = y + y, z2 = z + z;
+  const xx = x * x2, xy = x * y2, xz = x * z2, yy = y * y2, yz = y * z2, zz = z * z2, wx = w * x2, wy = w * y2, wz = w * z2;
+  m[o] = (1 - (yy + zz)) * ax; m[o + 1] = (xy + wz) * ax; m[o + 2] = (xz - wy) * ax; m[o + 3] = 0;
+  m[o + 4] = (xy - wz) * ay; m[o + 5] = (1 - (xx + zz)) * ay; m[o + 6] = (yz + wx) * ay; m[o + 7] = 0;
+  m[o + 8] = (xz + wy) * az; m[o + 9] = (yz - wx) * az; m[o + 10] = (1 - (xx + yy)) * az; m[o + 11] = 0;
+  m[o + 12] = g.pos[i * 3]; m[o + 13] = g.pos[i * 3 + 1]; m[o + 14] = g.pos[i * 3 + 2]; m[o + 15] = 1;
+}
+
+const spawnPoint = new THREE.Vector3(), spin = new THREE.Vector3(), quat = new THREE.Quaternion();
+function spawnGrains(cells, chunk, keep) {
+  const size = Math.cbrt((DX * DY * DZ) / keep);
+  const src = chunk ? chunk.mc.palette : palette;
+  for (const q of cells) {
+    if (keep < 1 && Math.random() > keep) continue;
+    const i = nextGrain;
+    nextGrain = (nextGrain + 1) % MAX_GRAINS;
+    spawnPoint.set(cellX(q % N), cellY(((q / N) | 0) % N), cellZ((q / N2) | 0));
+    let vx = (Math.random() - 0.5) * 0.7, vy = Math.random() * 0.5, vz = (Math.random() - 0.5) * 0.7;
+    if (chunk) {
+      // Where that cell is now, on the tipped-over slab
+      spawnPoint.x -= chunk.pivot.x;
+      spawnPoint.z -= chunk.pivot.z;
+      spawnPoint.applyMatrix4(chunk.group.matrixWorld);
+      spin.copy(spawnPoint).sub(chunk.group.position).cross(chunk.axis).multiplyScalar(-chunk.omega * 0.7);
+      vx += spin.x; vy += spin.y * 0.3; vz += spin.z;
+    }
+    g.pos.set([spawnPoint.x, spawnPoint.y, spawnPoint.z], i * 3);
+    g.vel.set([vx, vy, vz], i * 3);
+    quat.random();
+    g.rot.set([quat.x, quat.y, quat.z, quat.w], i * 4);
+    g.size[i] = size * (0.65 + Math.random() * Math.random() * 0.9);
+    g.shape.set([0.8 + Math.random() * 0.45, 0.65 + Math.random() * 0.4, 0.8 + Math.random() * 0.45], i * 3);
+    g.state[i] = 1;
+    const shade = 0.9 + Math.random() * 0.14;
+    grains.setColorAt(i, tmpColor.setRGB(src[q * 3] * shade, src[q * 3 + 1] * shade, src[q * 3 + 2] * shade));
+  }
+  grains.instanceColor.needsUpdate = true;
+  grainsDirty = true;
+}
+
+function settle(i) {
+  const s = g.size[i];
+  let x = g.pos[i * 3], z = g.pos[i * 3 + 2];
+  let c = column(x, z);
+  // Roll downhill until the pile is gentle enough to hold it
+  for (let step = 0; step < 60; step++) {
+    const cx = c % HFX, cz = (c / HFX) | 0;
+    let low = c, edge = null;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = cx + dx, nz = cz + dz;
+      if (nx < 0 || nx >= HFX || nz < 0 || nz >= HFZ) { if (heights[c] > s * 0.7) edge = [dx, dz]; continue; }
+      const n = nx + nz * HFX;
+      if (heights[n] < heights[low]) low = n;
+    }
+    if (edge) {   // over the rim and onto the table
+      g.pos[i * 3] = (cx * HF - TRAY.hx) + edge[0] * (0.05 + Math.random() * 0.12);
+      g.pos[i * 3 + 1] = GROUND + s * 0.4;
+      g.pos[i * 3 + 2] = (cz * HF - TRAY.hz) + edge[1] * (0.05 + Math.random() * 0.12);
+      g.state[i] = 2;
+      return;
+    }
+    if (heights[c] - heights[low] <= s * 0.7) break;
+    c = low;
+  }
+  x = (c % HFX) * HF - TRAY.hx + HF * 0.5 + (Math.random() - 0.5) * HF;
+  z = Math.floor(c / HFX) * HF - TRAY.hz + HF * 0.5 + (Math.random() - 0.5) * HF;
+  g.pos[i * 3] = x;
+  g.pos[i * 3 + 1] = heights[c] + s * 0.4;
+  g.pos[i * 3 + 2] = z;
+  // Raise the pile by the grain's volume (loosely packed), spread over a 3×3 patch
+  const rise = (s * s * s) / (HF * HF * 0.6);
+  const cx = c % HFX, cz = (c / HFX) | 0;
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const nx = cx + dx, nz = cz + dz;
+    if (nx < 0 || nx >= HFX || nz < 0 || nz >= HFZ) continue;
+    heights[nx + nz * HFX] += rise * (dx || dz ? (dx && dz ? 0.0625 : 0.125) : 0.25);
+  }
+  g.state[i] = 2;
+}
+
+function updateGrains(dt) {
+  for (let i = 0; i < MAX_GRAINS; i++) {
+    if (g.state[i] !== 1) continue;
+    const o = i * 3, s = g.size[i];
+    const px = g.pos[o], py = g.pos[o + 1], pz = g.pos[o + 2];
+    g.vel[o + 1] -= 9 * dt;
+    let nx = px + g.vel[o] * dt, ny = py + g.vel[o + 1] * dt, nz = pz + g.vel[o + 2] * dt;
+    if (insideBlock(nx, ny, nz)) {
+      const top = blockTop(nx, nz);
+      if (py >= top - 0.01) {   // landed on the block
+        g.pos.set([nx, top + s * 0.42, nz], o);
+        g.state[i] = 2;
+        writeGrain(i);
+        continue;
+      }
+      nx = px; nz = pz;
+      g.vel[o] *= -0.3; g.vel[o + 2] *= -0.3;
+    }
+    g.pos[o] = nx; g.pos[o + 1] = ny; g.pos[o + 2] = nz;
+    if (Math.abs(nx) > TRAY.hx || Math.abs(nz) > TRAY.hz) {
+      if (ny - s * 0.4 <= GROUND) { g.pos[o + 1] = GROUND + s * 0.4; g.state[i] = 2; }
+    } else if (ny - s * 0.5 <= heights[column(nx, nz)]) settle(i);
+    writeGrain(i);
+    grainsDirty = true;
+  }
+  if (grainsDirty) { grains.instanceMatrix.needsUpdate = true; grainsDirty = false; }
+}
+
+function clearGrains() {
+  g.state.fill(0);
+  heights.fill(0);
+  for (let i = 0; i < MAX_GRAINS; i++) grains.setMatrixAt(i, zeroMatrix);
+  grains.instanceMatrix.needsUpdate = true;
+  nextGrain = 0;
+}
+
+// ───────────────────────────── Knife ─────────────────────────────
+
+// A bench scraper: a tall steel blade with a wooden handle along the top
+const knife = {
+  group: new THREE.Group(),
+  dir: new THREE.Vector3(0, 0, 1),   // along the blade
+  tilt: 0, tiltTarget: 0,
+  depth: 0,                           // 0 hovering, 1 all the way down to the tray
+  bottom: TOP_Y + 0.14,
+};
+{
+  // Brushed steel: fine horizontal streaks over a soft top-to-bottom sheen
+  const brushed = document.createElement('canvas');
+  brushed.width = 256; brushed.height = 512;
+  const b = brushed.getContext('2d');
+  const sheen = b.createLinearGradient(0, 0, 256, 512);
+  sheen.addColorStop(0, '#f4f6f8'); sheen.addColorStop(0.45, '#b9bec6'); sheen.addColorStop(0.7, '#e8ebee'); sheen.addColorStop(1, '#9ea4ad');
+  b.fillStyle = sheen;
+  b.fillRect(0, 0, 256, 512);
+  for (let i = 0; i < 900; i++) {
+    b.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '60,64,70'},${0.04 + Math.random() * 0.08})`;
+    b.fillRect(Math.random() * 256 - 60, Math.random() * 512, 40 + Math.random() * 200, 1);
+  }
+  const steelMap = new THREE.CanvasTexture(brushed);
+  steelMap.colorSpace = THREE.SRGBColorSpace;
+  const steel = new THREE.MeshStandardMaterial({ map: steelMap, metalness: 0.55, roughness: 0.3, envMapIntensity: 1.5 });
+  const edge = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.9, roughness: 0.12, envMapIntensity: 2 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x7a4f32, roughness: 0.6, envMapIntensity: 0.4 });
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(BLADE, 1.02, 0.008), steel);
+  blade.position.y = 0.51;
+  const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, BLADE - 0.06, 6, 16), wood);
+  handle.rotation.z = Math.PI / 2;
+  handle.position.y = 1.06;
+  const bevel = new THREE.Mesh(new THREE.BoxGeometry(BLADE, 0.03, 0.01), edge);   // the honed edge catches the light
+  bevel.position.y = 0.015;
+  blade.castShadow = handle.castShadow = true;
+  knife.group.add(blade, bevel, handle);
+  knife.group.rotation.order = 'YXZ';
+  knife.group.visible = false;
+  scene.add(knife.group);
+}
+
+function placeKnife() {
+  const yaw = Math.atan2(-knife.dir.z, knife.dir.x);
+  knife.group.rotation.set(knife.tilt, yaw, 0);
+  // The blade passes through the cursor where it meets the top of the block
+  const lean = (TOP_Y - knife.bottom) * Math.tan(knife.tilt);
+  knife.group.position.set(cursor.x + knife.dir.z * lean, knife.bottom, cursor.z - knife.dir.x * lean);
+}
+
+// ───────────────────────────── Input ─────────────────────────────
+
+const cursor = new THREE.Vector3(0.9, TOP_Y, 0.2);
+const lastCut = new THREE.Vector3();
+const raycaster = new THREE.Raycaster();
+const topPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -TOP_Y);
+const ndc = new THREE.Vector2(), hit = new THREE.Vector3();
+let cutting = false, strokeChanged = false, cutSpeed = 0;
+let state = 'drop', dropY = 1.8, dropV = 0, clearT = 0;
+let jiggle = 0, jiggleV = 0;
+
+function pointAt(e) {
+  const rect = canvas.getBoundingClientRect();
+  ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  if (!raycaster.ray.intersectPlane(topPlane, hit)) return;
+  hit.x = THREE.MathUtils.clamp(hit.x, -TRAY.hx, TRAY.hx);
+  hit.z = THREE.MathUtils.clamp(hit.z, -TRAY.hz, TRAY.hz);
+  const dx = hit.x - cursor.x, dz = hit.z - cursor.z, d = Math.hypot(dx, dz);
+  if (d > 0.004) {   // turn the blade to follow the stroke
+    const k = cutting ? 0.25 : 0.4;
+    knife.dir.x += (dx / d - knife.dir.x) * k;
+    knife.dir.z += (dz / d - knife.dir.z) * k;
+    knife.dir.normalize();
+  }
+  cursor.set(hit.x, TOP_Y, hit.z);
+  knife.group.visible = true;
+}
+
+canvas.addEventListener('pointermove', pointAt);
+canvas.addEventListener('pointerdown', (e) => {
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already released */ }
+  pointAt(e);
+  cutting = true;
+  strokeChanged = false;
+  lastCut.copy(cursor);
+  startAudio();
+  askForMotion();
+});
+const endStroke = (e) => {
+  cutting = false;
+  if (strokeChanged && state === 'ready') separate();
+  strokeChanged = false;
+  if (e.pointerType !== 'mouse') knife.group.visible = false;
+};
+canvas.addEventListener('pointerup', endStroke);
+canvas.addEventListener('pointercancel', endStroke);
+canvas.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !cutting) knife.group.visible = false; });
+
+function newBlock() {
+  if (state === 'clear') return;
+  state = 'clear';
+  clearT = 0;
+}
+canvas.addEventListener('dblclick', newBlock);
+let lastTap = 0;
+canvas.addEventListener('pointerup', (e) => {
+  if (e.pointerType === 'mouse') return;
+  const now = performance.now();
+  if (now - lastTap < 300) newBlock();
+  lastTap = now;
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  knife.tiltTarget = THREE.MathUtils.clamp(knife.tiltTarget + e.deltaY * 0.0012, -MAX_TILT, MAX_TILT);
+}, { passive: false });
+
+function shake(strength = 1) {
+  jiggleV += 2.2 * strength;
+  for (let i = 0; i < MAX_GRAINS; i++) {
+    if (g.state[i] !== 2) continue;
+    g.state[i] = 1;
+    g.vel.set([(Math.random() - 0.5) * 0.9 * strength, (0.4 + Math.random() * 0.9) * strength, (Math.random() - 0.5) * 0.9 * strength], i * 3);
+  }
+  heights.fill(0);
+  hiss(0.35 * strength);
+}
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); shake(); }
+  else if (e.code === 'KeyM') {
+    muted = !muted;
+    if (master) master.gain.setTargetAtTime(muted ? 0 : 1, audio.currentTime, 0.05);
+  }
+});
+
+let motionAsked = false, lastShake = 0;
+function askForMotion() {
+  if (motionAsked || typeof DeviceMotionEvent === 'undefined') return;
+  motionAsked = true;
+  if (typeof DeviceMotionEvent.requestPermission === 'function') DeviceMotionEvent.requestPermission().catch(() => {});
+}
+window.addEventListener('devicemotion', (e) => {
+  const a = e.acceleration;
+  if (!a || a.x == null) return;
+  const mag = Math.hypot(a.x, a.y, a.z);
+  const now = performance.now();
+  if (mag > 10 && now - lastShake > 400) { lastShake = now; shake(Math.min(1.4, mag / 15)); }
+});
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+// A gritty crunch while the blade moves through sand, a thump when a slab lands
+let audio = null, master = null, crunchGain = null, noiseBuffer = null, muted = false;
+
+function startAudio() {
+  if (audio) { audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  master = audio.createGain();
+  master.connect(audio.destination);
+  noiseBuffer = audio.createBuffer(1, audio.sampleRate * 2, audio.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+  const noise = audio.createBufferSource();
+  noise.buffer = noiseBuffer;
+  noise.loop = true;
+  const band = audio.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.value = 2400;
+  band.Q.value = 0.7;
+  const low = audio.createBiquadFilter();
+  low.type = 'lowpass';
+  low.frequency.value = 700;
+  crunchGain = audio.createGain();
+  crunchGain.gain.value = 0;
+  noise.connect(band).connect(crunchGain);
+  noise.connect(low).connect(crunchGain);
+  crunchGain.connect(master);
+  noise.start();
+}
+
+function burst(type, frequency, volume, duration) {
+  if (!audio || muted || volume <= 0) return;
+  const t = audio.currentTime;
+  const src = audio.createBufferSource();
+  src.buffer = noiseBuffer;
+  const filter = audio.createBiquadFilter();
+  filter.type = type;
+  filter.frequency.value = frequency;
+  const gain = audio.createGain();
+  gain.gain.setValueAtTime(volume, t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+  src.connect(filter).connect(gain).connect(master);
+  src.start(t, Math.random());
+  src.stop(t + duration + 0.05);
+}
+
+function thump(weight) {
+  if (!audio || muted) return;
+  const t = audio.currentTime;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  osc.frequency.setValueAtTime(120, t);
+  osc.frequency.exponentialRampToValueAtTime(48, t + 0.18);
+  gain.gain.setValueAtTime(0.35 * (0.4 + weight), t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+  osc.connect(gain).connect(master);
+  osc.start(t);
+  osc.stop(t + 0.32);
+  burst('lowpass', 500, 0.3 * (0.4 + weight), 0.25);
+}
+const hiss = (amount) => burst('highpass', 2800, 0.12 * amount, 0.7);
+
+function updateSound(crunch) {
+  if (!audio) return;
+  crunchGain.gain.setTargetAtTime(crunch * (0.55 + 0.45 * Math.random()), audio.currentTime, 0.02);
+}
+
+// ───────────────────────────── Status & resize ─────────────────────────────
+
+let lastStatus = '';
+function updateStatus() {
+  const deg = Math.round(THREE.MathUtils.radToDeg(knife.tiltTarget));
+  const text = `${blockName} / Blade ${deg > 0 ? '+' : ''}${deg}°` + (slices ? ` / ${slices} ${slices === 1 ? 'slice' : 'slices'}` : '');
+  if (text !== lastStatus) statusEl.textContent = lastStatus = text;
+}
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const d = Math.max(2.15 / (Math.tan(halfFov) * camera.aspect), 1.75 / Math.tan(halfFov));
+  const elevation = THREE.MathUtils.degToRad(34), azimuth = THREE.MathUtils.degToRad(22);
+  camera.position.set(Math.sin(azimuth) * Math.cos(elevation) * d, Math.sin(elevation) * d + 0.3, Math.cos(azimuth) * Math.cos(elevation) * d);
+  camera.lookAt(0, 0.3, 0);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+fillBlock();
+const clock = new THREE.Clock();
+const ease = (t) => t * t * (3 - 2 * t);
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 1 / 30);
+  let crunch = 0;
+
+  if (state === 'clear') {
+    clearT += dt / 0.22;
+    const s = Math.max(0.001, 1 - ease(Math.min(1, clearT)));
+    blockGroup.scale.setScalar(s);
+    if (clearT >= 1) {
+      for (const c of chunks) { c.group.visible = false; chunkPool.push({ mc: c.mc, group: c.group }); }
+      chunks.length = 0;
+      clearGrains();
+      fillBlock();
+      blockGroup.scale.setScalar(1);
+      state = 'drop';
+      dropY = 1.8;
+      dropV = 0;
+    }
+  } else if (state === 'drop') {
+    dropV -= 9.8 * dt;
+    dropY += dropV * dt;
+    if (dropY <= 0) {
+      dropY = 0;
+      jiggleV += dropV * 0.5;
+      if (dropV < -1.2) { thump(0.5 * Math.min(1, -dropV / 5)); dropV = -dropV * 0.2; }
+      else { dropV = 0; state = 'ready'; }
+    }
+    blockGroup.position.y = dropY;
+  }
+
+  // Blade: sinks while pressed, lifts when released
+  knife.tilt += (knife.tiltTarget - knife.tilt) * Math.min(1, dt * 12);
+  knife.depth = cutting && state === 'ready' ? Math.min(1, knife.depth + dt * 3) : Math.max(0, knife.depth - dt * 5);
+  knife.bottom = THREE.MathUtils.lerp(TOP_Y + 0.14, 0.003, ease(knife.depth));
+  if (cutting && state === 'ready') {
+    const moved = Math.hypot(cursor.x - lastCut.x, cursor.z - lastCut.z);
+    cutSpeed += (moved / dt - cutSpeed) * Math.min(1, dt * 10);
+    const rough = THREE.MathUtils.smoothstep(cutSpeed, 1.2, 4);
+    const hx = knife.dir.x * BLADE / 2, hz = knife.dir.z * BLADE / 2;
+    let changed = carve(cursor.x - hx, cursor.z - hz, cursor.x + hx, cursor.z + hz, knife.bottom, rough);
+    if (moved > 1e-4) changed = carve(lastCut.x, lastCut.z, cursor.x, cursor.z, knife.bottom, rough) || changed;
+    if (changed) { strokeChanged = true; crunch = Math.min(0.5, 0.12 + cutSpeed * 0.12); }
+    lastCut.copy(cursor);
+  }
+  placeKnife();
+
+  jiggleV += (-140 * jiggle - 9 * jiggleV) * dt;
+  jiggle += jiggleV * dt;
+  if (state !== 'clear') blockGroup.scale.set(1 - jiggle * 0.08, 1 + jiggle * 0.16, 1 - jiggle * 0.08);
+
+  if (dirty) { remesh(block); dirty = false; }
+  updateChunks(dt);
+  updateGrains(dt);
+  updateSound(crunch);
+  updateStatus();
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="kinetic-sand"></script>
+</body>
+</html>

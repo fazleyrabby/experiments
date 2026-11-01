@@ -1,0 +1,53 @@
+/* Phosphor Icons, MIT. Official font and glyph mappings; WOFF2 only. */
+@font-face{font-family:"Phosphor";src:url("@phosphor-icons/web/regular/Phosphor.woff2") format("woff2");font-weight:normal;font-style:normal;font-display:block}
+.ph{font-family:"Phosphor"!important;font-style:normal;font-weight:normal;font-variant:normal;text-transform:none;line-height:1;letter-spacing:0;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.ph.ph-arrow-up-right:before {
+  content: "\e092";
+}
+.ph.ph-sun:before {
+  content: "\e472";
+}
+.ph.ph-moon:before {
+  content: "\e330";
+}
+.ph.ph-airplane-tilt:before {
+  content: "\e5d6";
+}
+.ph.ph-bezier-curve:before {
+  content: "\eb00";
+}
+.ph.ph-speaker-slash:before {
+  content: "\e45a";
+}
+.ph.ph-speaker-high:before {
+  content: "\e44a";
+}
+.ph.ph-info:before {
+  content: "\e2ce";
+}
+.ph.ph-warning:before {
+  content: "\e4e0";
+}
+.ph.ph-arrows-out-cardinal:before {
+  content: "\e0a4";
+}
+.ph.ph-arrow-counter-clockwise:before {
+  content: "\e038";
+}
+.ph.ph-repeat:before {
+  content: "\e3f6";
+}
+.ph.ph-x:before {
+  content: "\e4f6";
+}
+@font-face{font-family:"Phosphor-Fill";src:url("@phosphor-icons/web/fill/Phosphor-Fill.woff2") format("woff2");font-weight:normal;font-style:normal;font-display:block}
+.ph-fill{font-family:"Phosphor-Fill"!important;font-style:normal;font-weight:normal;font-variant:normal;text-transform:none;line-height:1;letter-spacing:0;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.ph-fill.ph-play:before {
+  content: "\e3d0";
+}
+.ph-fill.ph-pause:before {
+  content: "\e39e";
+}
+.ph.ph-corners-out:before {
+  content: "\e1d0";
+}

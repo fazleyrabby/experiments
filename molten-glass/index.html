@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Molten Glass // 04</title>
+<style>
+  :root { --bg: #121316; --ink: #F3E9DC; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas#stage.dragging { cursor: grabbing; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.left { left: 28px; }
+  .label.right { left: 28px; top: 24px; bottom: auto; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.5; }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; right: 18px; }
+    .label.right { top: 16px; left: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label left">
+  <div>Molten Glass // 04</div>
+  <div class="hint">Drag to shape / Pull the tip to stretch<br>Double-click for a new gather</div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const RINGS = 80;                 // profile samples along the height
+const SEGMENTS = 72;              // around the axis
+const BASE_Y = -1.25;             // where the glass meets the rod
+const ROD_RADIUS = 0.085;
+const START_HEIGHT = 1.7;
+const MIN_HEIGHT = 0.9, MAX_HEIGHT = 3.2;
+const MIN_RADIUS = 0.07, MAX_RADIUS = 1.45;
+const BRUSH = 0.09;               // brush width, as a fraction of the height
+const COOL_TIME = 9;              // seconds from white-hot to set, once you let go
+const SET_BELOW = 0.06;           // heat under which the glass can no longer be worked
+
+// Each gather: body tint + two cane colours that get twisted into it
+const PALETTE = [
+  { tint: 0xDDF0FF, a: 0x1238FF, b: 0xFFFFFF },
+  { tint: 0xFFF1D6, a: 0xFF7A00, b: 0xE3242B },
+  { tint: 0xE2FFF0, a: 0x00A86B, b: 0xFFD23F },
+  { tint: 0xFFE6F0, a: 0xFF3D8B, b: 0x7C4DFF },
+];
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0B0C0E);   // matches the backdrop's edge
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+pmrem.dispose();
+
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+
+const key = new THREE.DirectionalLight(0xFFFFFF, 1.6);
+key.position.set(-3, 5, 5);
+scene.add(key);
+const heatLight = new THREE.PointLight(0xFF7A2E, 0, 12, 2);   // the glass lights the rod while hot
+scene.add(heatLight);
+
+// Backlight: a soft light-table glow behind the piece, so coloured glass has
+// something bright to filter. A real (tone-mapped) mesh, so it looks the same
+// seen directly and seen through the glass.
+function buildBackdrop() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(256, 250, 0, 256, 250, 256);
+  g.addColorStop(0.0, '#CFC9BE');
+  g.addColorStop(0.3, '#8B8780');
+  g.addColorStop(0.65, '#26262A');
+  g.addColorStop(1.0, '#0B0C0E');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 512, 512);
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(13, 13), new THREE.MeshBasicMaterial({ map: texture, toneMapped: false }));
+  mesh.position.set(0, 0.3, -3);
+  return mesh;
+}
+scene.add(buildBackdrop());
+
+// ───────────────────────────── Rod ─────────────────────────────
+
+const rod = new THREE.Mesh(
+  new THREE.CylinderGeometry(ROD_RADIUS, ROD_RADIUS, 8, 32),
+  new THREE.MeshStandardMaterial({ color: 0x8A8D93, metalness: 1, roughness: 0.35 })
+);
+rod.position.y = BASE_Y - 4 + 0.05;
+scene.add(rod);
+
+// ───────────────────────────── Glass ─────────────────────────────
+// A surface of revolution. `radii` is the editable profile; the mesh is
+// rebuilt from it every frame.
+
+const radii = new Float32Array(RINGS + 1);
+const drawn = new Float32Array(RINGS + 1);     // profile with the rod blend and rounded tip applied
+let height = START_HEIGHT;
+let volume = 0;                                // conserved while shaping
+let heat = 1;                                  // 1 white-hot .. 0 cold
+let twist = 0;                                 // how far the canes have been wound
+let isSet = false;
+let paletteIndex = 0;
+
+const glassGeometry = new THREE.BufferGeometry();
+const positions = new Float32Array((RINGS + 1) * (SEGMENTS + 1) * 3);
+const normals = new Float32Array(positions.length);
+const colors = new Float32Array(positions.length);
+{
+  const index = [];
+  const row = SEGMENTS + 1;
+  for (let j = 0; j < RINGS; j++) {
+    for (let k = 0; k < SEGMENTS; k++) {
+      const a = j * row + k, b = a + 1, c = a + row, d = c + 1;
+      index.push(a, c, b, b, c, d);
+    }
+  }
+  glassGeometry.setIndex(index);
+  glassGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+  glassGeometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3).setUsage(THREE.DynamicDrawUsage));
+  glassGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage));
+}
+
+const glassMaterial = new THREE.MeshPhysicalMaterial({
+  vertexColors: true,
+  transmission: 1,
+  roughness: 0.04,
+  ior: 1.5,
+  thickness: 0.7,
+  clearcoat: 1,
+  clearcoatRoughness: 0.03,
+  emissive: 0xFF4400,
+  emissiveIntensity: 0,
+  envMapIntensity: 1.8,
+});
+const glass = new THREE.Mesh(glassGeometry, glassMaterial);
+glass.frustumCulled = false;
+scene.add(glass);
+
+// Heat halo: an additive glow drawn over the piece
+function buildHalo() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(255, 150, 60, 0.9)');
+  g.addColorStop(0.3, 'rgba(255, 90, 20, 0.35)');
+  g.addColorStop(1, 'rgba(255, 60, 0, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: true,
+  }));
+  sprite.renderOrder = 10;
+  return sprite;
+}
+const halo = buildHalo();
+scene.add(halo);
+
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+function measureVolume() {
+  let sum = 0;
+  for (let i = 0; i <= RINGS; i++) sum += radii[i] * radii[i];
+  return (sum * height) / RINGS;
+}
+
+function newGather() {
+  for (let i = 0; i <= RINGS; i++) radii[i] = 0.5 + 0.14 * Math.sin((Math.PI * i) / RINGS);
+  height = START_HEIGHT;
+  volume = measureVolume();
+  heat = 1;
+  twist = 0;
+  isSet = false;
+  paletteIndex = (paletteIndex + 1) % PALETTE.length;
+  paintCanes();
+}
+
+// Vertex colours: mostly clear body with two coloured canes spiralling up it
+const caneA = new THREE.Color(), caneB = new THREE.Color(), tint = new THREE.Color(), mixed = new THREE.Color();
+function paintCanes() {
+  const p = PALETTE[paletteIndex];
+  tint.setHex(p.tint); caneA.setHex(p.a); caneB.setHex(p.b);
+  const row = SEGMENTS + 1;
+  for (let j = 0; j <= RINGS; j++) {
+    const t = j / RINGS;
+    const wind = twist * (t - 0.15);
+    const fade = smooth(0.02, 0.2, t) * (1 - smooth(0.9, 1, t) * 0.5);
+    for (let k = 0; k <= SEGMENTS; k++) {
+      const phi = (k / SEGMENTS) * Math.PI * 2;
+      const a = smooth(0.45, 0.9, Math.sin(3 * phi + wind)) * fade;
+      const b = smooth(0.7, 0.96, Math.sin(3 * phi + wind + 2.2)) * fade;
+      mixed.copy(tint).lerp(caneA, a).lerp(caneB, b);
+      const o = (j * row + k) * 3;
+      colors[o] = mixed.r; colors[o + 1] = mixed.g; colors[o + 2] = mixed.b;
+    }
+  }
+  glassGeometry.attributes.color.needsUpdate = true;
+}
+
+function rebuildGlass() {
+  // Blend into the rod at the bottom, round the tip off at the top
+  for (let j = 0; j <= RINGS; j++) {
+    const t = j / RINGS;
+    let r = THREE.MathUtils.lerp(ROD_RADIUS * 1.25, radii[j], smooth(0, 0.14, t));
+    if (t > 0.84) { const u = (t - 0.84) / 0.16; r *= Math.sqrt(Math.max(0, 1 - u * u)); }
+    drawn[j] = r;
+  }
+  const row = SEGMENTS + 1, dy = height / RINGS;
+  for (let j = 0; j <= RINGS; j++) {
+    const r = drawn[j], y = BASE_Y + j * dy;
+    const slope = (drawn[Math.min(RINGS, j + 1)] - drawn[Math.max(0, j - 1)]) / ((Math.min(RINGS, j + 1) - Math.max(0, j - 1)) * dy);
+    const inv = 1 / Math.hypot(1, slope);
+    for (let k = 0; k <= SEGMENTS; k++) {
+      const phi = (k / SEGMENTS) * Math.PI * 2, cx = Math.cos(phi), sz = Math.sin(phi);
+      const o = (j * row + k) * 3;
+      positions[o] = r * cx; positions[o + 1] = y; positions[o + 2] = r * sz;
+      normals[o] = cx * inv; normals[o + 1] = -slope * inv; normals[o + 2] = sz * inv;
+    }
+  }
+  // The very tip closes to a point: aim its normals straight up
+  for (let k = 0; k <= SEGMENTS; k++) {
+    const o = (RINGS * row + k) * 3;
+    normals[o] = 0; normals[o + 1] = 1; normals[o + 2] = 0;
+  }
+  glassGeometry.attributes.position.needsUpdate = true;
+  glassGeometry.attributes.normal.needsUpdate = true;
+}
+
+// ───────────────────────────── Heat ─────────────────────────────
+
+const HOT_COLOR = new THREE.Color(1.0, 0.5, 0.16);
+const WHITE = new THREE.Color(1, 1, 1);
+
+function applyHeat() {
+  const glow = heat * heat;
+  glassMaterial.emissiveIntensity = 1.7 * glow;
+  glassMaterial.transmission = THREE.MathUtils.lerp(1, 0.12, smooth(0.05, 0.75, heat));
+  glassMaterial.roughness = THREE.MathUtils.lerp(0.04, 0.3, heat);
+  glassMaterial.color.copy(WHITE).lerp(HOT_COLOR, smooth(0.05, 0.8, heat));
+  heatLight.intensity = 18 * glow;
+  heatLight.position.set(0, BASE_Y + height * 0.5, 1.2);
+  halo.position.set(0, BASE_Y + height * 0.55, 0.5);
+  halo.scale.setScalar(height * 2.6 + 1.5);
+  halo.material.opacity = 0.4 * glow;
+
+  const celsius = Math.round(24 + 1126 * heat);
+  statusEl.textContent = `${celsius.toLocaleString('en-US')}°C · ${isSet ? 'Set' : heat > 0.35 ? 'Workable' : 'Cooling'}`;
+}
+
+// ───────────────────────────── Sound ─────────────────────────────
+// Furnace roar that follows the heat, and a glassy ping when the piece sets.
+
+let audio = null, roarGain = null;
+
+function initAudio() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  const buffer = audio.createBuffer(1, audio.sampleRate * 2, audio.sampleRate);
+  const data = buffer.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < data.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; data[i] = last * 3.5; }   // brown noise
+  const src = audio.createBufferSource();
+  src.buffer = buffer; src.loop = true;
+  const low = audio.createBiquadFilter();
+  low.type = 'lowpass'; low.frequency.value = 420;
+  roarGain = audio.createGain();
+  roarGain.gain.value = 0;
+  src.connect(low).connect(roarGain).connect(audio.destination);
+  src.start();
+}
+
+function playPing() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  [[2093, 0.12, 0.9], [3136, 0.07, 0.6], [4699, 0.04, 0.35]].forEach(([freq, level, decay]) => {
+    const osc = audio.createOscillator();
+    osc.frequency.value = freq;
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(level, t + 0.003);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t); osc.stop(t + decay + 0.05);
+  });
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const workPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);   // plane through the axis, facing the camera
+const hit = new THREE.Vector3();
+const tool = { down: false, id: -1, mode: 'shape', x: 0, y: 0 };
+
+function toolPosition(e) {
+  ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  if (!raycaster.ray.intersectPlane(workPlane, hit)) return false;
+  tool.x = hit.x; tool.y = hit.y;
+  return true;
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  initAudio();
+  if (tool.down || !toolPosition(e)) return;
+  const t = (tool.y - BASE_Y) / height;
+  if (t < -0.05 || t > 1.2 || Math.abs(tool.x) > 2) return;
+  tool.down = true; tool.id = e.pointerId;
+  tool.mode = t > 0.86 ? 'stretch' : 'shape';
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add('dragging');
+});
+canvas.addEventListener('pointermove', (e) => { if (tool.down && e.pointerId === tool.id) toolPosition(e); });
+const endTool = (e) => {
+  if (e.pointerId !== tool.id) return;
+  tool.down = false; tool.id = -1;
+  canvas.classList.remove('dragging');
+};
+canvas.addEventListener('pointerup', endTool);
+canvas.addEventListener('pointercancel', endTool);
+canvas.addEventListener('dblclick', newGather);
+
+function shapeGlass(dt) {
+  // Hotter glass follows the tool faster
+  const follow = 1 - Math.exp(-11 * dt * heat);
+
+  if (tool.down && tool.mode === 'stretch') {
+    const target = THREE.MathUtils.clamp(tool.y - BASE_Y, MIN_HEIGHT, MAX_HEIGHT);
+    height += (target - height) * follow;
+  } else if (tool.down) {
+    const at = (tool.y - BASE_Y) / height;
+    const target = THREE.MathUtils.clamp(Math.abs(tool.x), MIN_RADIUS, MAX_RADIUS);
+    for (let i = 0; i <= RINGS; i++) {
+      const d = (i / RINGS - at) / BRUSH;
+      const w = Math.exp(-d * d);
+      if (w > 0.002) radii[i] += (target - radii[i]) * w * follow;
+    }
+  }
+
+  // Surface tension: the profile relaxes while soft
+  const relax = Math.min(0.2, 5 * dt * heat);
+  let previous = radii[0];
+  for (let i = 1; i < RINGS; i++) {
+    const current = radii[i];
+    radii[i] += relax * 0.5 * (previous - 2 * current + radii[i + 1]);
+    previous = current;
+  }
+
+  // Glass is incompressible. Stretching thins it; squeezing it sideways makes
+  // it grow taller, pulling it wide makes it shorter (like clay on a wheel).
+  if (tool.down && tool.mode === 'stretch') {
+    const scale = THREE.MathUtils.clamp(Math.sqrt(volume / measureVolume()), 1 - 2 * dt, 1 + 2 * dt);
+    for (let i = 0; i <= RINGS; i++) radii[i] = THREE.MathUtils.clamp(radii[i] * scale, MIN_RADIUS, MAX_RADIUS);
+  } else {
+    const wanted = THREE.MathUtils.clamp((height * volume) / measureVolume(), MIN_HEIGHT, MAX_HEIGHT);
+    height += (wanted - height) * Math.min(1, 5 * dt);
+  }
+  if (height <= MIN_HEIGHT || height >= MAX_HEIGHT) volume = measureVolume();   // out of room: accept the new volume
+}
+
+function updateGlass(dt) {
+  if (!isSet) {
+    // Working keeps it hot; let go and it cools
+    heat = tool.down ? Math.min(1, heat + dt * 0.6) : Math.max(0, heat - dt / COOL_TIME);
+    if (heat < SET_BELOW) { isSet = true; playPing(); }
+    else {
+      shapeGlass(dt);
+      twist += dt * 0.55 * heat;
+      paintCanes();
+    }
+  } else if (heat > 0) {
+    heat = Math.max(0, heat - dt / COOL_TIME);
+  }
+  glass.rotation.y += dt * (0.35 + 0.5 * heat);   // always turning on the rod
+  rebuildGlass();
+  applyHeat();
+  if (roarGain) roarGain.gain.setTargetAtTime(0.16 * heat * heat, audio.currentTime, 0.1);
+}
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  // Keep the tallest and widest possible piece in frame
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitH = 2.55 / Math.tan(halfFov);
+  const fitW = 1.9 / (Math.tan(halfFov) * camera.aspect);
+  camera.position.set(0, 0.45, Math.max(fitH, fitW));
+  camera.lookAt(0, 0.45, 0);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+newGather();
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  updateGlass(dt);
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="molten-glass"></script>
+</body>
+</html>

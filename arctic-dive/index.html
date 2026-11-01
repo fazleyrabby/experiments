@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e12">
+<title>Arctic Dive</title>
+<meta name="description" content="A diver steps off a workboat into a mirror-still arctic sea, swims beneath tabular icebergs and climbs back aboard, under raymarched storm clouds. Real-time Three.js.">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; color: #e6ecf1; }
+  canvas { position: fixed; inset: 0; display: block; outline: none; touch-action: none; }
+  #hud {
+    position: fixed; z-index: 2; left: 16px; bottom: 16px; pointer-events: none; user-select: none;
+    font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.04em;
+    color: rgba(230, 236, 241, 0.62); transition: opacity 0.4s;
+  }
+  #hud b { display: block; color: #fff; font-weight: 600; letter-spacing: 0.24em; font-size: 12px; margin-bottom: 2px; }
+  #chip {
+    position: fixed; z-index: 2; left: 50%; bottom: 16px; transform: translateX(-50%); pointer-events: none;
+    font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em;
+    color: rgba(230, 236, 241, 0.7); padding: 6px 10px; border-radius: 4px;
+    background: rgba(12, 16, 20, 0.42); border: 1px solid rgba(230, 236, 241, 0.12);
+    backdrop-filter: blur(6px); transition: opacity 0.4s;
+  }
+  #loading {
+    position: fixed; inset: 0; display: grid; place-items: center; background: #0b0e12; z-index: 5;
+    font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2em; color: rgba(230, 236, 241, 0.6);
+    transition: opacity 0.8s;
+  }
+  #prompt {
+    position: fixed; z-index: 2; left: 50%; bottom: 52px; transform: translateX(-50%); pointer-events: none;
+    font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; text-transform: uppercase;
+    color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+  }
+  #play {
+    position: fixed; z-index: 2; right: 16px; top: 16px; cursor: pointer;
+    font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.1em; text-transform: uppercase;
+    color: #e6ecf1; padding: 9px 12px; border-radius: 4px;
+    background: rgba(12, 16, 20, 0.5); border: 1px solid rgba(230, 236, 241, 0.2); backdrop-filter: blur(6px);
+  }
+  #play:hover { background: rgba(30, 40, 50, 0.6); }
+  #play:focus-visible { outline: 2px solid #9fd8e6; outline-offset: 2px; }
+  .hidden { opacity: 0; pointer-events: none; }
+  @media (max-width: 600px) { #chip { display: none; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="loading">LOADING…</div>
+<div id="hud"><b>ARCTIC DIVE</b><span id="controls">drag · orbit &nbsp; WASD · fly &nbsp; mouse drag · look &nbsp; Q/E · down/up &nbsp; shift · fast<br>c · auto camera &nbsp; o · orbit &nbsp; p · pause &nbsp; h · hide</span><br><span id="stats"></span></div>
+<div id="prompt"></div>
+<button id="play" type="button">play as diver · g</button>
+<div id="chip">camera movement enabled</div>
+
+<script>
+  // Runs even if the module graph fails: explain instead of loading forever.
+  (function () {
+    var el = document.getElementById('loading');
+    var show = function (msg) { if (el && el.isConnected) { el.style.whiteSpace = 'pre-line'; el.style.textAlign = 'center'; el.textContent = msg; } };
+    if (location.protocol === 'file:') {
+      show('THIS PAGE NEEDS A LOCAL WEB SERVER\n\nbrowsers block its scripts and 3D models over file://\nrun:  python3 -m http.server 8644 --directory arctic-dive\nthen open  http://localhost:8644');
+      return;
+    }
+    var fail = function (e) {
+      var m = (e && (e.message || (e.reason && e.reason.message) || e.reason)) || 'unknown error';
+      show('COULD NOT LOAD THE SCENE\n\n' + m + '\n\nhard-reload (cmd+shift+r) or check the console');
+    };
+    addEventListener('error', fail);
+    addEventListener('unhandledrejection', fail);
+  })();
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

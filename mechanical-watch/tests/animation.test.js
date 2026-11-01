@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Vector3 } from 'three';
+import { WatchAnimation } from '../src/animation.js';
+
+function setup(reducedMotion=false){const parts=Array.from({length:9},(_,i)=>({object:{position:new Vector3(0,i*.05,0)},origin:new Vector3(0,i*.05,0),offset:new Vector3(i*.1,5-i*.6,.1),order:i/8}));return{parts,animation:new WatchAnimation(parts,{reducedMotion})};}
+function advance(animation,seconds){for(let i=0;i<Math.ceil(seconds*60);i++)animation.update(1/60);}
+test('explosion and reassembly return every part to exact endpoints',()=>{const{animation,parts}=setup();animation.moveTo(1);advance(animation,4);assert.equal(animation.progress,1);parts.forEach(p=>assert.deepEqual(p.object.position,p.origin.clone().add(p.offset)));animation.moveTo(0);advance(animation,4);assert.equal(animation.progress,0);parts.forEach(p=>assert.deepEqual(p.object.position,p.origin));});
+test('reversing direction never jumps a transform',()=>{const{animation,parts}=setup();animation.moveTo(1);advance(animation,1.4);const before=parts.map(p=>p.object.position.clone());animation.moveTo(0);animation.update(0);parts.forEach((p,i)=>assert.deepEqual(p.object.position,before[i]));advance(animation,4);parts.forEach(p=>assert.deepEqual(p.object.position,p.origin));});
+test('scrubbing interrupts transition and places assemblies at the requested separation',()=>{const{animation,parts}=setup();animation.moveTo(1);advance(animation,.8);animation.scrub(.43);assert.equal(animation.transition,null);assert.equal(animation.auto,false);parts.forEach(p=>assert.deepEqual(p.object.position,p.origin.clone().addScaledVector(p.offset,.43)));animation.moveTo(0);advance(animation,4);parts.forEach(p=>assert.deepEqual(p.object.position,p.origin));});
+test('auto cycle assembles, separates, holds and reassembles',()=>{const{animation}=setup();advance(animation,5.1);assert.ok(animation.transition);advance(animation,4);assert.equal(animation.progress,1);advance(animation,8);assert.ok(animation.transition);advance(animation,4);assert.equal(animation.progress,0);assert.equal(animation.auto,true);});
+test('reduced motion disables autoplay and mechanism but supports manual breakdown',()=>{const{animation}=setup(true);assert.equal(animation.auto,false);assert.equal(animation.running,false);advance(animation,30);assert.equal(animation.progress,0);animation.moveTo(1);advance(animation,.5);assert.equal(animation.progress,1);});

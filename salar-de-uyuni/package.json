@@ -1,0 +1,21 @@
+{
+  "name": "salar-de-uyuni",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "record": "node scripts/record.mjs",
+    "record:landscape": "node scripts/record.mjs --landscape",
+    "preview-image": "node scripts/preview.mjs"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1",
+    "vite": "^5.4.10"
+  }
+}

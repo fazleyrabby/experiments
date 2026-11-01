@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ferrofluid // 14</title>
+<style>
+  :root { --bg: #0d0e10; --ink: #EDE6DC; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 45%, transparent 45%, rgba(0, 0, 0, 0.55) 100%);
+  }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.left { left: 28px; }
+  .label.right { left: 28px; top: 24px; bottom: auto; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.5; }
+  .label .touch { display: none; }
+  @media (hover: none) {
+    .label .mouse { display: none; }
+    .label .touch { display: inline; }
+  }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; right: 18px; }
+    .label.right { top: 16px; left: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+<div class="label left">
+  <div>Ferrofluid // 14</div>
+  <div class="hint">
+    <span class="mouse">Hover to pull / Hold to raise spikes / Scroll for power<br>Double-click to drop a magnet / Space to shake</span>
+    <span class="touch">Touch to raise spikes / Double-tap to drop a magnet<br>Shake your phone to slosh</span>
+  </div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const DISH_R = 1.0;               // inner radius of the dish
+const MAX_MAGNETS = 4;            // the cursor plus three dropped magnets
+const MAX_RIPPLES = 6;
+const CRITICAL = 0.35;            // field below which the surface stays smooth (Rosensweig threshold)
+const HOVER_FIELD = 0.62, HOLD_FIELD = 1.3, DROP_FIELD = 1.05;
+const MIN_POWER = 0.4, MAX_POWER = 1.7;
+const IS_TOUCH = matchMedia('(hover: none)').matches;
+const GRID = IS_TOUCH ? 300 : 440; // surface resolution across the dish
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0e10);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 60);
+
+// Studio for the reflections: a dark room with softboxes. Ferrofluid is a
+// black mirror, so these panels are most of what you actually see.
+function buildStudio() {
+  const studio = new THREE.Scene();
+  studio.background = new THREE.Color(0x030304);
+  const panel = (w, h, color, power, position) => {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(power), side: THREE.DoubleSide })
+    );
+    mesh.position.set(...position);
+    mesh.lookAt(0, 0, 0);
+    studio.add(mesh);
+  };
+  panel(5.5, 3.2, 0xffffff, 5.0, [0, 7, 0.6]);       // overhead softbox
+  panel(1.0, 6.0, 0xf2f4ff, 3.5, [-6.5, 2.4, 1.5]);  // cool strip, left
+  panel(1.0, 5.0, 0xffe2c4, 2.6, [6.0, 2.0, -1.5]);  // warm strip, right
+  panel(9.0, 0.5, 0xffffff, 2.2, [0, 1.4, -7.5]);    // rim line behind
+  // Large graded scrim behind and above: the flat fluid mirrors it as a soft sheen
+  const g = document.createElement('canvas');
+  g.width = 4; g.height = 256;
+  const ctx = g.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.18, '#b9bbc2');
+  grad.addColorStop(0.5, '#15161a');
+  grad.addColorStop(1, '#000000');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 4, 256);
+  const scrimMap = new THREE.CanvasTexture(g);
+  scrimMap.colorSpace = THREE.SRGBColorSpace;
+  const scrim = new THREE.Mesh(
+    new THREE.PlaneGeometry(14, 7),
+    new THREE.MeshBasicMaterial({ map: scrimMap, color: new THREE.Color(1.1, 1.1, 1.15), side: THREE.DoubleSide })
+  );
+  scrim.position.set(0, 4.2, -6);
+  scrim.lookAt(0, 0, 0);
+  studio.add(scrim);
+  panel(7.0, 2.2, 0xf4f1ec, 2.4, [0, 3.0, 7.0]);     // fill behind the camera, lights the near flanks
+  panel(12.0, 1.2, 0xffffff, 1.6, [0, 0.5, 7.0]);    // low band in front, caught by the tall spikes
+  for (let i = 0; i < 10; i++) {                      // ring of thin strips for highlights down every spike
+    const a = (i / 10) * Math.PI * 2 + 0.3;
+    panel(0.45, 2.6, 0xffffff, 1.4 + 1.2 * ((i * 7) % 3) / 2, [Math.cos(a) * 7, 1.6, Math.sin(a) * 7]);
+  }
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshBasicMaterial({ color: 0x18181b }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -2;
+  studio.add(floor);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const texture = pmrem.fromScene(studio, 0.015).texture;
+  pmrem.dispose();
+  return texture;
+}
+scene.environment = buildStudio();
+
+// Desk, with a pool of light from above
+const desk = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.MeshStandardMaterial({ color: 0x1d1d20, roughness: 0.82, metalness: 0, envMapIntensity: 0.25 })
+);
+desk.rotation.x = -Math.PI / 2;
+desk.position.y = -0.03;
+scene.add(desk);
+
+const spot = new THREE.SpotLight(0xfff4ea, 55, 14, 0.55, 1, 2);
+spot.position.set(0.6, 6, 1.5);
+spot.target.position.set(0, 0, 0);
+scene.add(spot, spot.target);
+scene.add(new THREE.HemisphereLight(0x9aa0b0, 0x101012, 0.25));
+
+// Soft contact shadow under the dish
+function contactShadow() {
+  const size = 256, c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(size / 2, size / 2, size * 0.3, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(0,0,0,0.85)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.1, 3.1),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = -0.028;
+  return mesh;
+}
+scene.add(contactShadow());
+
+// Glass petri dish: a lathe of the wall's cross-section
+function buildDish() {
+  const t = 0.045, top = 0.17, base = -0.03;
+  const pts = [new THREE.Vector2(0, base), new THREE.Vector2(DISH_R + t - 0.012, base)];
+  pts.push(new THREE.Vector2(DISH_R + t, base + 0.012));
+  pts.push(new THREE.Vector2(DISH_R + t, top));
+  for (let i = 1; i < 8; i++) {   // rounded rim
+    const a = (i / 8) * Math.PI;
+    pts.push(new THREE.Vector2(DISH_R + t / 2 + Math.cos(a) * t / 2, top + Math.sin(a) * t * 0.45));
+  }
+  pts.push(new THREE.Vector2(DISH_R, top));
+  pts.push(new THREE.Vector2(DISH_R, 0.0));
+  pts.push(new THREE.Vector2(0, 0.0));
+  const glass = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, metalness: 0, roughness: 0.04, transmission: 1, thickness: 0.05,
+    ior: 1.5, envMapIntensity: 1.1, side: THREE.DoubleSide,
+  });
+  return new THREE.Mesh(new THREE.LatheGeometry(pts, 160), glass);
+}
+scene.add(buildDish());
+
+// ───────────────────────────── Fluid surface ─────────────────────────────
+
+// The height of the fluid is evaluated on the GPU twice: in the vertex shader
+// for the shape and silhouette, and per pixel for crisp normals on the spikes.
+const uniforms = {
+  uCount: { value: 0 },
+  uMag: { value: Array.from({ length: MAX_MAGNETS }, () => new THREE.Vector4()) },  // fluid centre xz, field, lattice angle
+  uVel: { value: Array.from({ length: MAX_MAGNETS }, () => new THREE.Vector4()) },  // velocity xz, agitation, spike spacing
+  uRip: { value: Array.from({ length: MAX_RIPPLES }, () => new THREE.Vector4()) },  // centre xz, age, amplitude
+  uTilt: { value: new THREE.Vector2() },
+  uBase: { value: 0.035 },
+  uTime: { value: 0 },
+};
+
+const FLUID_GLSL = /* glsl */`
+uniform int uCount;
+uniform vec4 uMag[${MAX_MAGNETS}];
+uniform vec4 uVel[${MAX_MAGNETS}];
+uniform vec4 uRip[${MAX_RIPPLES}];
+uniform vec2 uTilt;
+uniform float uBase;
+uniform float uTime;
+varying vec2 vXZ;
+
+float fluidHash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+// Gaussian pull of one magnet, stretched out behind the fluid when it moves
+float fieldEnvelope(vec2 d, vec2 v) {
+  float speed = length(v);
+  vec2 dir = speed > 1e-4 ? v / speed : vec2(0.0);
+  float along = dot(d, dir);
+  vec2 across = d - dir * along;
+  if (along < 0.0) along /= 1.0 + speed * 0.9;
+  return exp(-(along * along + dot(across, across)) / 0.16);
+}
+
+float fluidHeight(vec2 p, out float spikeH, out vec2 lean) {
+  float h = uBase + dot(p, uTilt);
+  h += 0.016 * smoothstep(${(DISH_R - 0.07).toFixed(3)}, ${DISH_R.toFixed(3)}, length(p));   // meniscus
+  spikeH = 0.0;
+  lean = vec2(0.0);
+  for (int i = 0; i < ${MAX_MAGNETS}; i++) {
+    if (i >= uCount) break;
+    vec4 m = uMag[i];
+    vec4 v = uVel[i];
+    vec2 d = p - m.xy;
+    float pull = fieldEnvelope(d, v.xy);
+    h += 0.11 * m.z * pull;                  // the fluid heaps up over the magnet
+    lean += v.xy * pull;
+    if (m.z < ${(CRITICAL * 0.9).toFixed(3)}) continue;
+
+    // Hex lattice of spikes that travels with the fluid
+    float a = v.w, c = cos(m.w), s = sin(m.w);
+    vec2 q = mat2(c, -s, s, c) * d;
+    vec2 cell = vec2(1.0, 1.7320508) * a, mid = cell * 0.5;
+    vec2 g1 = mod(q, cell) - mid;
+    vec2 g2 = mod(q - mid, cell) - mid;
+    vec2 g = dot(g1, g1) < dot(g2, g2) ? g1 : g2;
+    vec2 tipQ = q - g;
+    vec2 tip = mat2(c, s, -s, c) * tipQ;     // spike centre, relative to the fluid centre
+
+    // Each spike is as tall as the field at its own centre, so it stays a clean cone
+    float amp = 0.45 * max(0.0, m.z * fieldEnvelope(tip, v.xy) - ${CRITICAL.toFixed(3)});
+    amp *= 1.0 - smoothstep(${(DISH_R - 0.16).toFixed(3)}, ${(DISH_R - 0.05).toFixed(3)}, length(m.xy + tip));
+    amp *= 1.0 + v.z * 0.22 * sin(uTime * 17.0 + fluidHash(tipQ * 7.0 + float(i) * 13.1) * 6.2831);
+    float t = clamp(1.0 - length(g) / (a * 0.5), 0.0, 1.0);
+    spikeH = max(spikeH, amp * pow(t, 1.4));   // concave flanks, sharp tip
+  }
+  h += spikeH;
+
+  for (int k = 0; k < ${MAX_RIPPLES}; k++) {
+    vec4 r = uRip[k];
+    if (r.w <= 0.0) continue;
+    float front = length(p - r.xy) - r.z * 0.9;
+    h += r.w * exp(-r.z * 1.8) * sin(front * 34.0) * exp(-front * front * 40.0);
+  }
+  return h;
+}
+`;
+
+const fluidMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0x0a0a0c, metalness: 0.78, roughness: 0.09,
+  clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.35,
+});
+fluidMaterial.onBeforeCompile = (shader) => {
+  Object.assign(shader.uniforms, uniforms);
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\n' + FLUID_GLSL)
+    .replace('#include <begin_vertex>', /* glsl */`
+      vec2 xz = position.xz;
+      float rr = length(xz);
+      if (rr > ${DISH_R.toFixed(3)}) xz *= ${DISH_R.toFixed(3)} / rr;   // fold the square's corners onto the wall
+      vXZ = xz;
+      float spikeH; vec2 lean;
+      float fh = fluidHeight(xz, spikeH, lean);
+      vec3 transformed = vec3(xz.x, fh, xz.y);
+      transformed.xz -= clamp(lean, -3.0, 3.0) * spikeH * 0.12;        // tips lag behind the motion
+    `);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\n' + FLUID_GLSL)
+    .replace('#include <normal_fragment_begin>', /* glsl */`
+      float faceDirection = gl_FrontFacing ? 1.0 : -1.0;
+      float sk; vec2 ln;
+      const float E = 0.0016;
+      float h0 = fluidHeight(vXZ, sk, ln);
+      float hx = fluidHeight(vXZ + vec2(E, 0.0), sk, ln);
+      float hz = fluidHeight(vXZ + vec2(0.0, E), sk, ln);
+      vec3 normal = normalize((viewMatrix * vec4(normalize(vec3(h0 - hx, E, h0 - hz)), 0.0)).xyz);
+      vec3 nonPerturbedNormal = normal;
+    `);
+};
+
+const fluidGeometry = new THREE.PlaneGeometry(2 * DISH_R + 0.02, 2 * DISH_R + 0.02, GRID, GRID);
+fluidGeometry.rotateX(-Math.PI / 2);
+const fluid = new THREE.Mesh(fluidGeometry, fluidMaterial);
+fluid.frustumCulled = false;   // the shader moves every vertex
+scene.add(fluid);
+
+// ───────────────────────────── Magnets ─────────────────────────────
+
+// Each magnet sits under the dish. The fluid above it is a spring: it follows
+// the magnet, overshoots and wobbles, and its field rises and falls the same way.
+function makeMagnet(x, z, dropped) {
+  return {
+    dropped,
+    pos: new THREE.Vector2(x, z),       // the magnet itself
+    fluid: new THREE.Vector2(x, z),     // where the fluid has got to
+    vel: new THREE.Vector2(),
+    field: 0, fieldVel: 0, target: 0,
+    agitation: 0,
+    angle: Math.random() * Math.PI,
+    lastSpikes: 0,
+  };
+}
+
+const cursor = makeMagnet(0, 0, true);
+cursor.dropped = false;
+const magnets = [cursor];
+let power = 1;
+let holding = false, hovering = true;   // starts with a gentle pull in the middle
+
+const ripples = Array.from({ length: MAX_RIPPLES }, () => ({ x: 0, z: 0, age: 9, amp: 0 }));
+function ripple(x, z, amp) {
+  const slot = ripples.reduce((a, b) => (b.amp * Math.exp(-b.age * 1.8) < a.amp * Math.exp(-a.age * 1.8) ? b : a));
+  Object.assign(slot, { x, z, age: 0, amp });
+}
+
+const tilt = new THREE.Vector2(), tiltVel = new THREE.Vector2();
+function shake(dx, dz) {
+  tiltVel.x += dx * 0.35;
+  tiltVel.y += dz * 0.35;
+  for (const m of magnets) m.vel.add(new THREE.Vector2(-dx, -dz).multiplyScalar(3));
+  for (let i = 0; i < 2; i++) {
+    const a = Math.random() * Math.PI * 2;
+    ripple(Math.cos(a) * 0.85, Math.sin(a) * 0.85, 0.008);
+  }
+  oozeKick = 1;
+}
+
+function updateMagnets(dt, time) {
+  const reach = 1 - THREE.MathUtils.smoothstep(cursor.pos.length(), DISH_R + 0.1, DISH_R + 0.7);
+  const wanted = hovering ? (holding ? HOLD_FIELD : HOVER_FIELD) * power * reach : 0;
+  if (cursor.target > CRITICAL + 0.35 && wanted < cursor.target - 0.3) ripple(cursor.fluid.x, cursor.fluid.y, 0.012);
+  cursor.target = wanted;
+
+  for (const m of magnets) {
+    // Fluid centre: an underdamped spring towards the magnet
+    const ax = 60 * (m.pos.x - m.fluid.x) - 7 * m.vel.x;
+    const az = 60 * (m.pos.y - m.fluid.y) - 7 * m.vel.y;
+    m.vel.x += ax * dt;
+    m.vel.y += az * dt;
+    // Same-pole magnets push each other's fluid apart
+    for (const o of magnets) {
+      if (o === m) continue;
+      const dx = m.fluid.x - o.fluid.x, dz = m.fluid.y - o.fluid.y;
+      const d = Math.hypot(dx, dz) + 1e-4;
+      if (d < 0.75) {
+        const f = 9 * (0.75 - d) * Math.min(m.field, o.field) / d;
+        m.vel.x += dx * f * dt;
+        m.vel.y += dz * f * dt;
+      }
+    }
+    m.fluid.addScaledVector(m.vel, dt);
+    const r = m.fluid.length();
+    if (r > DISH_R - 0.08) m.fluid.multiplyScalar((DISH_R - 0.08) / r);
+
+    // Field strength: a spring too, so spikes snap up and slump with a little rebound
+    m.fieldVel += (40 * (m.target - m.field) - 9 * m.fieldVel) * dt;
+    m.field = Math.max(0, m.field + m.fieldVel * dt);
+
+    const stir = Math.min(1, m.vel.length() * 0.45 + Math.abs(m.fieldVel) * 0.25);
+    m.agitation += (stir - m.agitation) * Math.min(1, dt * (stir > m.agitation ? 12 : 2.5));
+    m.angle += dt * 0.04 * Math.sin(time * 0.3 + m.pos.x * 3);
+  }
+
+  // Forget dropped magnets once they have been lifted away
+  for (let i = magnets.length - 1; i > 0; i--) {
+    if (magnets[i].target === 0 && magnets[i].field < 0.01) magnets.splice(i, 1);
+  }
+}
+
+// ───────────────────────────── Pointer ─────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.06);
+const pointer = new THREE.Vector2();
+const hit = new THREE.Vector3();
+
+function pointAt(event) {
+  const rect = canvas.getBoundingClientRect();
+  pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  if (raycaster.ray.intersectPlane(pickPlane, hit)) cursor.pos.set(hit.x, hit.z);
+}
+
+canvas.addEventListener('pointermove', (e) => {
+  pointAt(e);
+  if (e.pointerType === 'mouse') hovering = true;
+});
+canvas.addEventListener('pointerdown', (e) => {
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already released */ }
+  pointAt(e);
+  if (e.pointerType !== 'mouse' && cursor.field < 0.05) cursor.fluid.copy(cursor.pos);   // a touch appears in place
+  hovering = true;
+  holding = true;
+  startAudio();
+  askForMotion();
+});
+const release = (e) => {
+  holding = false;
+  if (e.pointerType !== 'mouse') hovering = false;
+};
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+canvas.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !holding) hovering = false; });
+
+canvas.addEventListener('dblclick', (e) => {
+  pointAt(e);
+  const near = magnets.find((m) => m.dropped && m.target > 0 && m.pos.distanceTo(cursor.pos) < 0.2);
+  if (near) {
+    near.target = 0;
+    ripple(near.fluid.x, near.fluid.y, 0.01);
+  } else if (cursor.pos.length() < DISH_R && magnets.filter((m) => m.dropped && m.target > 0).length < MAX_MAGNETS - 1) {
+    const m = makeMagnet(cursor.pos.x, cursor.pos.y, true);
+    m.target = DROP_FIELD * power;
+    magnets.push(m);
+    ripple(m.pos.x, m.pos.y, 0.01);
+  }
+});
+
+// Double-tap on touch screens
+let lastTap = 0;
+canvas.addEventListener('pointerup', (e) => {
+  if (e.pointerType === 'mouse') return;
+  const now = performance.now();
+  if (now - lastTap < 300) canvas.dispatchEvent(new MouseEvent('dblclick', { clientX: e.clientX, clientY: e.clientY }));
+  lastTap = now;
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  power = THREE.MathUtils.clamp(power * Math.exp(-e.deltaY * 0.0012), MIN_POWER, MAX_POWER);
+  for (const m of magnets) if (m.dropped && m.target > 0) m.target = DROP_FIELD * power;
+}, { passive: false });
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    const a = Math.random() * Math.PI * 2;
+    shake(Math.cos(a) * 0.9, Math.sin(a) * 0.9);
+  } else if (e.code === 'KeyM') {
+    muted = !muted;
+    if (master) master.gain.setTargetAtTime(muted ? 0 : 1, audio.currentTime, 0.05);
+  }
+});
+
+// Shaking the phone sloshes the dish
+let motionAsked = false, lastShake = 0;
+function askForMotion() {
+  if (motionAsked || typeof DeviceMotionEvent === 'undefined') return;
+  motionAsked = true;
+  if (typeof DeviceMotionEvent.requestPermission === 'function') DeviceMotionEvent.requestPermission().catch(() => {});
+}
+window.addEventListener('devicemotion', (e) => {
+  const acc = e.acceleration;
+  if (!acc || acc.x == null) return;
+  const mag = Math.hypot(acc.x, acc.y);
+  const now = performance.now();
+  if (mag > 9 && now - lastShake > 180) {
+    lastShake = now;
+    const k = Math.min(1.4, mag / 14);
+    shake((acc.x / mag) * k, (-acc.y / mag) * k);
+  }
+});
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+// Crackles as spikes form, a low ooze while the fluid moves
+let audio = null, master = null, oozeGain = null, muted = false, oozeKick = 0;
+
+function startAudio() {
+  if (audio) { audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  master = audio.createGain();
+  master.connect(audio.destination);
+
+  const length = audio.sampleRate * 2;
+  const buffer = audio.createBuffer(1, length, audio.sampleRate);
+  const data = buffer.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < length; i++) {   // brown noise
+    last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+    data[i] = last * 3.5;
+  }
+  const noise = audio.createBufferSource();
+  noise.buffer = buffer;
+  noise.loop = true;
+  const lowpass = audio.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.value = 340;
+  oozeGain = audio.createGain();
+  oozeGain.gain.value = 0;
+  noise.connect(lowpass).connect(oozeGain).connect(master);
+  noise.start();
+}
+
+function pop(volume) {
+  if (!audio || muted) return;
+  const t = audio.currentTime + Math.random() * 0.03;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  const f = 900 + Math.random() * 1600;
+  osc.frequency.setValueAtTime(f, t);
+  osc.frequency.exponentialRampToValueAtTime(f * 0.3, t + 0.06);
+  gain.gain.setValueAtTime(volume, t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+  osc.connect(gain).connect(master);
+  osc.start(t);
+  osc.stop(t + 0.08);
+}
+
+function updateSound(dt) {
+  if (!audio) return;
+  let motion = oozeKick;
+  for (const m of magnets) {
+    const spikes = Math.max(0, m.field - CRITICAL);
+    const growth = (spikes - m.lastSpikes) / dt;
+    m.lastSpikes = spikes;
+    if (growth > 0 && Math.random() < growth * dt * 14) pop(0.025 + Math.random() * 0.035);
+    motion += Math.min(1, m.field) * (m.vel.length() * 0.05 + Math.abs(m.fieldVel) * 0.06);
+  }
+  oozeKick = Math.max(0, oozeKick - dt * 1.5);
+  oozeGain.gain.setTargetAtTime(Math.min(0.3, motion), audio.currentTime, 0.08);
+}
+
+// ───────────────────────────── Uniforms & status ─────────────────────────────
+
+function pushUniforms(time) {
+  uniforms.uTime.value = time;
+  uniforms.uCount.value = magnets.length;
+  let drawn = 0;
+  magnets.forEach((m, i) => {
+    const spacing = THREE.MathUtils.lerp(0.17, 0.095, THREE.MathUtils.smoothstep(m.field, CRITICAL, 1.4));
+    uniforms.uMag.value[i].set(m.fluid.x, m.fluid.y, m.field, m.angle);
+    uniforms.uVel.value[i].set(m.vel.x, m.vel.y, m.agitation, spacing);
+    drawn += m.field;
+  });
+  // The fluid that heaps up over the magnets is drawn from the rest of the dish
+  uniforms.uBase.value = Math.max(0.012, 0.035 - 0.009 * drawn);
+  uniforms.uTilt.value.copy(tilt);
+  ripples.forEach((r, i) => uniforms.uRip.value[i].set(r.x, r.z, r.age, r.age < 4 ? r.amp : 0));
+}
+
+let lastStatus = '';
+function updateStatus() {
+  const field = Math.max(...magnets.map((m) => m.field)) * 0.42;
+  const count = magnets.filter((m) => m.dropped && m.target > 0).length;
+  const text = `Field ${field.toFixed(2)} T / Power ${Math.round(power * 100)}%` + (count ? ` / ${count} dropped` : '');
+  if (text !== lastStatus) statusEl.textContent = lastStatus = text;
+}
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const elevation = THREE.MathUtils.degToRad(46);
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitW = 1.45 / (Math.tan(halfFov) * camera.aspect);
+  const fitH = 1.15 / Math.tan(halfFov);
+  const d = Math.max(fitW, fitH);
+  camera.position.set(0, Math.sin(elevation) * d, Math.cos(elevation) * d);
+  camera.lookAt(0, 0.04, 0);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(clock.getDelta(), 1 / 30);
+  const time = clock.elapsedTime;
+
+  tiltVel.addScaledVector(tilt, -30 * dt).multiplyScalar(Math.exp(-2.5 * dt));
+  tilt.addScaledVector(tiltVel, dt);
+  for (const r of ripples) r.age += dt;
+
+  updateMagnets(dt, time);
+  updateSound(dt);
+  pushUniforms(time);
+  updateStatus();
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="ferrofluid"></script>
+</body>
+</html>

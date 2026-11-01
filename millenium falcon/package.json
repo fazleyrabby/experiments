@@ -1,0 +1,19 @@
+{
+  "name": "lego-millennium-falcon",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Procedural LEGO-style Millennium Falcon that assembles itself brick by brick in deep space.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "validate": "node scripts/validate.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}

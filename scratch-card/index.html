@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scratch Card // 08</title>
+<style>
+  :root { --bg: #0F5B46; --ink: #FFF4DC; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.left { left: 28px; }
+  .label.right { right: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.6; }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; }
+    .label.right { right: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label left">
+  <div>Scratch Card // 08</div>
+  <div class="hint">Scratch to reveal / Match three to win<br>Double-click for a new card</div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const BG = 0x0F5B46;
+const CARD = [3.3, 4.6];           // world size
+const TEX = [660, 920];            // texture size, same aspect
+const WINDOWS = [[330, 300], [185, 560], [475, 560]];   // centres of the three scratch windows (texture px)
+const WINDOW_SIZE = 230;
+const BRUSH = 30;                  // scratch width (texture px)
+const REVEAL_AT = 0.55;            // each window must be this cleared before the rest falls away
+const WIN_CHANCE = 0.22;
+const SYMBOLS = ['🍒', '⭐', '💎', '🍋', '🔔', '🍀'];
+const BASE_TILT = -0.16;
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+const root = new THREE.Group();
+root.rotation.x = BASE_TILT;
+scene.add(root);
+
+// ───────────────────────────── Card art (procedural) ─────────────────────────────
+
+const artCanvas = document.createElement('canvas');     // printed card, prizes included
+const foilCanvas = document.createElement('canvas');    // what the silver coating looks like
+const maskCanvas = document.createElement('canvas');    // white = coating still there
+for (const c of [artCanvas, foilCanvas, maskCanvas]) { c.width = TEX[0]; c.height = TEX[1]; }
+const artCtx = artCanvas.getContext('2d');
+const foilCtx = foilCanvas.getContext('2d');
+const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+
+const windowRect = ([cx, cy]) => [cx - WINDOW_SIZE / 2, cy - WINDOW_SIZE / 2, WINDOW_SIZE, WINDOW_SIZE];
+const SANS = '"Helvetica Neue", "Arial Black", Arial, sans-serif';
+
+function drawArt(symbols, serial) {
+  const c = artCtx, [w, h] = TEX;
+  c.fillStyle = '#FFF4DC';
+  c.fillRect(0, 0, w, h);
+
+  // Sunburst behind the title
+  c.save();
+  c.beginPath(); c.rect(0, 0, w, 150); c.clip();
+  c.fillStyle = '#E3242B'; c.fillRect(0, 0, w, 150);
+  c.translate(w / 2, 210);
+  c.fillStyle = 'rgba(255, 210, 63, 0.28)';
+  for (let i = 0; i < 24; i += 2) {
+    c.beginPath(); c.moveTo(0, 0);
+    c.arc(0, 0, 700, (i * Math.PI) / 12, ((i + 1) * Math.PI) / 12);
+    c.fill();
+  }
+  c.restore();
+
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillStyle = '#FFF4DC';
+  c.font = `900 78px ${SANS}`;
+  c.fillText('LUCKY 3', w / 2, 68);
+  c.font = `700 19px ${SANS}`;
+  c.fillStyle = '#FFD23F';
+  c.fillText('M A T C H   T H R E E   T O   W I N', w / 2, 124);
+
+  // Gold frame
+  c.strokeStyle = '#C9A24B'; c.lineWidth = 6;
+  c.strokeRect(18, 18, w - 36, h - 36);
+  c.lineWidth = 1.5;
+  c.strokeRect(28, 28, w - 56, h - 56);
+
+  // Prize windows
+  WINDOWS.forEach((centre, i) => {
+    const [x, y, s] = windowRect(centre);
+    c.fillStyle = '#FBE9B8';
+    c.beginPath(); c.roundRect(x, y, s, s, 26); c.fill();
+    c.strokeStyle = '#C9A24B'; c.lineWidth = 3; c.stroke();
+    c.font = '132px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    c.fillStyle = '#2B2722';
+    c.fillText(symbols[i], centre[0], centre[1] + 10);
+  });
+
+  // Footer
+  c.fillStyle = '#2B2722';
+  c.font = `700 17px ${SANS}`;
+  c.fillText('S C R A T C H   A L L   T H R E E', w / 2, 742);
+  c.font = `500 14px ${SANS}`;
+  c.globalAlpha = 0.55;
+  c.fillText(`No. ${serial}   ·   Odds of winning 1 in 5   ·   No cash value`, w / 2, 778);
+  c.globalAlpha = 1;
+  // Barcode
+  let x = 230;
+  while (x < 430) { const bar = 1 + Math.floor(Math.random() * 4); c.fillRect(x, 812, bar, 52); x += bar + 1 + Math.floor(Math.random() * 3); }
+}
+
+function drawFoil() {
+  const c = foilCtx, [w, h] = TEX;
+  c.fillStyle = '#B9BDC2';
+  c.fillRect(0, 0, w, h);
+  // Fine print, the way real coatings are overprinted
+  c.save();
+  c.rotate(-0.5);
+  c.font = `900 22px ${SANS}`;
+  c.fillStyle = 'rgba(60, 64, 72, 0.3)';
+  for (let y = -200; y < h + 600; y += 36) {
+    for (let x = -700 + ((y / 36) % 2) * 60; x < w + 200; x += 150) c.fillText('SCRATCH', x, y);
+  }
+  c.restore();
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `900 120px ${SANS}`;
+  c.fillStyle = 'rgba(40, 44, 52, 0.5)';
+  WINDOWS.forEach(([cx, cy]) => c.fillText('?', cx, cy + 6));
+}
+
+function resetMask() {
+  maskCtx.globalCompositeOperation = 'source-over';
+  maskCtx.fillStyle = '#000';
+  maskCtx.fillRect(0, 0, TEX[0], TEX[1]);
+  maskCtx.fillStyle = '#fff';
+  WINDOWS.forEach((centre) => {
+    const [x, y, s] = windowRect(centre);
+    maskCtx.beginPath(); maskCtx.roundRect(x + 4, y + 4, s - 8, s - 8, 22); maskCtx.fill();
+  });
+}
+
+const textureOf = (cnv, color) => {
+  const t = new THREE.CanvasTexture(cnv);
+  if (color) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+};
+const artTexture = textureOf(artCanvas, true);
+const foilTexture = textureOf(foilCanvas, true);
+const maskTexture = textureOf(maskCanvas, false);
+
+// ───────────────────────────── Card mesh ─────────────────────────────
+
+const cardMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uArt: { value: artTexture }, uFoil: { value: foilTexture }, uMask: { value: maskTexture },
+    uTilt: { value: new THREE.Vector2() },
+    uTexel: { value: new THREE.Vector2(1 / TEX[0], 1 / TEX[1]) },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    uniform sampler2D uArt, uFoil, uMask;
+    uniform vec2 uTilt, uTexel;
+    varying vec2 vUv;
+
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+    void main() {
+      // Rounded corners
+      vec2 size = vec2(${CARD[0].toFixed(2)}, ${CARD[1].toFixed(2)});
+      vec2 q = abs(vUv - 0.5) * size - (size * 0.5 - 0.16);
+      float corner = length(max(q, 0.0)) - 0.16;
+      float edge = fwidth(corner);
+      float alpha = 1.0 - smoothstep(-edge, edge, corner);
+      if (alpha < 0.01) discard;
+
+      float mask = texture2D(uMask, vUv).r;
+      float coated = smoothstep(0.42, 0.58, mask);
+
+      // Printed card, with the coating's edge casting a hairline shadow onto it
+      vec3 art = texture2D(uArt, vUv).rgb;
+      float lip = texture2D(uMask, vUv + uTexel * vec2(-2.5, 2.5)).r;
+      art *= 1.0 - 0.3 * smoothstep(0.3, 0.7, lip) * (1.0 - coated);
+      // Paper sheen that slides with the tilt
+      art += 0.05 * smoothstep(0.35, 0.0, abs(vUv.x + vUv.y * 0.6 - 0.8 - uTilt.x * 1.2));
+
+      // Silver coating: brushed streaks plus a bright band that moves as the card tilts
+      vec3 foil = texture2D(uFoil, vUv).rgb;
+      float streak = hash(vec2(floor(vUv.y * 900.0), 3.0)) * 0.5 + hash(floor(vUv * vec2(60.0, 900.0))) * 0.5;
+      foil *= 0.82 + 0.3 * streak;
+      float band = vUv.x * 0.9 + vUv.y * 0.5 - 0.7 - uTilt.x * 1.6 + uTilt.y * 0.8;
+      foil += 0.5 * exp(-band * band * 18.0);
+      // Worn rim where the coating has been scratched back
+      foil *= 0.75 + 0.25 * smoothstep(0.55, 0.95, mask);
+
+      gl_FragColor = vec4(mix(art, foil, coated), alpha);
+      #include <colorspace_fragment>
+    }
+  `,
+  transparent: true,
+});
+const card = new THREE.Mesh(new THREE.PlaneGeometry(CARD[0], CARD[1]), cardMaterial);
+root.add(card);
+
+// Soft drop shadow
+{
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.shadowColor = 'rgba(0, 20, 12, 0.6)';
+  ctx.shadowBlur = 26;
+  ctx.shadowOffsetX = 1000; ctx.shadowOffsetY = 8;
+  ctx.fillRect(78 - 1000, 68, 100, 120);   // well inside the canvas, so the blur never reaches its edge
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(CARD[0] * (256 / 100), CARD[1] * (256 / 120)),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })
+  );
+  shadow.position.z = -0.03;
+  shadow.renderOrder = -1;
+  root.add(shadow);
+}
+
+// ───────────────────────────── Flakes ─────────────────────────────
+// Bits of coating that curl off and fall as you scratch.
+
+const FLAKES = 400;
+const flakes = (() => {
+  const positions = new Float32Array(FLAKES * 3).fill(999);
+  const velocity = new Float32Array(FLAKES * 3);
+  const life = new Float32Array(FLAKES);
+  const colors = new Float32Array(FLAKES * 3);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage));
+  const points = new THREE.Points(geometry, new THREE.PointsMaterial({ size: 0.05, vertexColors: true }));
+  points.frustumCulled = false;
+  root.add(points);
+  const color = new THREE.Color();
+  let cursor = 0;
+
+  function emit(x, y, amount, hexes, burst = 1) {
+    for (let n = 0; n < amount; n++) {
+      const i = cursor; cursor = (cursor + 1) % FLAKES;
+      positions[i * 3] = x + (Math.random() - 0.5) * 0.12;
+      positions[i * 3 + 1] = y + (Math.random() - 0.5) * 0.12;
+      positions[i * 3 + 2] = 0.03 + Math.random() * 0.05;
+      velocity[i * 3] = (Math.random() - 0.5) * 1.6 * burst;
+      velocity[i * 3 + 1] = (Math.random() * 1.4 + 0.2) * burst;
+      velocity[i * 3 + 2] = Math.random() * 0.5;
+      life[i] = 0.7 + Math.random() * 0.8;
+      color.setHex(hexes[Math.floor(Math.random() * hexes.length)]);
+      colors[i * 3] = color.r; colors[i * 3 + 1] = color.g; colors[i * 3 + 2] = color.b;
+    }
+    geometry.attributes.color.needsUpdate = true;
+  }
+
+  function update(dt) {
+    for (let i = 0; i < FLAKES; i++) {
+      if (life[i] <= 0) continue;
+      life[i] -= dt;
+      if (life[i] <= 0) { positions[i * 3] = 999; continue; }
+      velocity[i * 3 + 1] -= 7 * dt;
+      positions[i * 3] += velocity[i * 3] * dt;
+      positions[i * 3 + 1] += velocity[i * 3 + 1] * dt;
+      positions[i * 3 + 2] += velocity[i * 3 + 2] * dt;
+    }
+    geometry.attributes.position.needsUpdate = true;
+  }
+  return { emit, update };
+})();
+const SILVER = [0xC9CDD2, 0x9EA3AA, 0xE4E7EA];
+const CONFETTI = [0xFFD23F, 0xE3242B, 0xFFF4DC, 0x17B890, 0x1238FF];
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, scratchGain = null;
+
+function initAudio() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  const buffer = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = audio.createBufferSource();
+  src.buffer = buffer; src.loop = true;
+  const band = audio.createBiquadFilter();
+  band.type = 'bandpass'; band.frequency.value = 3400; band.Q.value = 0.9;
+  scratchGain = audio.createGain();
+  scratchGain.gain.value = 0;
+  src.connect(band).connect(scratchGain).connect(audio.destination);
+  src.start();
+}
+
+function setScratchSound(speed) {
+  if (!audio) return;
+  const level = Math.min(0.3, speed * 0.05) * (0.6 + Math.random() * 0.8);   // gritty flutter
+  scratchGain.gain.setTargetAtTime(level, audio.currentTime, 0.02);
+}
+
+function playNotes(notes, type, level, spacing) {
+  if (!audio) return;
+  const t = audio.currentTime;
+  notes.forEach((freq, i) => {
+    const osc = audio.createOscillator();
+    osc.type = type; osc.frequency.value = freq;
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(0.0001, t + i * spacing);
+    gain.gain.exponentialRampToValueAtTime(level, t + i * spacing + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + i * spacing + 0.45);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t + i * spacing); osc.stop(t + i * spacing + 0.5);
+  });
+}
+
+// ───────────────────────────── Game ─────────────────────────────
+
+let symbols = [];
+let revealed = false;
+let cards = 0, wins = 0;
+let wipe = 0;              // > 0 while the last of the coating is being cleared
+let dealTime = 0;          // new card slides in
+let checkTimer = 0;
+
+function showStatus(text) {
+  statusEl.textContent = text ?? `Cards ${String(cards).padStart(3, '0')} · Wins ${String(wins).padStart(3, '0')}`;
+}
+
+function newCard() {
+  const win = Math.random() < WIN_CHANCE;
+  const first = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
+  if (win) symbols = [first, first, first];
+  else {
+    // Never three alike; two alike is allowed, for the near-miss
+    do { symbols = [first, 0, 0].map((s, i) => (i ? SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)] : s)); }
+    while (symbols[0] === symbols[1] && symbols[1] === symbols[2]);
+    symbols.sort(() => Math.random() - 0.5);
+  }
+  drawArt(symbols, String(Math.floor(Math.random() * 9e7 + 1e7)));
+  resetMask();
+  artTexture.needsUpdate = maskTexture.needsUpdate = true;
+  revealed = false;
+  wipe = 0;
+  dealTime = 0.45;
+  cards++;
+  showStatus();
+}
+
+// How much of the least-scratched window is cleared, so the last one is never revealed for you
+const PROBE_SCALE = 0.1;
+const probe = document.createElement('canvas');
+probe.width = Math.round(TEX[0] * PROBE_SCALE); probe.height = Math.round(TEX[1] * PROBE_SCALE);
+const probeCtx = probe.getContext('2d', { willReadFrequently: true });
+function scratchedFraction() {
+  probeCtx.drawImage(maskCanvas, 0, 0, probe.width, probe.height);
+  let least = 1;
+  for (const centre of WINDOWS) {
+    const [x, y, size] = windowRect(centre).map((v) => Math.round(v * PROBE_SCALE));
+    const data = probeCtx.getImageData(x, y, size, size).data;
+    let left = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i] > 128) left++;
+    least = Math.min(least, 1 - left / (size * size));
+  }
+  return least;
+}
+
+function reveal() {
+  revealed = true;
+  wipe = 0.35;
+  const won = symbols[0] === symbols[1] && symbols[1] === symbols[2];
+  if (won) {
+    wins++;
+    showStatus(`Winner! ${symbols[0]}${symbols[0]}${symbols[0]}`);
+    playNotes([523.25, 659.25, 783.99, 1046.5, 1318.5], 'triangle', 0.16, 0.09);
+    flakes.emit(0, 0.3, 160, CONFETTI, 3.2);
+    if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+  } else {
+    showStatus('No match. Try another');
+    playNotes([311.1, 233.1], 'sine', 0.14, 0.16);
+  }
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const pointerNdc = new THREE.Vector2();
+const localRay = new THREE.Ray();
+const inverse = new THREE.Matrix4();
+const hit = new THREE.Vector3();
+const scratch = { down: false, id: -1, x: 0, y: 0, has: false, speed: 0 };
+
+// Pointer -> texture pixel on the card (may be off the card)
+function cardPixel(e) {
+  ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  localRay.copy(raycaster.ray).applyMatrix4(inverse.copy(card.matrixWorld).invert());
+  const t = -localRay.origin.z / localRay.direction.z;
+  if (!(t > 0)) return null;
+  localRay.at(t, hit);
+  return { x: (hit.x / CARD[0] + 0.5) * TEX[0], y: (0.5 - hit.y / CARD[1]) * TEX[1], wx: hit.x, wy: hit.y };
+}
+
+function scratchTo(p) {
+  if (revealed) return;
+  const fromX = scratch.has ? scratch.x : p.x, fromY = scratch.has ? scratch.y : p.y;
+  const distance = Math.hypot(p.x - fromX, p.y - fromY);
+
+  maskCtx.strokeStyle = maskCtx.fillStyle = '#000';
+  maskCtx.lineCap = 'round'; maskCtx.lineJoin = 'round';
+  maskCtx.lineWidth = BRUSH;
+  maskCtx.beginPath(); maskCtx.moveTo(fromX, fromY); maskCtx.lineTo(p.x + 0.01, p.y); maskCtx.stroke();
+  // Ragged edge: little nicks either side of the stroke
+  for (let n = 0, count = 2 + Math.floor(distance / 6); n < count; n++) {
+    const t = Math.random();
+    maskCtx.beginPath();
+    maskCtx.arc(fromX + (p.x - fromX) * t + (Math.random() - 0.5) * BRUSH * 1.3,
+      fromY + (p.y - fromY) * t + (Math.random() - 0.5) * BRUSH * 1.3, 2 + Math.random() * 5, 0, Math.PI * 2);
+    maskCtx.fill();
+  }
+  maskTexture.needsUpdate = true;
+
+  // Only shed flakes where there was coating to remove
+  const inWindow = WINDOWS.some(([cx, cy]) => Math.abs(p.x - cx) < WINDOW_SIZE / 2 && Math.abs(p.y - cy) < WINDOW_SIZE / 2);
+  if (inWindow && distance > 1) flakes.emit(p.wx, p.wy, Math.min(4, 1 + Math.floor(distance / 14)), SILVER);
+  scratch.speed = inWindow ? distance : 0;
+  scratch.x = p.x; scratch.y = p.y; scratch.has = true;
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  initAudio();
+  if (scratch.down) return;
+  scratch.down = true; scratch.id = e.pointerId; scratch.has = false;
+  canvas.setPointerCapture(e.pointerId);
+  const p = cardPixel(e);
+  if (p) scratchTo(p);
+});
+canvas.addEventListener('pointermove', (e) => {
+  pointerNdc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  if (!scratch.down || e.pointerId !== scratch.id) return;
+  const p = cardPixel(e);
+  if (p) scratchTo(p);
+});
+const release = (e) => {
+  if (e.pointerId !== scratch.id) return;
+  scratch.down = false; scratch.id = -1; scratch.has = false;
+};
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+canvas.addEventListener('dblclick', newCard);
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitH = (CARD[1] * 0.5 + 0.95) / Math.tan(halfFov);
+  const fitW = (CARD[0] * 0.5 + 0.5) / (Math.tan(halfFov) * camera.aspect);
+  camera.position.set(0, 0, Math.max(fitH, fitW));
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+drawFoil();
+foilTexture.needsUpdate = true;
+newCard();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  // Card leans with the pointer, which slides the sheen across the coating
+  const ease = 1 - Math.exp(-5 * dt);
+  root.rotation.x += (BASE_TILT - pointerNdc.y * 0.1 - root.rotation.x) * ease;
+  root.rotation.y += (pointerNdc.x * 0.16 - root.rotation.y) * ease;
+  cardMaterial.uniforms.uTilt.value.set(root.rotation.y, root.rotation.x - BASE_TILT);
+
+  // New card slides up into place
+  dealTime = Math.max(0, dealTime - dt);
+  const slide = (dealTime / 0.45) ** 2;
+  root.position.y = -slide * 9;
+  root.rotation.z = slide * 0.35;
+  root.updateMatrixWorld();
+
+  // Once enough is scratched, the rest falls away
+  if (!revealed && scratch.down) {
+    checkTimer -= dt;
+    if (checkTimer <= 0) { checkTimer = 0.25; if (scratchedFraction() > REVEAL_AT) reveal(); }
+  }
+  if (wipe > 0) {
+    wipe -= dt;
+    maskCtx.fillStyle = `rgba(0, 0, 0, ${Math.min(1, dt / 0.12)})`;
+    maskCtx.fillRect(0, 0, TEX[0], TEX[1]);
+    maskTexture.needsUpdate = true;
+    WINDOWS.forEach(([cx, cy]) => flakes.emit((cx / TEX[0] - 0.5) * CARD[0], (0.5 - cy / TEX[1]) * CARD[1], 2, SILVER, 1.6));
+  }
+
+  setScratchSound(scratch.down ? scratch.speed : 0);
+  scratch.speed *= 0.6;
+  flakes.update(dt);
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="scratch-card"></script>
+</body>
+</html>

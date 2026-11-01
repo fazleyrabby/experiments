@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sticker Peel // 03</title>
+<style>
+  :root { --bg: #E9E4DA; --ink: #2B2722; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  canvas#stage.dragging { cursor: grabbing; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.left { left: 28px; }
+  .label.right { right: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.45; }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; }
+    .label.right { right: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label left">
+  <div>Sticker Peel // 03</div>
+  <div class="hint">Drag an edge to peel</div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const BG = 0xE9E4DA;
+const STICKER_SIZE = 1.5;          // side of each sticker quad
+const CURL_RADIUS = 0.16;          // radius of the peel roll
+const SEGMENTS = 96;               // quad subdivision, for a smooth curl
+const MASK_RES = 64;               // hit-test resolution
+const BASE_TILT = -0.22;
+const LAYOUTS = { landscape: { lid: [6.6, 4.3], grid: [3, 2] }, portrait: { lid: [4.3, 6.6], grid: [2, 3] } };
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+
+const root = new THREE.Group();   // lid + stickers; tilts with the pointer
+root.rotation.x = BASE_TILT;
+scene.add(root);
+
+// ───────────────────────────── Lid (the surface the stickers live on) ─────────────────────────────
+
+function roundedRect(w, h, r) {
+  const s = new THREE.Shape();
+  s.moveTo(-w / 2 + r, -h / 2);
+  s.lineTo(w / 2 - r, -h / 2); s.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+  s.lineTo(w / 2, h / 2 - r); s.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+  s.lineTo(-w / 2 + r, h / 2); s.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+  s.lineTo(-w / 2, -h / 2 + r); s.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+  return s;
+}
+
+const lidMaterial = new THREE.ShaderMaterial({
+  uniforms: { uSize: { value: new THREE.Vector2(1, 1) } },
+  vertexShader: /* glsl */`
+    varying vec2 vPos;
+    void main() { vPos = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    uniform vec2 uSize;
+    varying vec2 vPos;
+    void main() {
+      vec2 p = vPos / uSize;
+      // Brushed dark aluminium: vertical falloff plus a soft diagonal sheen
+      vec3 col = mix(vec3(0.020, 0.022, 0.026), vec3(0.038, 0.040, 0.046), p.y + 0.5);
+      col += 0.022 * smoothstep(0.55, 0.0, abs(p.x * 0.8 + p.y - 0.25));
+      gl_FragColor = vec4(col, 1.0);
+      #include <colorspace_fragment>
+    }
+  `,
+});
+const lid = new THREE.Mesh(new THREE.BufferGeometry(), lidMaterial);
+lid.position.z = -0.02;
+
+function buildLidShadow() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.shadowColor = 'rgba(40, 30, 20, 0.55)';
+  ctx.shadowBlur = 34;
+  ctx.shadowOffsetX = 1000;          // draw the rect off-canvas so only its shadow lands
+  ctx.shadowOffsetY = 10;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(48 - 1000, 48, 160, 160);
+  const texture = new THREE.CanvasTexture(c);
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false })
+  );
+  mesh.position.z = -0.05;
+  return mesh;
+}
+const lidShadow = buildLidShadow();
+root.add(lidShadow, lid);
+
+// ───────────────────────────── Sticker art (procedural, drawn on canvas) ─────────────────────────────
+
+const DESIGNS = [
+  { // smiley
+    fill: '#FFD23F',
+    path: (c) => c.arc(0, 0, 0.74, 0, Math.PI * 2),
+    art: (c) => {
+      c.fillStyle = '#1F1A14';
+      c.beginPath(); c.ellipse(-0.25, -0.16, 0.075, 0.13, 0, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(0.25, -0.16, 0.075, 0.13, 0, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = '#1F1A14'; c.lineWidth = 0.075; c.lineCap = 'round';
+      c.beginPath(); c.arc(0, 0.06, 0.4, Math.PI * 0.14, Math.PI * 0.86); c.stroke();
+    },
+  },
+  { // star
+    fill: '#FF5D73',
+    path: (c) => {
+      for (let k = 0; k < 10; k++) {
+        const a = -Math.PI / 2 + (k * Math.PI) / 5, r = k % 2 ? 0.36 : 0.8;
+        c[k ? 'lineTo' : 'moveTo'](Math.cos(a) * r, Math.sin(a) * r + 0.04);
+      }
+      c.closePath();
+    },
+    art: (c) => {
+      c.fillStyle = 'rgba(255, 255, 255, 0.35)';
+      c.beginPath(); c.ellipse(-0.12, -0.2, 0.09, 0.16, 0.5, 0, Math.PI * 2); c.fill();
+    },
+  },
+  { // name label
+    fill: '#1238FF',
+    path: (c) => c.roundRect(-0.86, -0.5, 1.72, 1.0, 0.16),
+    art: (c) => {
+      c.fillStyle = '#FFF1E3';
+      c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.font = '900 0.3px "Helvetica Neue", "Arial Black", Arial, sans-serif';
+      c.fillText('HELLO', 0, -0.2);
+      c.beginPath(); c.roundRect(-0.72, 0.02, 1.44, 0.36, 0.07); c.fill();
+      c.fillStyle = '#1238FF';
+      c.font = 'italic 700 0.2px Georgia, serif';
+      c.fillText('peel me', 0, 0.21);
+    },
+  },
+  { // bolt
+    fill: '#FFC400',
+    path: (c) => {
+      [[0.22, -0.86], [-0.5, 0.1], [-0.04, 0.1], [-0.24, 0.86], [0.5, -0.14], [0.04, -0.14], [0.36, -0.86]]
+        .forEach(([x, y], k) => c[k ? 'lineTo' : 'moveTo'](x, y));
+      c.closePath();
+    },
+    art: () => {},
+  },
+  { // heart
+    fill: '#E3242B',
+    path: (c) => {
+      c.moveTo(0, 0.7);
+      c.bezierCurveTo(-1.15, -0.02, -0.6, -0.95, 0, -0.36);
+      c.bezierCurveTo(0.6, -0.95, 1.15, -0.02, 0, 0.7);
+    },
+    art: (c) => {
+      c.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      c.beginPath(); c.ellipse(-0.36, -0.3, 0.08, 0.16, 0.7, 0, Math.PI * 2); c.fill();
+    },
+  },
+  { // badge
+    fill: '#17B890',
+    path: (c) => c.arc(0, 0, 0.72, 0, Math.PI * 2),
+    art: (c) => {
+      c.strokeStyle = '#FFF1E3'; c.lineWidth = 0.035; c.setLineDash([0.07, 0.06]);
+      c.beginPath(); c.arc(0, 0, 0.6, 0, Math.PI * 2); c.stroke();
+      c.setLineDash([]);
+      c.fillStyle = '#FFF1E3'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.font = '900 0.46px "Helvetica Neue", "Arial Black", Arial, sans-serif';
+      c.fillText('OK', 0, 0.03);
+    },
+  },
+];
+
+function renderDesign(design) {
+  const size = 512;
+  const cnv = document.createElement('canvas');
+  cnv.width = cnv.height = size;
+  const c = cnv.getContext('2d');
+  c.translate(size / 2, size / 2);
+  c.scale(size * 0.44, size * 0.44);   // design units: roughly -1..1
+  // Die-cut: a fat white outline around the coloured shape
+  c.beginPath(); design.path(c);
+  c.lineJoin = 'round'; c.lineWidth = 0.2; c.strokeStyle = '#FBFAF6'; c.stroke();
+  c.fillStyle = design.fill; c.fill();
+  design.art(c);
+
+  // Low-res alpha mask for hit tests, plus the sticker's bounding radius
+  const small = document.createElement('canvas');
+  small.width = small.height = MASK_RES;
+  const sc = small.getContext('2d', { willReadFrequently: true });
+  sc.drawImage(cnv, 0, 0, MASK_RES, MASK_RES);
+  const data = sc.getImageData(0, 0, MASK_RES, MASK_RES).data;
+  const mask = new Uint8Array(MASK_RES * MASK_RES);
+  let radius = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (data[i * 4 + 3] < 128) continue;
+    mask[i] = 1;
+    const x = ((i % MASK_RES) + 0.5) / MASK_RES - 0.5, y = (Math.floor(i / MASK_RES) + 0.5) / MASK_RES - 0.5;
+    radius = Math.max(radius, Math.hypot(x, y) * STICKER_SIZE);
+  }
+
+  const texture = new THREE.CanvasTexture(cnv);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  return { texture, mask, radius };
+}
+const designs = DESIGNS.map(renderDesign);
+
+// ───────────────────────────── Sticker shader ─────────────────────────────
+// The quad is folded about a line (uFoldPos, uFoldN): everything on the
+// positive side wraps half-way round a cylinder, then lies flat on its back.
+
+const STICKER_VERTEX = /* glsl */`
+  uniform vec2 uFoldPos;
+  uniform vec2 uFoldN;      // unit, points toward the peeled side
+  uniform float uRadius;    // 0 = flat
+  uniform float uShadow;    // 1 = project the flap down as a shadow
+  varying vec2 vUv;
+  varying vec3 vNormal;
+  varying float vSide;      // signed distance from the fold
+  varying float vHeight;
+
+  void main() {
+    vec3 p = position;
+    vec3 n = vec3(0.0, 0.0, 1.0);
+    float d = dot(p.xy - uFoldPos, uFoldN);
+    if (uRadius > 0.0001 && d > 0.0) {
+      float theta = d / uRadius;
+      vec2 onFold = p.xy - uFoldN * d;
+      if (theta < 3.14159265) {
+        p.xy = onFold + uFoldN * (uRadius * sin(theta));
+        p.z = uRadius * (1.0 - cos(theta));
+        n = vec3(-uFoldN * sin(theta), cos(theta));
+      } else {
+        float past = d - 3.14159265 * uRadius;
+        p.xy = onFold - uFoldN * past;
+        p.z = 2.0 * uRadius + past * 0.07;   // the loose end lifts a little
+        n = vec3(0.0, 0.0, -1.0);
+      }
+    }
+    vHeight = p.z;
+    if (uShadow > 0.5) {
+      p.xy += vec2(0.32, -0.12) * p.z;
+      p.z = 0.003;
+    }
+    vUv = uv;
+    vSide = d;
+    vNormal = mat3(modelMatrix) * n;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  }
+`;
+
+const STICKER_FRAGMENT = /* glsl */`
+  uniform sampler2D uMap;
+  uniform float uOpacity;
+  varying vec2 vUv;
+  varying vec3 vNormal;
+
+  void main() {
+    vec4 tex = texture2D(uMap, vUv);
+    float edge = fwidth(tex.a) * 0.7 + 0.0001;
+    float alpha = smoothstep(0.5 - edge, 0.5 + edge, tex.a);
+    if (alpha < 0.01) discard;
+
+    vec3 N = normalize(vNormal);
+    if (!gl_FrontFacing) N = -N;
+    vec3 L = normalize(vec3(-0.75, 0.1, 0.65));   // low from the left, so only the curl catches the gloss
+    vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
+    float diffuse = clamp(dot(N, L), 0.0, 1.0);
+
+    // Front: glossy print. Back: matte backing paper.
+    vec3 col = gl_FrontFacing ? tex.rgb : vec3(0.86, 0.85, 0.81);
+    col *= 0.56 + 0.62 * diffuse;
+    col += pow(max(dot(N, H), 0.0), gl_FrontFacing ? 70.0 : 10.0) * (gl_FrontFacing ? 0.55 : 0.06);
+
+    gl_FragColor = vec4(col, alpha * uOpacity);
+    #include <colorspace_fragment>
+  }
+`;
+
+const SHADOW_FRAGMENT = /* glsl */`
+  uniform sampler2D uMap;
+  uniform float uOpacity;
+  varying vec2 vUv;
+  varying float vSide;
+  varying float vHeight;
+
+  void main() {
+    if (vSide <= 0.0) discard;
+    float alpha = texture2D(uMap, vUv).a * smoothstep(0.0, 0.06, vHeight) * 0.3 * uOpacity;
+    gl_FragColor = vec4(0.0, 0.0, 0.0, alpha);
+  }
+`;
+
+// ───────────────────────────── Stickers ─────────────────────────────
+
+const stickerGeometry = new THREE.PlaneGeometry(STICKER_SIZE, STICKER_SIZE, SEGMENTS, SEGMENTS);
+const stickers = [];
+let peeledCount = 0;
+
+function createSticker(index) {
+  const uniforms = {
+    uMap: { value: null },
+    uFoldPos: { value: new THREE.Vector2() },
+    uFoldN: { value: new THREE.Vector2(1, 0) },
+    uRadius: { value: 0 },
+    uOpacity: { value: 1 },
+    uShadow: { value: 0 },
+  };
+  const material = new THREE.ShaderMaterial({
+    uniforms, vertexShader: STICKER_VERTEX, fragmentShader: STICKER_FRAGMENT,
+    side: THREE.DoubleSide, alphaToCoverage: true,
+  });
+  // The shadow shares the fold uniforms and only overrides uShadow
+  const shadowMaterial = new THREE.ShaderMaterial({
+    uniforms: { ...uniforms, uShadow: { value: 1 } },
+    vertexShader: STICKER_VERTEX, fragmentShader: SHADOW_FRAGMENT,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(stickerGeometry, material);
+  const shadow = new THREE.Mesh(stickerGeometry, shadowMaterial);
+  shadow.renderOrder = 1;
+  mesh.frustumCulled = shadow.frustumCulled = false;
+  const group = new THREE.Group();
+  group.add(mesh, shadow);
+  root.add(group);
+
+  const sticker = {
+    group, uniforms, index,
+    design: null,
+    home: new THREE.Vector3(), homeRotation: 0,
+    state: 'stuck',                    // stuck | peeling | returning | finishing | flying | landing
+    grab: new THREE.Vector2(),         // where the peel started (sticker space, on the edge)
+    tip: new THREE.Vector2(),          // where that point is now
+    target: new THREE.Vector2(),
+    dir: new THREE.Vector2(1, 0),
+    velocity: new THREE.Vector3(), spin: 0, time: 0,
+  };
+  setDesign(sticker, index % designs.length);
+  return sticker;
+}
+
+function setDesign(sticker, designIndex) {
+  sticker.designIndex = designIndex;
+  sticker.design = designs[designIndex];
+  sticker.uniforms.uMap.value = sticker.design.texture;
+}
+
+function insideSticker(sticker, x, y) {
+  const u = x / STICKER_SIZE + 0.5, v = 0.5 - y / STICKER_SIZE;
+  if (u < 0 || u >= 1 || v < 0 || v >= 1) return false;
+  return sticker.design.mask[Math.floor(v * MASK_RES) * MASK_RES + Math.floor(u * MASK_RES)] === 1;
+}
+
+// Fold line for a sticker whose grabbed point has been dragged to `tip`.
+// Chosen so the grabbed point lands exactly under the finger.
+const fold = { amount: 0 };
+function updateFold(sticker) {
+  const u = sticker.uniforms;
+  const dx = sticker.tip.x - sticker.grab.x, dy = sticker.tip.y - sticker.grab.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-4) { u.uRadius.value = 0; fold.amount = 0; return fold; }
+  sticker.dir.set(dx / length, dy / length);
+  const radius = Math.min(CURL_RADIUS, length * 0.3);
+  const reach = (length + Math.PI * radius) / 2;
+  u.uRadius.value = radius;
+  u.uFoldPos.value.set(sticker.grab.x + sticker.dir.x * reach, sticker.grab.y + sticker.dir.y * reach);
+  u.uFoldN.value.set(-sticker.dir.x, -sticker.dir.y);
+  // How far the fold has swept across the sticker: 0 none, 1 fully off
+  const past = -(u.uFoldPos.value.x * u.uFoldN.value.x + u.uFoldPos.value.y * u.uFoldN.value.y);
+  fold.amount = THREE.MathUtils.clamp((past + sticker.design.radius) / (2 * sticker.design.radius), 0, 1);
+  return fold;
+}
+
+function layoutStickers(name) {
+  const { lid: [w, h], grid: [cols, rows] } = LAYOUTS[name];
+  lid.geometry.dispose();
+  lid.geometry = new THREE.ShapeGeometry(roundedRect(w, h, 0.28), 12);
+  lidMaterial.uniforms.uSize.value.set(w, h);
+  lidShadow.scale.set(w * 1.6, h * 1.6, 1);
+
+  const cellW = (w - 0.5) / cols, cellH = (h - 0.5) / rows;
+  stickers.forEach((s, i) => {
+    const c = i % cols, r = Math.floor(i / cols);
+    s.home.set(
+      (c + 0.5) * cellW - (w - 0.5) / 2 + Math.sin(i * 12.9) * 0.14,
+      (h - 0.5) / 2 - (r + 0.5) * cellH + Math.cos(i * 7.3) * 0.12,
+      0.01 + i * 0.01
+    );
+    s.homeRotation = Math.sin(i * 4.7 + 1) * 0.32;
+    resetSticker(s);
+  });
+}
+
+function resetSticker(s) {
+  s.state = 'stuck';
+  s.group.position.copy(s.home);
+  s.group.rotation.set(0, 0, s.homeRotation);
+  s.group.scale.setScalar(1);
+  s.uniforms.uRadius.value = 0;
+  s.uniforms.uOpacity.value = 1;
+}
+
+for (let i = 0; i < 6; i++) stickers.push(createSticker(i));
+
+// ───────────────────────────── Sound ─────────────────────────────
+// Peel: filtered noise that follows peel speed. Slap: a short thump.
+
+let audio = null, peelGain = null, noiseBuffer = null;
+
+function initAudio() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  noiseBuffer = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+  const src = audio.createBufferSource();
+  src.buffer = noiseBuffer; src.loop = true;
+  const band = audio.createBiquadFilter();
+  band.type = 'bandpass'; band.frequency.value = 2600; band.Q.value = 0.7;
+  const high = audio.createBiquadFilter();
+  high.type = 'highpass'; high.frequency.value = 900;
+  peelGain = audio.createGain();
+  peelGain.gain.value = 0;
+  src.connect(band).connect(high).connect(peelGain).connect(audio.destination);
+  src.start();
+}
+
+function setPeelSound(speed) {
+  if (!audio) return;
+  // Adhesive lets go in tiny jerks, so the level flutters
+  const level = Math.min(0.32, speed * 0.09) * (0.55 + Math.random() * 0.9);
+  peelGain.gain.setTargetAtTime(level, audio.currentTime, 0.015);
+}
+
+function playSlap() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  const src = audio.createBufferSource();
+  src.buffer = noiseBuffer;
+  const low = audio.createBiquadFilter();
+  low.type = 'lowpass'; low.frequency.value = 900;
+  const gain = audio.createGain();
+  gain.gain.setValueAtTime(0.5, t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+  src.connect(low).connect(gain).connect(audio.destination);
+  src.start(t, Math.random() * 0.5); src.stop(t + 0.1);
+}
+
+// ───────────────────────────── Interaction ─────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const pointerNdc = new THREE.Vector2();
+const localRay = new THREE.Ray();
+const inverse = new THREE.Matrix4();
+const rootPoint = new THREE.Vector3();
+const local = new THREE.Vector2();
+let active = null;                       // sticker being peeled
+let activePointer = -1;
+const grabOffset = new THREE.Vector2();  // keeps the tip from jumping to the finger on grab
+
+// Pointer position on the lid plane, in root space
+function pointerOnLid(e) {
+  ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  localRay.copy(raycaster.ray).applyMatrix4(inverse.copy(root.matrixWorld).invert());
+  const t = -localRay.origin.z / localRay.direction.z;
+  return t > 0 ? localRay.at(t, rootPoint) : null;
+}
+
+// Root-space point -> sticker space (undo the sticker's home position and rotation)
+function toStickerSpace(s, point, out) {
+  const x = point.x - s.home.x, y = point.y - s.home.y;
+  const c = Math.cos(-s.homeRotation), sn = Math.sin(-s.homeRotation);
+  return out.set(x * c - y * sn, x * sn + y * c);
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  initAudio();
+  if (active) return;
+  const point = pointerOnLid(e);
+  if (!point) return;
+  for (let i = stickers.length - 1; i >= 0; i--) {
+    const s = stickers[i];
+    if (s.state !== 'stuck' && s.state !== 'returning') continue;
+    toStickerSpace(s, point, local);
+    if (!insideSticker(s, local.x, local.y)) continue;
+
+    // Start the peel from the nearest edge, outward from the centre
+    const len = Math.hypot(local.x, local.y) || 1;
+    const ox = local.x / len, oy = local.y / len;
+    s.grab.copy(local);
+    while (insideSticker(s, s.grab.x + ox * 0.02, s.grab.y + oy * 0.02)) { s.grab.x += ox * 0.02; s.grab.y += oy * 0.02; }
+    grabOffset.copy(s.grab).sub(local);
+    s.tip.copy(s.grab); s.target.copy(s.grab);
+    s.state = 'peeling';
+    active = s; activePointer = e.pointerId;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('dragging');
+    break;
+  }
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  pointerNdc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  if (!active || e.pointerId !== activePointer) return;
+  const point = pointerOnLid(e);
+  if (point) toStickerSpace(active, point, active.target).add(grabOffset);
+});
+
+function release(e) {
+  if (!active || e.pointerId !== activePointer) return;
+  if (active.state === 'peeling') active.state = updateFold(active).amount > 0.45 ? 'finishing' : 'returning';
+  active = null; activePointer = -1;
+  canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+
+// ───────────────────────────── Sticker life cycle ─────────────────────────────
+
+const easeOutBack = (t) => 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
+
+function flyAway(s) {
+  // Leaves in the direction it was pulled, tumbling
+  const c = Math.cos(s.homeRotation), sn = Math.sin(s.homeRotation);
+  s.velocity.set((s.dir.x * c - s.dir.y * sn) * 5, (s.dir.x * sn + s.dir.y * c) * 5 + 1.5, 3.5);
+  s.spin = (Math.random() - 0.5) * 8;
+  s.state = 'flying';
+  s.time = 0;
+  if (active === s) { active = null; activePointer = -1; canvas.classList.remove('dragging'); }
+  peeledCount++;
+  showCount();
+}
+
+function showCount() { statusEl.textContent = `Peeled ${String(peeledCount).padStart(3, '0')}`; }
+
+function updateStickers(dt) {
+  let peelSpeed = 0;
+  for (const s of stickers) {
+    switch (s.state) {
+      case 'peeling': {
+        const before = s.tip.distanceTo(s.grab);
+        s.tip.lerp(s.target, 1 - Math.exp(-28 * dt));
+        peelSpeed = Math.max(peelSpeed, Math.abs(s.tip.distanceTo(s.grab) - before) / dt);
+        if (updateFold(s).amount >= 1) flyAway(s);
+        break;
+      }
+      case 'finishing': {
+        s.tip.addScaledVector(s.dir, 9 * dt);
+        peelSpeed = Math.max(peelSpeed, 9);
+        if (updateFold(s).amount >= 1) flyAway(s);
+        break;
+      }
+      case 'returning': {
+        s.tip.lerp(s.grab, 1 - Math.exp(-14 * dt));
+        if (s.tip.distanceTo(s.grab) < 0.004) { s.tip.copy(s.grab); s.state = 'stuck'; }
+        updateFold(s);
+        break;
+      }
+      case 'flying': {
+        s.time += dt;
+        s.velocity.y -= 9 * dt;
+        s.group.position.addScaledVector(s.velocity, dt);
+        s.group.rotation.z += s.spin * dt;
+        s.group.rotation.x += s.spin * 0.6 * dt;
+        s.uniforms.uOpacity.value = 1 - THREE.MathUtils.smoothstep(s.time, 0.25, 0.6);
+        if (s.time > 0.75) {
+          // A fresh sticker slaps down in the same spot
+          setDesign(s, (s.designIndex + 1 + Math.floor(Math.random() * (designs.length - 1))) % designs.length);
+          resetSticker(s);
+          s.state = 'landing';
+          s.time = 0;
+        }
+        break;
+      }
+      case 'landing': {
+        if (s.time === 0) playSlap();
+        s.time += dt;
+        const t = Math.min(1, s.time / 0.24);
+        s.group.scale.setScalar(1 + 0.3 * (1 - easeOutBack(t)));
+        s.uniforms.uOpacity.value = Math.min(1, s.time / 0.08);
+        if (t >= 1) { s.group.scale.setScalar(1); s.state = 'stuck'; }
+        break;
+      }
+    }
+  }
+  setPeelSound(peelSpeed);
+}
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+let layoutName = '';
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+
+  const name = camera.aspect >= 1 ? 'landscape' : 'portrait';
+  if (name !== layoutName) { layoutName = name; layoutStickers(name); }
+
+  const [lidW, lidH] = LAYOUTS[name].lid;
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitH = (lidH * 0.5 + 1.2) / Math.tan(halfFov);
+  const fitW = (lidW * 0.5 + 0.8) / (Math.tan(halfFov) * camera.aspect);
+  camera.position.set(0, 0, Math.max(fitH, fitW));
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+showCount();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const ease = 1 - Math.exp(-5 * dt);
+  root.rotation.x += (BASE_TILT - pointerNdc.y * 0.04 - root.rotation.x) * ease;
+  root.rotation.y += (pointerNdc.x * 0.07 - root.rotation.y) * ease;
+  root.updateMatrixWorld();
+
+  updateStickers(dt);
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="sticker-peel"></script>
+</body>
+</html>

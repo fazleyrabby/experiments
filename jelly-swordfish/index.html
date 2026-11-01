@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F1E7DA">
+<meta name="description" content="A little swordfish made of jelly. Grab its bill, pull it around, and watch it wobble.">
+<title>Jelly Swordfish // 12</title>
+<style>
+  :root { --bg: #F1E7DA; --ink: #2B2722; --quiet: #766b5f; color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--ink); }
+  body, button { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline-offset: -6px; }
+  #stage.hovering { cursor: grab; }
+  #stage.dragging, #stage.rotating { cursor: grabbing; }
+  .label { position: fixed; z-index: 2; font-size: 11px; font-weight: 500; line-height: 1.8; letter-spacing: .17em; text-transform: uppercase; }
+  .back { top: max(18px, env(safe-area-inset-top)); left: 28px; min-height: 44px; display: flex; align-items: center; color: inherit; text-decoration: none; }
+  .back::before { content: "\2190"; margin-right: 12px; font-size: 17px; letter-spacing: 0; }
+  .controls { top: max(18px, env(safe-area-inset-top)); right: 28px; display: flex; gap: 25px; }
+  button { border: 0; padding: 0; min-height: 44px; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+  button:hover, .back:hover { color: var(--quiet); }
+  button:focus-visible, a:focus-visible, canvas:focus-visible { outline: 2px solid var(--ink); outline-offset: 5px; }
+  .caption { bottom: max(26px, env(safe-area-inset-bottom)); left: 28px; pointer-events: none; }
+  .hint { margin-top: 4px; color: var(--quiet); letter-spacing: .1em; }
+  .state { bottom: max(26px, env(safe-area-inset-bottom)); right: 28px; text-align: right; pointer-events: none; }
+  .state .hint { font-size: 10px; }
+  .visits { top: max(74px, calc(env(safe-area-inset-top) + 52px)); right: 28px; color: var(--quiet); pointer-events: none; font-size: 10px; }
+  .visits[hidden] { display: none; }
+  #loading { position: fixed; top: 50%; width: 100%; text-align: center; color: var(--quiet); font-size: 11px; letter-spacing: .12em; }
+  #loading[hidden] { display: none; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  @media (max-width: 900px) {
+    .state { bottom: max(112px, calc(env(safe-area-inset-bottom) + 92px)); }
+    .state .hint { display: none; }
+  }
+  @media (max-width: 560px) {
+    .label { font-size: 10px; letter-spacing: .12em; }
+    .back, .caption { left: 20px; }
+    .controls, .state, .visits { right: 20px; }
+    .controls { gap: 18px; }
+    .caption, .state { bottom: max(20px, env(safe-area-inset-bottom)); }
+    .hint { max-width: 230px; letter-spacing: .04em; }
+    .state .hint { display: none; }
+    .state { bottom: max(100px, calc(env(safe-area-inset-bottom) + 80px)); font-size: 9px; }
+  }
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<canvas id="stage" tabindex="0" aria-label="Interactive jelly swordfish" aria-describedby="instructions keyboard-help"></canvas>
+<a class="label back" href="/">Experiments</a>
+<div class="label controls"><button id="jump">Jump</button><button id="reset" aria-label="Reset fish and view">Reset</button></div>
+<div class="label caption"><div>Jelly Swordfish // 12</div><div class="hint" id="instructions">Grab fish to fling / Drag background to rotate<br>Scroll to zoom / Right-drag to rotate anywhere</div></div>
+<div class="label state"><div id="status">Ready to wobble</div><div class="hint">A very soft sort of swordfish</div></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+<div id="loading" role="status">A little jelly, coming to life.</div>
+<div class="sr-only" id="keyboard-help">Focus the fish and use arrow keys to move it, Space to jump, Enter to poke, and R to reset. Use A and D to rotate around it, W and S to tilt the view, plus and minus to zoom, and 0 to reset the view.</div>
+<div class="sr-only" id="announcement" role="status" aria-live="polite"></div>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const canvas = document.getElementById('stage');
+const loading = document.getElementById('loading');
+const status = document.getElementById('status');
+const jumpButton = document.getElementById('jump');
+const motion = matchMedia('(prefers-reduced-motion: reduce)');
+
+const clamp = THREE.MathUtils.clamp;
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+} catch {
+  loading.textContent = 'This little fish needs WebGL. Try another browser or enable hardware acceleration.';
+  document.querySelector('.controls').hidden = true;
+  throw new Error('WebGL is unavailable');
+}
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#F1E7DA');
+scene.fog = new THREE.Fog('#F1E7DA', 16, 38);
+const camera = new THREE.OrthographicCamera(-5, 5, 3, -3, .1, 80);
+camera.position.set(0, 3.8, 12);
+camera.lookAt(0, 0, 0);
+const DEFAULT_ELEVATION = Math.atan2(3.8, 12);
+const VIEW_RADIUS = Math.hypot(3.8, 12);
+let viewYaw = 0, viewElevation = DEFAULT_ELEVATION;
+function updateView() {
+  const radius = VIEW_RADIUS * Math.cos(viewElevation);
+  camera.position.set(Math.sin(viewYaw) * radius, Math.sin(viewElevation) * VIEW_RADIUS, Math.cos(viewYaw) * radius);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
+}
+function zoomView(factor) {
+  camera.zoom = clamp(camera.zoom * factor, .5, 3);
+  updateView();
+}
+function resetView() {
+  viewYaw = 0;
+  viewElevation = DEFAULT_ELEVATION;
+  camera.zoom = 1;
+  updateView();
+}
+const pmrem = new THREE.PMREMGenerator(renderer);
+const room = new RoomEnvironment();
+const environment = pmrem.fromScene(room, .035);
+scene.environment = environment.texture;
+room.dispose();
+pmrem.dispose();
+scene.add(new THREE.HemisphereLight(0xffffff, 0xe8dccb, .55));
+const key = new THREE.DirectionalLight(0xfff6ea, 2.2);
+key.position.set(-3, 6, 5);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xc0e6ff, .7);
+rim.position.set(2, 1, -4);
+scene.add(rim);
+
+const fish = new THREE.Group();
+scene.add(fish);
+const jelly = new THREE.MeshPhysicalMaterial({
+  // The same gelatin material settings as Jelly Cube, in its blue flavour.
+  color: 0xffffff, transmission: 1, thickness: 1.5, ior: 1.36,
+  roughness: .06, clearcoat: 1, clearcoatRoughness: .05,
+  attenuationColor: new THREE.Color(0x3d6bff), attenuationDistance: 1.25,
+  emissive: 0x3d6bff, emissiveIntensity: .07,
+  specularIntensity: 1, envMapIntensity: 1.25
+});
+const finMaterial = jelly.clone();
+finMaterial.thickness = .3;
+finMaterial.attenuationDistance = .65;
+const ridgeMaterial = new THREE.MeshPhysicalMaterial({ color: 0xa3e0ec, roughness: .2, transmission: .5, thickness: .1 });
+const skin = [];
+const hitMeshes = [];
+
+function addSkin(geometry, material = jelly, fin = false) {
+  geometry.deleteAttribute('normal');
+  geometry = mergeVertices(geometry, .0001);
+  geometry.computeVertexNormals();
+  geometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
+  const mesh = new THREE.Mesh(geometry, material);
+  // The fish moves beyond its original bounding sphere while being stretched.
+  mesh.frustumCulled = false;
+  mesh.userData.rest = new Float32Array(geometry.attributes.position.array);
+  mesh.userData.fin = fin;
+  fish.add(mesh);
+  skin.push(mesh);
+  hitMeshes.push(mesh);
+  return mesh;
+}
+
+// One continuous surface from the tail root all the way to the tip of the bill.
+const profile = new THREE.CatmullRomCurve3([
+  [-2.12, .045, .045], [-1.7, .14, .13], [-1.15, .33, .27],
+  [-.55, .51, .39], [.05, .58, .46], [.6, .48, .38],
+  [.98, .29, .24], [1.16, .105, .1], [1.55, .075, .065],
+  [2.2, .045, .04], [3.06, .002, .002]
+].map(p => new THREE.Vector3(...p)), false, 'centripetal');
+const rings = 124, sides = 48;
+const vertices = [], indices = [];
+for (let i = 0; i <= rings; i++) {
+  const p = profile.getPoint(i / rings);
+  for (let j = 0; j <= sides; j++) {
+    const a = j / sides * Math.PI * 2;
+    const center = .045 + .055 * clamp((p.x - .6) / .7, 0, 1);
+    vertices.push(p.x, center + Math.cos(a) * Math.max(.002, p.y), Math.sin(a) * Math.max(.002, p.z));
+    if (i < rings && j < sides) {
+      const n = i * (sides + 1) + j;
+      indices.push(n, n + 1, n + sides + 1, n + 1, n + sides + 2, n + sides + 1);
+    }
+  }
+}
+const bodyGeometry = new THREE.BufferGeometry();
+bodyGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+bodyGeometry.setIndex(indices);
+const body = addSkin(bodyGeometry);
+
+function fin(draw, depth = .065, z = 0) {
+  const shape = new THREE.Shape();
+  draw(shape);
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .035, bevelThickness: .035, curveSegments: 18 });
+  geometry.translate(0, 0, z - depth / 2);
+  return addSkin(geometry, finMaterial, true);
+}
+
+// The swept crescent tail and tall dorsal fin make the silhouette a swordfish.
+fin(s => {
+  s.moveTo(-1.98, .04);
+  s.bezierCurveTo(-2.28, .25, -2.52, .84, -2.94, 1.02);
+  s.bezierCurveTo(-2.83, .69, -2.62, .25, -2.47, .04);
+  s.bezierCurveTo(-2.64, -.2, -2.82, -.6, -2.94, -.91);
+  s.bezierCurveTo(-2.54, -.79, -2.28, -.21, -1.98, .04);
+}, .09);
+fin(s => {
+  s.moveTo(.34, .51);
+  s.bezierCurveTo(.22, .85, .04, 1.24, -.19, 1.38);
+  s.bezierCurveTo(-.27, 1.4, -.24, 1.08, -.38, .91);
+  s.bezierCurveTo(-.61, .62, -1.07, .47, -1.36, .29);
+  s.quadraticCurveTo(-.48, .42, .34, .51);
+});
+fin(s => {
+  s.moveTo(-.48, -.39);
+  s.quadraticCurveTo(-.7, -.77, -1.2, -.82);
+  s.quadraticCurveTo(-1.02, -.49, -.95, -.25);
+  s.closePath();
+}, .045);
+
+// Near and far pectoral fins angle away from the body rather than lying flat.
+function pectoral(side) {
+  const shape = new THREE.Shape();
+  shape.moveTo(.37, -.1);
+  shape.bezierCurveTo(.03, -.31, -.5, -.75, -.91, -.78);
+  shape.quadraticCurveTo(-.68, -.34, -.08, -.17);
+  shape.quadraticCurveTo(.17, -.06, .37, -.1);
+  const g = new THREE.ExtrudeGeometry(shape, { depth: .055, bevelEnabled: true, bevelThickness: .035, bevelSize: .03, bevelSegments: 3, curveSegments: 20 });
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i);
+    p.setZ(i, side * (.33 + Math.max(0, -y - .1) * .72) + p.getZ(i));
+  }
+  addSkin(g, finMaterial, true);
+}
+pectoral(-1);
+pectoral(1);
+
+// A few soft ridges catch light inside the fins.
+function ridge(points, radius = .009) {
+  return addSkin(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p))), 20, radius, 5, false), ridgeMaterial, true);
+}
+ridge([[.12,.55,.065],[-.17,1.2,.065]]);
+ridge([[-.02,.53,.065],[-.35,.91,.065]]);
+ridge([[-.25,.48,.065],[-.68,.65,.065]]);
+ridge([[-2.09,.04,.08],[-2.45,.36,.08],[-2.8,.86,.08]]);
+ridge([[-2.09,.04,.08],[-2.45,-.3,.08],[-2.8,-.77,.08]]);
+
+const attachments = [];
+const eyeMaterial = new THREE.MeshPhysicalMaterial({ color: 0x132e3b, roughness: .1, clearcoat: 1 });
+const eyeRim = new THREE.MeshPhysicalMaterial({ color: 0xb1e6ee, transmission: .3, roughness: .15, thickness: .1 });
+function attach(mesh, x, y, z) {
+  mesh.position.set(x, y, z);
+  mesh.userData.anchor = new THREE.Vector3(x, y, z);
+  attachments.push(mesh);
+  fish.add(mesh);
+  return mesh;
+}
+for (const side of [-1, 1]) {
+  const x = .77, y = .22, z = side * .321;
+  const rimEye = new THREE.Mesh(new THREE.SphereGeometry(.102, 24, 16), eyeRim);
+  rimEye.scale.set(1, 1, .48);
+  attach(rimEye, x, y, z);
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(.073, 24, 16), eyeMaterial);
+  eye.scale.set(1, 1, .63);
+  attach(eye, x + .012, y + .002, z + side * .034);
+  const shine = new THREE.Mesh(new THREE.SphereGeometry(.018, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  attach(shine, x + .026, y + .026, z + side * .076);
+}
+// A short, subtle mouth follows the cheek, tucked below the bill.
+const mouthMaterial = new THREE.MeshStandardMaterial({ color: 0x3d8eaa, transparent: true, opacity: .48, roughness: .5 });
+const mouth = addSkin(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
+  new THREE.Vector3(.73, -.04, .363), new THREE.Vector3(.96, .002, .252), new THREE.Vector3(1.15, .06, .12)
+]), 24, .012, 6, false), mouthMaterial);
+
+// Jelly Cube's quiet checker tabletop makes the refraction visible.
+const floorCanvas = document.createElement('canvas');
+floorCanvas.width = floorCanvas.height = 128;
+const floorContext = floorCanvas.getContext('2d');
+floorContext.fillStyle = '#F4EBDD';
+floorContext.fillRect(0, 0, 128, 128);
+floorContext.fillStyle = '#E3D5BF';
+floorContext.fillRect(0, 0, 64, 64);
+floorContext.fillRect(64, 64, 64, 64);
+const floorTexture = new THREE.CanvasTexture(floorCanvas);
+floorTexture.colorSpace = THREE.SRGBColorSpace;
+floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+floorTexture.repeat.set(50, 50);
+floorTexture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.MeshStandardMaterial({ map: floorTexture, roughness: .9 }));
+const FLOOR_Y = -1.25;
+const MIN_CENTER_Y = FLOOR_Y + 1.07;
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = FLOOR_Y;
+scene.add(floor);
+
+const shadowCanvas = document.createElement('canvas');
+shadowCanvas.width = shadowCanvas.height = 128;
+const context = shadowCanvas.getContext('2d');
+const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
+gradient.addColorStop(0, 'rgba(45,39,35,.3)');
+gradient.addColorStop(.4, 'rgba(45,39,35,.13)');
+gradient.addColorStop(1, 'rgba(45,39,35,0)');
+context.fillStyle = gradient;
+context.fillRect(0, 0, 128, 128);
+const shadowMaterial = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(shadowCanvas), transparent: true, depthWrite: false });
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 2.7), shadowMaterial);
+shadow.rotation.x = -Math.PI / 2;
+shadow.position.y = FLOOR_Y + .01;
+scene.add(shadow);
+
+// As in Jelly Cube, a 3D lattice holds the entire object together. Shape matching
+// preserves its volume while allowing a local dent and a connected elastic wobble.
+const LATTICE = [16, 6, 5];
+const latticeMin = [-3.1, -1.05, -1.05];
+const latticeSize = [6.3, 2.55, 2.1];
+const spacing = latticeSize.map((v, a) => v / (LATTICE[a] - 1));
+const COUNT = LATTICE[0] * LATTICE[1] * LATTICE[2];
+const rest = new Float32Array(COUNT * 3);
+const pos = new Float32Array(COUNT * 3);
+const prev = new Float32Array(COUNT * 3);
+const vel = new Float32Array(COUNT * 3);
+const grabWeight = new Float32Array(COUNT);
+const grabOffset = new Float32Array(COUNT * 3);
+const inertia = [0, 0, 0];
+const restCenter = new THREE.Vector3();
+for (let k = 0, n = 0; k < LATTICE[2]; k++) for (let j = 0; j < LATTICE[1]; j++) for (let i = 0; i < LATTICE[0]; i++, n++) {
+  const xyz = [i, j, k].map((v, a) => latticeMin[a] + v * spacing[a]);
+  for (let a = 0; a < 3; a++) rest[n * 3 + a] = xyz[a];
+  restCenter.add(new THREE.Vector3(...xyz));
+}
+restCenter.divideScalar(COUNT);
+for (let n = 0; n < COUNT; n++) for (let a = 0; a < 3; a++) inertia[a] += (rest[n * 3 + a] - restCenter.getComponent(a)) ** 2;
+pos.set(rest);
+const A = new Float64Array(9), R = new Float64Array(9), T = new Float64Array(9);
+const bodyRotation = new THREE.Quaternion(), deltaRotation = new THREE.Quaternion();
+const identity = new THREE.Quaternion(), axis = new THREE.Vector3(), rotationMatrix = new THREE.Matrix4();
+function buildSkin(points) {
+  const count = points.length / 3;
+  const index = new Uint16Array(count * 8), weight = new Float32Array(count * 8);
+  for (let v = 0; v < count; v++) {
+    const u = [0, 1, 2].map(a => (points[v * 3 + a] - latticeMin[a]) / spacing[a]);
+    const cell = u.map((x, a) => clamp(Math.floor(x), 0, LATTICE[a] - 2));
+    const f = u.map((x, a) => clamp(x - cell[a], 0, 1));
+    for (let c = 0; c < 8; c++) {
+      const dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1;
+      index[v * 8 + c] = (cell[2] + dz) * LATTICE[0] * LATTICE[1] + (cell[1] + dy) * LATTICE[0] + cell[0] + dx;
+      weight[v * 8 + c] = (dx ? f[0] : 1 - f[0]) * (dy ? f[1] : 1 - f[1]) * (dz ? f[2] : 1 - f[2]);
+    }
+  }
+  return { index, weight };
+}
+function skinPoint(binding, vertex, out) {
+  let x = 0, y = 0, z = 0;
+  for (let c = vertex * 8; c < vertex * 8 + 8; c++) {
+    const i = binding.index[c] * 3, w = binding.weight[c];
+    x += pos[i] * w; y += pos[i + 1] * w; z += pos[i + 2] * w;
+  }
+  return out.set(x, y, z);
+}
+for (const mesh of skin) mesh.userData.binding = buildSkin(mesh.userData.rest);
+for (const mesh of attachments) mesh.userData.binding = buildSkin(mesh.userData.anchor.toArray());
+
+// Small air bubbles embedded in the solid jelly, following the same lattice.
+const bubbleMaterial = new THREE.MeshStandardMaterial({ color: 0xd8e5ff, roughness: .25 });
+for (let i = 0; i < 18; i++) {
+  const x = -.95 + (i % 6) * .28;
+  const y = Math.sin(i * 4.1) * .22 + .08;
+  const z = Math.cos(i * 2.7) * .22;
+  const bubble = attach(new THREE.Mesh(new THREE.SphereGeometry(.018 + (i % 4) * .006, 12, 8), bubbleMaterial), x, y, z);
+  bubble.userData.binding = buildSkin([x, y, z]);
+}
+function extractRotation() {
+  for (let iter = 0; iter < 4; iter++) {
+    rotationMatrix.makeRotationFromQuaternion(bodyRotation);
+    const e = rotationMatrix.elements;
+    let ox = 0, oy = 0, oz = 0, dot = 0;
+    for (let c = 0; c < 3; c++) {
+      const rx = e[c * 4], ry = e[c * 4 + 1], rz = e[c * 4 + 2];
+      const ax = A[c], ay = A[3 + c], az = A[6 + c];
+      ox += ry * az - rz * ay; oy += rz * ax - rx * az; oz += rx * ay - ry * ax;
+      dot += rx * ax + ry * ay + rz * az;
+    }
+    const divisor = 1 / (Math.abs(dot) + 1e-9);
+    ox *= divisor; oy *= divisor; oz *= divisor;
+    const angle = Math.hypot(ox, oy, oz);
+    if (angle < 1e-9) break;
+    bodyRotation.premultiply(deltaRotation.setFromAxisAngle(axis.set(ox / angle, oy / angle, oz / angle), angle)).normalize();
+  }
+  bodyRotation.slerp(identity, .025);
+  rotationMatrix.makeRotationFromQuaternion(bodyRotation);
+  const e = rotationMatrix.elements;
+  R.set([e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]]);
+}
+function stepJelly(dt) {
+  for (let i = 0; i < pos.length; i++) {
+    prev[i] = pos[i];
+    vel[i] *= Math.exp(-1.5 * dt);
+    pos[i] += vel[i] * dt;
+  }
+  const c = new THREE.Vector3();
+  for (let i = 0; i < pos.length; i += 3) c.add(scratch.set(pos[i], pos[i + 1], pos[i + 2]));
+  c.divideScalar(COUNT);
+  A.fill(0);
+  for (let i = 0; i < pos.length; i += 3) {
+    const qx = rest[i] - restCenter.x, qy = rest[i + 1] - restCenter.y, qz = rest[i + 2] - restCenter.z;
+    const px = pos[i] - c.x, py = pos[i + 1] - c.y, pz = pos[i + 2] - c.z;
+    A[0] += px * qx; A[1] += px * qy; A[2] += px * qz;
+    A[3] += py * qx; A[4] += py * qy; A[5] += py * qz;
+    A[6] += pz * qx; A[7] += pz * qy; A[8] += pz * qz;
+  }
+  extractRotation();
+  for (let n = 0; n < 9; n++) A[n] /= inertia[n % 3];
+  const determinant = A[0] * (A[4] * A[8] - A[5] * A[7]) - A[1] * (A[3] * A[8] - A[5] * A[6]) + A[2] * (A[3] * A[7] - A[4] * A[6]);
+  const norm = determinant > .05 ? 1 / Math.cbrt(determinant) : 0;
+  const blend = norm > 0 ? .68 : 0;
+  for (let n = 0; n < 9; n++) T[n] = blend * A[n] * norm + (1 - blend) * R[n];
+  for (let n = 0; n < COUNT; n++) {
+    const i = n * 3;
+    const x = rest[i] - restCenter.x, y = rest[i + 1] - restCenter.y, z = rest[i + 2] - restCenter.z;
+    const targets = [T[0] * x + T[1] * y + T[2] * z, T[3] * x + T[4] * y + T[5] * z, T[6] * x + T[7] * y + T[8] * z];
+    for (let a = 0; a < 3; a++) {
+      const target = targets[a] + restCenter.getComponent(a);
+      pos[i + a] += .12 * (target - pos[i + a]);
+      // A slight return to the rest pose keeps the elongated fish from rolling away.
+      pos[i + a] += .006 * (rest[i + a] - pos[i + a]);
+      if (hand && grabWeight[n] > 0) {
+        const held = hand.local.getComponent(a) + pull.getComponent(a) + grabOffset[i + a];
+        pos[i + a] += grabWeight[n] * .3 * (held - pos[i + a]);
+      }
+      vel[i + a] = (pos[i + a] - prev[i + a]) / dt;
+    }
+  }
+}
+const center = new THREE.Vector3(0, .75, 0), velocity = new THREE.Vector3(), home = center.clone();
+const goal = new THREE.Vector3(), pull = new THREE.Vector3();
+const scratch = new THREE.Vector3();
+const floorNormal = new THREE.Vector3();
+const inverseFishRotation = new THREE.Quaternion();
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const dragPlane = new THREE.Plane();
+const normal = new THREE.Vector3();
+const worldPoint = new THREE.Vector3();
+let hand = null, orbit = null, time = 0, previousTime = 0, accumulator = 0;
+let statusTimer = 0, halfWidth = 5, halfHeight = 3;
+
+const STEP = 1 / 120;
+
+function setStatus(text, duration = 0) {
+  if (status.textContent !== text) status.textContent = text;
+  statusTimer = duration;
+}
+function announce(text) { document.getElementById('announcement').textContent = text; }
+function landingSquish(strength) {
+  const amount = Math.min(strength, 9) * (motion.matches ? .35 : 1);
+  for (let n = 0; n < COUNT; n++) {
+    const i = n * 3;
+    const top = clamp((rest[i + 1] - latticeMin[1]) / latticeSize[1], 0, 1);
+    vel[i] += (rest[i] - restCenter.x) * amount * .25;
+    vel[i + 1] -= top * amount * .9;
+    vel[i + 2] += rest[i + 2] * amount * .75;
+  }
+}
+function jump() {
+  if (hand) return;
+  velocity.y = 5.2;
+  landingSquish(2);
+  setStatus('A little jelly jump', 1.2);
+  announce('The swordfish jumps.');
+}
+jumpButton.addEventListener('click', jump);
+
+function reset() {
+  if (hand || orbit) endDrag();
+  resetView();
+  center.set(0, .75, 0);
+  home.copy(center);
+  velocity.set(0, 0, 0);
+  pos.set(rest); vel.fill(0); bodyRotation.identity();
+  setStatus('Back in shape', 1.8);
+  announce('Swordfish reset to the center.');
+}
+document.getElementById('reset').addEventListener('click', reset);
+
+function poke(x = .1, strength = 1) {
+  const point = hand ? hand.local : new THREE.Vector3(x, 0, .4);
+  for (let n = 0; n < COUNT; n++) {
+    const i = n * 3;
+    const distance = Math.hypot(pos[i] - point.x, pos[i + 1] - point.y, pos[i + 2] - point.z);
+    const w = Math.max(0, 1 - distance / 1.15);
+    vel[i + 1] -= w * 1.2 * strength;
+    vel[i + 2] -= w * 5.5 * strength;
+  }
+  setStatus('A little jelly wobble', 2.2);
+}
+function setPointer(e) {
+  const rect = canvas.getBoundingClientRect();
+  pointer.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+}
+function hitTest(e) {
+  setPointer(e);
+  return raycaster.intersectObjects(hitMeshes, false)[0];
+}
+canvas.addEventListener('pointerdown', e => {
+  if (hand || orbit || (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2)) return;
+  const hit = e.button === 2 ? null : hitTest(e);
+  if (!hit) {
+    e.preventDefault();
+    orbit = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('rotating');
+    return;
+  }
+  e.preventDefault();
+  canvas.focus({ preventScroll: true });
+  camera.getWorldDirection(normal);
+  dragPlane.setFromNormalAndCoplanarPoint(normal, hit.point);
+  const local = fish.worldToLocal(hit.point.clone());
+  hand = {
+    id: e.pointerId, local, world: hit.point.clone(), offset: hit.point.clone().sub(center),
+    startX: e.clientX, startY: e.clientY, moved: false, bill: local.x > 1.2,
+    lastWorld: hit.point.clone(), lastAt: performance.now(), throwVelocity: new THREE.Vector3()
+  };
+  home.copy(center);
+  for (let n = 0; n < COUNT; n++) {
+    const i = n * 3;
+    const d = Math.hypot(pos[i] - local.x, pos[i + 1] - local.y, pos[i + 2] - local.z);
+    grabWeight[n] = Math.max(0, 1 - d / 1.25) ** 2;
+    grabOffset[i] = pos[i] - local.x;
+    grabOffset[i + 1] = pos[i + 1] - local.y;
+    grabOffset[i + 2] = pos[i + 2] - local.z;
+  }
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add('dragging');
+  poke(local.x, .4);
+  setStatus(hand.bill ? 'A wonderfully floppy bill' : 'Jelly in your hands');
+});
+canvas.addEventListener('pointermove', e => {
+  if (orbit) {
+    if (e.pointerId !== orbit.id) return;
+    viewYaw -= (e.clientX - orbit.x) * .008;
+    // Keep the camera above the solid tabletop while permitting a full turn.
+    viewElevation = clamp(viewElevation + (e.clientY - orbit.y) * .006, .08, Math.PI / 2 - .06);
+    orbit.x = e.clientX; orbit.y = e.clientY;
+    updateView();
+    return;
+  }
+  if (!hand) {
+    if (e.pointerType !== 'touch') canvas.classList.toggle('hovering', Boolean(hitTest(e)));
+    return;
+  }
+  if (e.pointerId !== hand.id) return;
+  setPointer(e);
+  if (!raycaster.ray.intersectPlane(dragPlane, worldPoint)) return;
+  const now = performance.now(), sampleDt = Math.max(.016, (now - hand.lastAt) / 1000);
+  scratch.copy(worldPoint).sub(hand.lastWorld).divideScalar(sampleDt).clampLength(0, 12);
+  hand.throwVelocity.lerp(scratch, .55);
+  hand.lastWorld.copy(worldPoint); hand.lastAt = now;
+  hand.world.copy(worldPoint);
+  if (Math.hypot(e.clientX - hand.startX, e.clientY - hand.startY) > 4) hand.moved = true;
+  if (hand.moved) {
+    home.copy(worldPoint).sub(hand.offset);
+    home.x = clamp(home.x, -halfWidth + .7, halfWidth - .7);
+    home.y = clamp(home.y, MIN_CENTER_Y, halfHeight - 1.2);
+    home.z = clamp(home.z, -halfWidth + .9, halfWidth - .9);
+  }
+});
+function endDrag(e) {
+  if (orbit) {
+    if (e && e.pointerId !== orbit.id) return;
+    const id = orbit.id;
+    orbit = null;
+    canvas.classList.remove('rotating');
+    if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id);
+    return;
+  }
+  if (!hand || (e && e.pointerId !== hand.id)) return;
+  const released = hand;
+  hand = null;
+  if (canvas.hasPointerCapture(released.id)) canvas.releasePointerCapture(released.id);
+  canvas.classList.remove('dragging', 'hovering');
+  if (!released.moved && e?.type === 'pointerup') poke(released.local.x);
+  else {
+    if (e?.type === 'pointerup' && performance.now() - released.lastAt < 140) {
+      velocity.lerp(released.throwVelocity, .8);
+      landingSquish(velocity.length() * .45);
+    }
+    setStatus('Catch that wobble', 1.6);
+  }
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('lostpointercapture', endDrag);
+window.addEventListener('blur', () => endDrag());
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (hand) return;
+  const units = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerHeight : 1;
+  zoomView(Math.exp(-clamp(e.deltaY * units, -500, 500) * .0015));
+}, { passive: false });
+canvas.addEventListener('pointerleave', () => { if (!hand) canvas.classList.remove('hovering'); });
+canvas.addEventListener('keydown', e => {
+  const arrows = { ArrowLeft: [-.22, 0], ArrowRight: [.22, 0], ArrowUp: [0, .22], ArrowDown: [0, -.22] };
+  if (arrows[e.key]) {
+    e.preventDefault();
+    velocity.x += arrows[e.key][0] * 7;
+    velocity.y += arrows[e.key][1] * 10;
+    setStatus('A little jelly hop', 1.2);
+  } else if (e.code === 'Space' || e.code === 'Enter') {
+    e.preventDefault();
+    if (!e.repeat) { if (e.code === 'Space') jump(); else { poke(); announce('Squish.'); } }
+  } else if (e.key.toLowerCase() === 'r') reset();
+  else if (['a', 'd', 'w', 's', '+', '=', '-', '0'].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+    switch (e.key.toLowerCase()) {
+      case 'a': viewYaw -= .18; break;
+      case 'd': viewYaw += .18; break;
+      case 'w': viewElevation = Math.min(Math.PI / 2 - .06, viewElevation + .12); break;
+      case 's': viewElevation = Math.max(.08, viewElevation - .12); break;
+      case '+': case '=': zoomView(1.15); break;
+      case '-': zoomView(1 / 1.15); break;
+      case '0': resetView(); break;
+    }
+    updateView();
+  }
+});
+
+function step(dt) {
+  time += dt;
+  if (hand) {
+    goal.copy(home);
+    velocity.addScaledVector(scratch.copy(goal).sub(center), 110 * dt);
+    velocity.multiplyScalar(Math.exp(-12 * dt));
+  } else {
+    // Released fish keeps its throw momentum and falls onto the tabletop.
+    velocity.y -= 14 * dt;
+    velocity.x *= Math.exp(-.35 * dt);
+    velocity.z *= Math.exp(-.35 * dt);
+  }
+  center.addScaledVector(velocity, dt);
+  if (center.y < MIN_CENTER_Y) {
+    center.y = MIN_CENTER_Y;
+    if (velocity.y < 0) {
+      const impact = -velocity.y;
+      velocity.y = impact > 1.6 ? impact * .34 : 0;
+      velocity.x *= .8;
+      velocity.z *= .8;
+      if (impact > .8) {
+        landingSquish(impact);
+        if (!hand) setStatus('Boing', .8);
+      }
+    }
+    if (!hand) {
+      velocity.x *= Math.exp(-4 * dt);
+      velocity.z *= Math.exp(-4 * dt);
+    }
+  }
+  const wall = Math.max(.5, halfWidth - .9);
+  if (Math.abs(center.x) > wall) {
+    center.x = clamp(center.x, -wall, wall);
+    velocity.x *= -.4;
+    landingSquish(Math.abs(velocity.x));
+  }
+  if (Math.abs(center.z) > wall) {
+    center.z = clamp(center.z, -wall, wall);
+    velocity.z *= -.4;
+    landingSquish(Math.abs(velocity.z));
+  }
+  if (center.y > halfHeight - 1.2) {
+    center.y = halfHeight - 1.2;
+    velocity.y = Math.min(0, -velocity.y * .3);
+  }
+  if (hand) {
+    pull.copy(hand.world).sub(center).sub(hand.offset).clampLength(0, .5);
+    pull.applyQuaternion(inverseFishRotation);
+    if (!hand.moved) pull.z -= .22;
+  }
+  stepJelly(dt);
+  if (statusTimer > 0) {
+    statusTimer -= dt;
+    if (statusTimer <= 0 && !hand) setStatus(center.y > MIN_CENTER_Y + .1 ? 'A little air time' : 'Ready to wobble');
+  }
+}
+
+function updateSkin() {
+  fish.position.copy(center);
+  fish.rotation.z += (clamp(velocity.x * -.035 + velocity.y * .02, -.22, .22) - fish.rotation.z) * .08;
+  fish.rotation.y = clamp(velocity.x * .015, -.12, .12);
+  // Project lattice particles onto the solid tabletop in the fish's local frame.
+  // Every skin vertex is a convex blend of these particles, so fins and bill
+  // obey the same floor even when the fish is tilted or locally compressed.
+  inverseFishRotation.copy(fish.quaternion).invert();
+  floorNormal.set(0, 1, 0).applyQuaternion(inverseFishRotation);
+  for (let n = 0; n < COUNT; n++) {
+    const i = n * 3;
+    const height = center.y + pos[i] * floorNormal.x + pos[i + 1] * floorNormal.y + pos[i + 2] * floorNormal.z;
+    if (height < FLOOR_Y + .025) {
+      const penetration = FLOOR_Y + .025 - height;
+      pos[i] += floorNormal.x * penetration;
+      pos[i + 1] += floorNormal.y * penetration;
+      pos[i + 2] += floorNormal.z * penetration;
+      const normalSpeed = vel[i] * floorNormal.x + vel[i + 1] * floorNormal.y + vel[i + 2] * floorNormal.z;
+      if (normalSpeed < 0) {
+        vel[i] -= floorNormal.x * normalSpeed;
+        vel[i + 1] -= floorNormal.y * normalSpeed;
+        vel[i + 2] -= floorNormal.z * normalSpeed;
+      }
+    }
+  }
+  for (const mesh of skin) {
+    const p = mesh.geometry.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      skinPoint(mesh.userData.binding, i, scratch);
+      p.setXYZ(i, scratch.x, scratch.y, scratch.z);
+    }
+    p.needsUpdate = true;
+    mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeBoundingSphere();
+  }
+  for (const mesh of attachments) skinPoint(mesh.userData.binding, 0, mesh.position);
+  fish.updateMatrixWorld(true);
+  shadow.position.x = center.x - .1;
+  shadow.position.z = center.z - .1;
+  shadow.scale.x = 1 + Math.max(0, center.y) * .12;
+  shadowMaterial.opacity = clamp(.8 - center.y * .18, .15, .95);
+}
+function resize() {
+  const width = window.innerWidth, height = window.innerHeight;
+  renderer.setSize(width, height, false);
+  halfHeight = Math.max(2.8, 3.85 / (width / height));
+  halfWidth = halfHeight * width / height;
+  Object.assign(camera, { left: -halfWidth, right: halfWidth, top: halfHeight, bottom: -halfHeight });
+  camera.updateProjectionMatrix();
+  home.x = clamp(home.x, -halfWidth + .7, halfWidth - .7);
+  home.z = clamp(home.z, -halfWidth + .9, halfWidth - .9);
+  home.y = clamp(home.y, MIN_CENTER_Y, halfHeight - 1.2);
+}
+window.addEventListener('resize', resize);
+resize();
+
+function frame(now) {
+  if (document.hidden) { previousTime = now; return; }
+  accumulator += previousTime ? Math.min((now - previousTime) / 1000, .05) : STEP;
+  previousTime = now;
+  for (let i = 0; accumulator >= STEP && i < 6; i++, accumulator -= STEP) step(STEP);
+  updateSkin();
+  renderer.render(scene, camera);
+  if (!loading.hidden) { loading.hidden = true; canvas.dataset.ready = 'true'; }
+}
+canvas.addEventListener('webglcontextlost', e => {
+  e.preventDefault();
+  endDrag();
+  loading.hidden = false;
+  loading.textContent = 'The fish is taking a breather. Reload to bring it back.';
+  renderer.setAnimationLoop(null);
+});
+renderer.setAnimationLoop(frame);
+</script>
+<script>
+window.addEventListener('error', () => {
+  const stage = document.getElementById('stage');
+  if (stage.dataset.ready) return;
+  const message = document.getElementById('loading');
+  message.hidden = false;
+  message.textContent = 'The fish could not load. Check your connection and reload.';
+});
+</script>
+<script defer src="/visit-counter.js" data-project="jelly-swordfish"></script>
+</body>
+</html>

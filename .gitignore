@@ -1,0 +1,47 @@
+.vercel
+.env*
+
+# Dependencies, caches, OS files
+**/node_modules
+**/.venv
+**/__pycache__
+.DS_Store
+**/.DS_Store
+
+# Projects that keep their own Git repositories
+SKYBOUND/
+SimForge/
+boatride/
+ctg-explorer/
+little-spider/
+rts/
+stillwater-diorama/
+
+# Renders, recordings and heavy source assets stay local
+**/*.mp4
+**/*.webm
+**/*.mov
+**/*.mkv
+**/*.avi
+**/*.m4v
+**/*.wav
+**/*.blend
+**/*.blend1
+**/renders/
+**/artifacts/
+**/test-results/
+**/.playwright-mcp
+**/.qa
+specimen-07/
+alien-experiment-old/
+highland-express/screenshots/
+highland-express/video/
+ferrofluid/demo/
+
+# Local tooling
+.claude/
+.impeccable/
+**/.claude/
+**/.kilo/
+**/.openai/
+vercel-delete-list.txt

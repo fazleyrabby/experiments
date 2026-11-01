@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asset Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #5a6470; }
+  #info { position: fixed; left: 12px; top: 10px; font: 12px ui-monospace, Menlo, monospace; color: #fff; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="info"></div>
+<script type="module">
+// Dev-only viewer: ?m=boat.glb&cam=x,y,z&target=x,y,z
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const params = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.add(new THREE.DirectionalLight(0xffffff, 2).translateX(5).translateY(8).translateZ(6));
+scene.add(new THREE.GridHelper(20, 20, 0x223344, 0x334455));
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.05, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+new GLTFLoader().load('../assets/' + (params.get('m') || 'boat.glb'), g => {
+  scene.add(g.scene);
+  const box = new THREE.Box3().setFromObject(g.scene), size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  document.getElementById('info').textContent = `size ${size.toArray().map(v => v.toFixed(2)).join(' × ')}`;
+  controls.target.copy(params.has('target') ? new THREE.Vector3(...params.get('target').split(',').map(Number)) : c);
+  camera.position.copy(params.has('cam') ? new THREE.Vector3(...params.get('cam').split(',').map(Number)) : c.clone().add(new THREE.Vector3(1, 0.5, 1).multiplyScalar(size.length() * 0.8)));
+  if (params.has('pose')) window.dispatchEvent(new CustomEvent('asset', { detail: g }));
+});
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script>
+</body>
+</html>

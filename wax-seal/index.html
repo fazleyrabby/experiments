@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wax Seal // 09</title>
+<style>
+  :root { --bg: #18332A; --ink: #F3E9DC; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label.left { left: 28px; }
+  .label.right { right: 28px; text-align: right; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.6; }
+  .label.field { top: 24px; bottom: auto; left: 28px; pointer-events: auto; display: flex; align-items: baseline; gap: 10px; }
+  .label.field input {
+    width: 4.2em; padding: 0 0 2px; background: none; border: 0; border-bottom: 1px solid currentColor; border-radius: 0; outline: none;
+    font: inherit; font-weight: 700; letter-spacing: inherit; text-transform: uppercase; color: inherit; text-align: center;
+  }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; }
+    .label.right { right: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+    .label.field { top: 16px; left: 18px; }
+    .label.field input { font-size: 16px; }   /* stops iOS zooming the page on focus */
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<label class="label field">Initials <input id="initials" maxlength="3" value="A" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+<div class="label left">
+  <div>Wax Seal // 09</div>
+  <div class="hint">Hold to pour wax / Let go to stamp<br>Double-click for a new letter</div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const BG = 0x18332A;
+const ENVELOPE = [6.6, 4.6];
+const WAX_PLANE = 3.6;             // side of the square the wax is modelled on
+const WAX_GRID = 220;
+const STAMP_RADIUS = 0.72;
+const MIN_POUR = 0.62, MAX_POUR = 1.05;   // blob radius needed before stamping / at most
+const DESK_TILT = -0.95;           // looking across the desk while you work
+const SHOW_TILT = -0.26;           // tipped up to face you once sealed
+const WAX_COLORS = [0xA8111D, 0x1D2F6F, 0xB98A22, 0x1F5B3A, 0x1B1B1F, 0x6E2A82];
+
+// ───────────────────────────── Renderer & scene ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const initialsEl = document.getElementById('initials');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+pmrem.dispose();
+
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+const key = new THREE.DirectionalLight(0xFFF2E0, 2.6);
+key.position.set(-4, 3, 7);
+scene.add(key);
+
+const root = new THREE.Group();    // the desk: envelope, wax and stamp
+root.rotation.x = DESK_TILT;
+scene.add(root);
+
+// ───────────────────────────── Envelope ─────────────────────────────
+
+function envelopeTexture() {
+  const c = document.createElement('canvas');
+  c.width = 1320; c.height = 920;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#EDE0C8';
+  ctx.fillRect(0, 0, 1320, 920);
+  for (let i = 0; i < 26000; i++) {   // paper fibre
+    ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '120, 96, 60' : '255, 255, 255'}, ${Math.random() * 0.07})`;
+    ctx.fillRect(Math.random() * 1320, Math.random() * 920, 1 + Math.random() * 2, 1);
+  }
+  const tip = [660, 470];
+  // Side and bottom flaps: faint creases
+  ctx.strokeStyle = 'rgba(110, 86, 52, 0.22)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, 920); ctx.lineTo(...tip); ctx.lineTo(1320, 920); ctx.stroke();
+  // Top flap: lies over the rest, so it gets an edge shadow
+  ctx.save();
+  ctx.shadowColor = 'rgba(70, 50, 24, 0.5)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
+  ctx.fillStyle = '#F1E5CE';
+  ctx.beginPath(); ctx.moveTo(-20, -20); ctx.lineTo(1340, -20); ctx.lineTo(1340, 6); ctx.lineTo(tip[0], tip[1]); ctx.lineTo(-20, 6); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+const envelope = new THREE.Mesh(
+  new THREE.PlaneGeometry(ENVELOPE[0], ENVELOPE[1]),
+  new THREE.MeshStandardMaterial({ map: envelopeTexture(), roughness: 0.95 })
+);
+root.add(envelope);
+
+function softShadow(w, h, blur, alpha) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.shadowColor = `rgba(0, 0, 0, ${alpha})`;
+  ctx.shadowBlur = blur;
+  ctx.shadowOffsetX = 1000;
+  if (h) ctx.fillRect(78 - 1000, 78, 100, 100);
+  else { ctx.beginPath(); ctx.arc(128 - 1000, 128, 50, 0, Math.PI * 2); ctx.fill(); }
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 2.56, (h || w) * 2.56),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })
+  );
+  return mesh;
+}
+const envelopeShadow = softShadow(ENVELOPE[0], ENVELOPE[1], 22, 0.55);
+envelopeShadow.position.set(0.05, -0.12, -0.02);
+envelopeShadow.renderOrder = -1;
+root.add(envelopeShadow);
+
+// ───────────────────────────── Seal design ─────────────────────────────
+// Height map for the stamp face: white is raised. Covers the whole wax plane.
+
+const designCanvas = document.createElement('canvas');
+designCanvas.width = designCanvas.height = 1024;
+const designTexture = new THREE.CanvasTexture(designCanvas);
+
+function drawDesign() {
+  const text = (initialsEl.value || '').toUpperCase().replace(/[^A-Z0-9&]/g, '').slice(0, 3) || '✦';
+  const c = designCanvas.getContext('2d');
+  const face = (STAMP_RADIUS / WAX_PLANE) * 1024;   // stamp radius in pixels
+  c.filter = 'none';
+  c.fillStyle = '#000';
+  c.fillRect(0, 0, 1024, 1024);
+  c.save();
+  c.translate(512, 512);
+  c.filter = 'blur(2.2px)';        // softens every edge into a bevel
+  c.strokeStyle = c.fillStyle = '#fff';
+  c.lineWidth = face * 0.055;
+  c.beginPath(); c.arc(0, 0, face * 0.86, 0, Math.PI * 2); c.stroke();
+  c.lineWidth = face * 0.02;
+  c.beginPath(); c.arc(0, 0, face * 0.7, 0, Math.PI * 2); c.stroke();
+  for (let i = 0; i < 28; i++) {   // beading between the rings
+    const a = (i / 28) * Math.PI * 2;
+    c.beginPath(); c.arc(Math.cos(a) * face * 0.78, Math.sin(a) * face * 0.78, face * 0.022, 0, Math.PI * 2); c.fill();
+  }
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `700 ${face * [1.0, 0.78, 0.56][text.length - 1]}px Georgia, "Times New Roman", serif`;
+  c.fillText(text, 0, face * 0.05);
+  c.restore();
+  designTexture.needsUpdate = true;
+}
+
+// ───────────────────────────── Wax ─────────────────────────────
+// A flat grid displaced in the vertex shader: a molten dome that the stamp
+// flattens into a floor with the design in relief and a squeezed-out rim.
+
+const waxUniforms = {
+  uRadius: { value: 0 },           // blob radius
+  uPress: { value: 0 },            // 0 molten dome .. 1 stamped
+  uSeed: { value: 1 },
+  uDesign: { value: designTexture },
+};
+
+const WAX_SHARED = /* glsl */`
+  uniform float uRadius, uPress, uSeed;
+  // Irregular outline, more ragged once it has been squashed
+  float waxOutline(vec2 p) {
+    float a = atan(p.y, p.x);
+    float wobble = 0.07 * sin(a * 3.0 + uSeed) + 0.045 * sin(a * 5.0 + uSeed * 2.3)
+                 + 0.03 * sin(a * 9.0 + uSeed * 4.1) + 0.02 * sin(a * 14.0 + uSeed * 7.0);
+    return uRadius * (1.0 + wobble * mix(1.0, 1.5, uPress));
+  }
+`;
+
+const WAX_VERTEX = /* glsl */`
+  uniform sampler2D uDesign;
+  varying vec2 vWax;
+  float waxHeight(vec2 p) {
+    float r = length(p);
+    float outer = waxOutline(p);
+    float t = r / max(outer, 0.0001);
+    if (t >= 1.0) return 0.0;
+    float dome = 0.27 * min(1.0, uRadius / 0.8) * pow(1.0 - t * t, 0.6);
+
+    float relief = texture2D(uDesign, p / ${WAX_PLANE.toFixed(1)} + 0.5).r;
+    float floorHeight = 0.06 + 0.035 * relief;
+    float beyond = clamp((r - ${STAMP_RADIUS.toFixed(2)}) / max(outer - ${STAMP_RADIUS.toFixed(2)}, 0.001), 0.0, 1.0);
+    float rim = 0.17 * pow(1.0 - beyond * beyond, 0.5);
+    float stamped = mix(floorHeight, rim, smoothstep(${(STAMP_RADIUS - 0.04).toFixed(2)}, ${(STAMP_RADIUS + 0.03).toFixed(2)}, r));
+    return mix(dome, stamped, uPress);
+  }
+`;
+
+const waxMaterial = new THREE.MeshPhysicalMaterial({
+  color: WAX_COLORS[0],
+  roughness: 0.3,
+  clearcoat: 0.7,
+  clearcoatRoughness: 0.25,
+  bumpMap: designTexture,          // fine detail of the design, per pixel
+  bumpScale: 0,
+  envMapIntensity: 1.1,
+});
+waxMaterial.onBeforeCompile = (shader) => {
+  Object.assign(shader.uniforms, waxUniforms);
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\n' + WAX_SHARED + WAX_VERTEX)
+    .replace('#include <beginnormal_vertex>', /* glsl */`
+      #include <beginnormal_vertex>
+      {
+        float e = 0.012;
+        float h = waxHeight(position.xy);
+        objectNormal = normalize(vec3(h - waxHeight(position.xy + vec2(e, 0.0)), h - waxHeight(position.xy + vec2(0.0, e)), e));
+      }
+    `)
+    .replace('#include <begin_vertex>', /* glsl */`
+      #include <begin_vertex>
+      transformed.z = waxHeight(position.xy);
+      vWax = position.xy;
+    `);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\n' + WAX_SHARED + 'varying vec2 vWax;')
+    .replace('#include <clipping_planes_fragment>', /* glsl */`
+      #include <clipping_planes_fragment>
+      if (length(vWax) > waxOutline(vWax)) discard;   // nothing outside the blob
+    `);
+};
+const wax = new THREE.Mesh(new THREE.PlaneGeometry(WAX_PLANE, WAX_PLANE, WAX_GRID, WAX_GRID), waxMaterial);
+wax.position.z = 0.004;
+wax.frustumCulled = false;
+root.add(wax);
+
+const waxShadow = softShadow(1, 0, 16, 0.4);
+waxShadow.position.set(0.04, -0.05, 0.002);
+root.add(waxShadow);
+
+// Stream of wax while pouring
+const stream = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.03, 0.045, 5, 12).rotateX(Math.PI / 2).translate(0, 0, 2.6),
+  new THREE.MeshStandardMaterial({ color: WAX_COLORS[0], roughness: 0.2 })
+);
+stream.visible = false;
+root.add(stream);
+
+// ───────────────────────────── Stamp ─────────────────────────────
+
+function fixWinding(geometry) {
+  // LatheGeometry's winding depends on profile direction; make front faces agree with the normals.
+  const p = geometry.attributes.position, n = geometry.attributes.normal, idx = geometry.index;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), vn = new THREE.Vector3();
+  for (let t = 0; t < idx.count; t += 3) {
+    a.fromBufferAttribute(p, idx.getX(t)); b.fromBufferAttribute(p, idx.getX(t + 1)); c.fromBufferAttribute(p, idx.getX(t + 2));
+    const face = b.sub(a).cross(c.sub(a));
+    if (face.lengthSq() < 1e-12) continue;
+    vn.fromBufferAttribute(n, idx.getX(t));
+    if (face.dot(vn) < 0) {
+      for (let k = 0; k < idx.count; k += 3) { const tmp = idx.getX(k + 1); idx.setX(k + 1, idx.getX(k + 2)); idx.setX(k + 2, tmp); }
+    }
+    return;
+  }
+}
+// Turned profile [radius, height], standing up out of the desk (+z)
+function turned(profile, material) {
+  const geometry = new THREE.LatheGeometry(profile.map(([r, h]) => new THREE.Vector2(Math.max(r, 0.0001), h)), 64);
+  geometry.rotateX(Math.PI / 2);
+  fixWinding(geometry);
+  return new THREE.Mesh(geometry, material);
+}
+const stamp = new THREE.Group();
+stamp.add(
+  turned([[0, 0], [0.72, 0], [0.745, 0.03], [0.745, 0.3], [0.68, 0.37], [0.32, 0.43], [0.3, 0.52]],
+    new THREE.MeshStandardMaterial({ color: 0xC9A24B, metalness: 1, roughness: 0.26 })),
+  turned([[0.3, 0.52], [0.21, 0.64], [0.17, 0.92], [0.23, 1.5], [0.34, 2.0], [0.37, 2.28], [0.31, 2.55], [0.17, 2.7], [0, 2.73]],
+    new THREE.MeshStandardMaterial({ color: 0x4A2816, roughness: 0.38 }))
+);
+stamp.visible = false;
+root.add(stamp);
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, pourGain = null, noiseBuffer = null;
+
+function initAudio() {
+  if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audio = new Ctx();
+  noiseBuffer = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  // Pour: a faint hiss
+  const src = audio.createBufferSource();
+  src.buffer = noiseBuffer; src.loop = true;
+  const high = audio.createBiquadFilter();
+  high.type = 'highpass'; high.frequency.value = 4200;
+  pourGain = audio.createGain();
+  pourGain.gain.value = 0;
+  src.connect(high).connect(pourGain).connect(audio.destination);
+  src.start();
+}
+
+function playThunk() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  const osc = audio.createOscillator();
+  osc.frequency.setValueAtTime(130, t);
+  osc.frequency.exponentialRampToValueAtTime(55, t + 0.14);
+  const gain = audio.createGain();
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(0.6, t + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  osc.connect(gain).connect(audio.destination);
+  osc.start(t); osc.stop(t + 0.25);
+  // The wax squelching out
+  const src = audio.createBufferSource();
+  src.buffer = noiseBuffer;
+  const low = audio.createBiquadFilter();
+  low.type = 'lowpass'; low.frequency.value = 700;
+  const squish = audio.createGain();
+  squish.gain.setValueAtTime(0.35, t);
+  squish.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  src.connect(low).connect(squish).connect(audio.destination);
+  src.start(t); src.stop(t + 0.15);
+}
+
+// ───────────────────────────── The ritual ─────────────────────────────
+
+let state = 'idle';                // idle | pouring | stamping | sealed
+let holding = false;
+let pourTime = 0;
+let clockInState = 0;              // seconds since the stamp started down
+let radiusAtStamp = 0;
+let colorIndex = 0;
+const pointerNdc = new THREE.Vector2();
+
+const setStatus = (text) => { statusEl.textContent = text; };
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+function newLetter() {
+  state = 'idle'; holding = false; pourTime = 0; clockInState = 0;
+  waxUniforms.uRadius.value = 0;
+  waxUniforms.uPress.value = 0;
+  waxUniforms.uSeed.value = Math.random() * 100;
+  waxMaterial.bumpScale = 0;
+  waxMaterial.color.setHex(WAX_COLORS[colorIndex]);
+  stream.material.color.setHex(WAX_COLORS[colorIndex]);
+  colorIndex = (colorIndex + 1) % WAX_COLORS.length;
+  stamp.visible = false;
+  setStatus('Hold to pour');
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  initAudio();
+  initialsEl.blur();
+  if (state === 'idle' || state === 'pouring') { holding = true; state = 'pouring'; setStatus('Pouring'); }
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  pointerNdc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+});
+const letGo = () => { holding = false; };
+canvas.addEventListener('pointerup', letGo);
+canvas.addEventListener('pointercancel', letGo);
+canvas.addEventListener('dblclick', newLetter);
+initialsEl.addEventListener('input', drawDesign);
+
+function update(dt, time) {
+  let tilt = DESK_TILT;
+
+  if (state === 'pouring') {
+    // Keeps pouring on its own until there is enough to take the stamp
+    const flowing = holding || waxUniforms.uRadius.value < MIN_POUR;
+    if (flowing) {
+      pourTime += dt;
+      waxUniforms.uRadius.value = MAX_POUR * (1 - Math.exp(-pourTime / 1.15));
+    } else {
+      state = 'stamping';
+      clockInState = 0;
+      radiusAtStamp = waxUniforms.uRadius.value;
+      stamp.visible = true;
+      setStatus('Stamping');
+    }
+    stream.visible = flowing;
+    stream.position.set(Math.sin(time * 9) * 0.012, Math.cos(time * 7) * 0.012, 0);
+  } else {
+    stream.visible = false;
+  }
+
+  if (state === 'stamping') {
+    const before = clockInState;
+    clockInState += dt;
+    const t = clockInState;
+    // Down (0-0.38s), press (0.38-0.5), hold (0.5-1.15), lift (1.15-1.7)
+    const press = smooth(0.38, 0.5, t);
+    if (before < 0.38 && t >= 0.38) { playThunk(); if (navigator.vibrate) navigator.vibrate(20); }
+    waxUniforms.uPress.value = press;
+    waxUniforms.uRadius.value = THREE.MathUtils.lerp(radiusAtStamp, Math.max(radiusAtStamp * 1.12, STAMP_RADIUS * 1.24), press);
+    waxMaterial.bumpScale = 3.2 * press;
+
+    const down = Math.min(1, t / 0.38);
+    const lift = smooth(1.15, 1.7, t);
+    stamp.position.z = THREE.MathUtils.lerp(6.5, 0.3, down * down) * (1 - press) + 0.065 * press + lift * 7;
+    stamp.rotation.z = 0.5 * (1 - down) + Math.sin(t * 40) * 0.01 * press * (1 - lift);   // settles, with a tiny grind
+    if (t > 1.7) { stamp.visible = false; state = 'sealed'; clockInState = 0; setStatus('Sealed'); }
+  }
+
+  if (state === 'sealed') {
+    clockInState += dt;
+    tilt = THREE.MathUtils.lerp(DESK_TILT, SHOW_TILT, smooth(0, 0.9, clockInState));   // tip it up to admire
+  }
+
+  // Wax goes from wet and glossy to set
+  const wet = state === 'pouring' ? 1 : state === 'stamping' ? 1 - 0.5 * smooth(0.5, 1.7, clockInState) : state === 'sealed' ? 0.5 * (1 - smooth(0, 2.5, clockInState)) : 0;
+  waxMaterial.roughness = THREE.MathUtils.lerp(0.5, 0.14, wet);
+  waxMaterial.clearcoat = THREE.MathUtils.lerp(0.25, 1, wet);
+  waxMaterial.envMapIntensity = THREE.MathUtils.lerp(0.55, 1.1, wet);
+
+  const r = waxUniforms.uRadius.value;
+  waxShadow.scale.setScalar(Math.max(0.001, r * 1.95));
+  waxShadow.visible = r > 0.02;
+
+  const ease = 1 - Math.exp(-4 * dt);
+  root.rotation.x += (tilt - pointerNdc.y * 0.05 - root.rotation.x) * ease;
+  root.rotation.y += (pointerNdc.x * 0.09 - root.rotation.y) * ease;
+
+  if (pourGain) pourGain.gain.setTargetAtTime(stream.visible ? 0.035 : 0, audio.currentTime, 0.05);
+}
+
+// ───────────────────────────── Resize ─────────────────────────────
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitH = (ENVELOPE[1] * 0.5 + 1.0) / Math.tan(halfFov);
+  const fitW = (ENVELOPE[0] * 0.5 + 0.5) / (Math.tan(halfFov) * camera.aspect);
+  camera.position.set(0, 0.2, Math.max(fitH, fitW));
+  camera.lookAt(0, 0.2, 0);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+drawDesign();
+newLetter();
+
+// ───────────────────────────── Loop ─────────────────────────────
+
+const clock = new THREE.Clock();
+function frame() {
+  update(Math.min(clock.getDelta(), 0.05), clock.elapsedTime);
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="wax-seal"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#04060b" />
+    <meta
+      name="description"
+      content="A LEGO-style Lamborghini Countach that assembles itself brick by brick, then breaks down into an exploded view. Built with Three.js."
+    />
+    <title>Countach in Bricks — Brick Labs / 002</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2304060b'/%3E%3Cpath d='M4 21 L11 14 L20 12 L28 18 L28 22 L4 22 Z' fill='%23d6101f'/%3E%3Ccircle cx='10' cy='22' r='3' fill='%23e8ecf2'/%3E%3Ccircle cx='23' cy='22' r='3' fill='%23e8ecf2'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app" class="app" data-state="ASSEMBLING">
+      <canvas id="scene" class="scene" aria-label="Interactive 3D LEGO-style Lamborghini Countach"></canvas>
+      <div class="vignette" aria-hidden="true"></div>
+
+      <header class="hud hud--top">
+        <div class="brand">
+          <p class="eyebrow"><span class="eyebrow__mark" aria-hidden="true"></span>BRICK LABS / 002</p>
+          <h1 class="title">Countach<br />in Bricks</h1>
+          <p class="lede">A V12 wedge, built brick by brick.</p>
+        </div>
+
+        <div class="aside">
+          <dl class="meta" aria-label="Model data">
+            <div class="meta__row">
+              <dt>Model</dt>
+              <dd>LP400 Countach</dd>
+            </div>
+            <div class="meta__row">
+              <dt>Bricks</dt>
+              <dd id="meta-bricks">—</dd>
+            </div>
+            <div class="meta__row">
+              <dt>Sections</dt>
+              <dd id="meta-sections">—</dd>
+            </div>
+            <div class="meta__row">
+              <dt>Scale</dt>
+              <dd>1 stud = 6.5 cm</dd>
+            </div>
+          </dl>
+          <div class="finish" role="group" aria-label="Paint finish">
+            <span class="finish__label">Finish</span>
+            <div class="finish__swatches" id="finishes"></div>
+          </div>
+          <button type="button" class="sound" id="btn-sound" aria-pressed="false">
+            <span class="sound__bars" aria-hidden="true"><i></i><i></i><i></i></span>
+            Sound <span id="sound-state">Off</span>
+          </button>
+        </div>
+      </header>
+
+      <p class="hint" id="hint" aria-hidden="true">Drag to orbit <span>/</span> Scroll to zoom</p>
+
+      <footer class="hud hud--bottom">
+        <section class="status" aria-label="Assembly status">
+          <div class="status__head">
+            <span class="status__dot" aria-hidden="true"></span>
+            <span class="status__label" id="status-label" role="status" aria-live="polite">Assembling</span>
+            <span class="status__count" id="status-count" aria-hidden="true">0000 / 0000</span>
+          </div>
+          <p class="status__section" id="status-section" aria-hidden="true"></p>
+          <div
+            class="progress"
+            id="progress"
+            role="progressbar"
+            aria-label="Assembly progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <div class="progress__fill" id="progress-fill"></div>
+          </div>
+          <span class="status__percent" id="status-percent" aria-hidden="true">000%</span>
+        </section>
+
+        <nav class="controls" aria-label="Car controls">
+          <button type="button" class="button" id="btn-break" disabled>
+            <span class="button__index" aria-hidden="true">01</span>Break down
+          </button>
+          <button type="button" class="button" id="btn-reassemble" disabled>
+            <span class="button__index" aria-hidden="true">02</span>Reassemble
+          </button>
+          <button type="button" class="button" id="btn-reset">
+            <span class="button__index" aria-hidden="true">03</span>Reset view
+          </button>
+        </nav>
+      </footer>
+
+      <div class="fallback" id="fallback" hidden>
+        <p class="eyebrow">BRICK LABS / 002</p>
+        <p>This experience needs WebGL, which is not available in this browser.</p>
+      </div>
+    </div>
+
+    <noscript>This experience needs JavaScript and WebGL.</noscript>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
