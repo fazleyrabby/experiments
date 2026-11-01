@@ -8,14 +8,14 @@
 .DS_Store
 **/.DS_Store
 
-# Projects that keep their own Git repositories
-SKYBOUND/
-SimForge/
-boatride/
-ctg-explorer/
-little-spider/
-rts/
-stillwater-diorama/
+# Projects that keep their own Git repositories; their builds are mirrored into builds/
+/SKYBOUND/
+/SimForge/
+/boatride/
+/ctg-explorer/
+/little-spider/
+/rts/
+/stillwater-diorama/
 
 # Renders, recordings and heavy source assets stay local
 **/*.mp4

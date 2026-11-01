@@ -8,3 +8,4 @@ for folder,slug in projects.items():
  if slug in requested or folder in requested:
   print(f'Building /{slug}/',flush=True)
   subprocess.run(['npm','run','build'],cwd=ROOT/folder,check=True)
+subprocess.run([sys.executable,ROOT/'scripts/sync-builds.py'],check=True)

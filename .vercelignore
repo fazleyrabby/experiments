@@ -290,3 +290,12 @@ highland-express/video
 **/*.blend
 **/*.blend1
 **/*.wav
+
+# Projects with their own Git repositories are served from builds/ (see scripts/sync-builds.py)
+/SKYBOUND
+/SimForge
+/boatride
+/ctg-explorer
+/little-spider
+/rts
+/stillwater-diorama

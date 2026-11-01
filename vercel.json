@@ -130,15 +130,15 @@
     },
     {
       "src": "^/simforge/$",
-      "dest": "/SimForge/dist/index.html"
+      "dest": "/builds/SimForge/index.html"
     },
     {
       "src": "^/simforge/(about|simulations)(?:/[^/.]+)?/?$",
-      "dest": "/SimForge/dist/index.html"
+      "dest": "/builds/SimForge/index.html"
     },
     {
       "src": "^/simforge/(.+)$",
-      "dest": "/SimForge/dist/$1"
+      "dest": "/builds/SimForge/$1"
     },
     {
       "src": "^/lego-spaceship$",
@@ -164,11 +164,11 @@
     },
     {
       "src": "^/rts/$",
-      "dest": "/rts/dist/index.html"
+      "dest": "/builds/rts/index.html"
     },
     {
       "src": "^/rts/(.+)$",
-      "dest": "/rts/dist/$1"
+      "dest": "/builds/rts/$1"
     },
     {
       "src": "^/skybound$",
@@ -179,11 +179,11 @@
     },
     {
       "src": "^/skybound/$",
-      "dest": "/SKYBOUND/dist/index.html"
+      "dest": "/builds/SKYBOUND/index.html"
     },
     {
       "src": "^/skybound/(.+)$",
-      "dest": "/SKYBOUND/dist/$1"
+      "dest": "/builds/SKYBOUND/$1"
     },
     {
       "src": "^/boatride$",
@@ -194,11 +194,11 @@
     },
     {
       "src": "^/boatride/$",
-      "dest": "/boatride/dist/index.html"
+      "dest": "/builds/boatride/index.html"
     },
     {
       "src": "^/boatride/(.+)$",
-      "dest": "/boatride/dist/$1"
+      "dest": "/builds/boatride/$1"
     },
     {
       "src": "^/stillwater-diorama/dist(?:/index\\.html)?/?$",
@@ -223,11 +223,11 @@
     },
     {
       "src": "^/stillwater-diorama/$",
-      "dest": "/stillwater-diorama/dist/index.html"
+      "dest": "/builds/stillwater-diorama/index.html"
     },
     {
       "src": "^/stillwater-diorama/(.+)$",
-      "dest": "/stillwater-diorama/dist/$1"
+      "dest": "/builds/stillwater-diorama/$1"
     },
     {
       "src": "^/little-spider/dist(?:/index\\.html)?/?$",
@@ -252,11 +252,11 @@
     },
     {
       "src": "^/little-spider/$",
-      "dest": "/little-spider/dist/index.html"
+      "dest": "/builds/little-spider/index.html"
     },
     {
       "src": "^/little-spider/(.+)$",
-      "dest": "/little-spider/dist/$1"
+      "dest": "/builds/little-spider/$1"
     },
     {
       "src": "^/ctg-explorer/dist(?:/index\\.html)?/?$",
@@ -281,11 +281,11 @@
     },
     {
       "src": "^/ctg-explorer/$",
-      "dest": "/ctg-explorer/dist/index.html"
+      "dest": "/builds/ctg-explorer/index.html"
     },
     {
       "src": "^/ctg-explorer/(.+)$",
-      "dest": "/ctg-explorer/dist/$1"
+      "dest": "/builds/ctg-explorer/$1"
     },
     {
       "src": "^/salar-de-uyuni/dist(?:/index\\.html)?/?$",

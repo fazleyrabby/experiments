@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e8ede8"><meta name="description" content="A tiny woodland, alive. Turn, wander, and get a little closer to an interactive 3D creek.">
+<title>Stillwater • A living diorama</title>
+<link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./icons/style.css">
+</head>
+<body>
+<canvas id="world" tabindex="0" aria-label="Interactive woodland creek. Drag to orbit, scroll to zoom, tap water for ripples." aria-describedby="keyboard"></canvas>
+<header><div class="identity"><div class="wordmark">stillwater<span class="leaf-mark" aria-hidden="true"></span></div><p>A little world, alive.</p></div><div class="utilities"><button id="sound" class="icon-button" aria-label="Turn nature sounds on" aria-pressed="false" title="Nature sounds"><i class="ph ph-speaker-slash" aria-hidden="true"></i></button><button id="full" class="icon-button" aria-label="Enter fullscreen" title="Fullscreen"><i class="ph ph-corners-out" aria-hidden="true"></i></button></div></header>
+<div class="scene-note"><span class="note-line"></span><span>Woodland creek</span></div>
+<footer><div class="hint" id="hint">Drag to wander <span>·</span> Scroll to get closer</div><nav class="dock" aria-label="Scene controls"><button id="orbit" class="dock-button" title="Slow orbit" aria-label="Start automatic rotation" aria-pressed="false"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i><span>Orbit</span></button><span class="divider"></span><button id="day" class="dock-button active" data-mode="day" aria-pressed="true"><i class="ph ph-sun" aria-hidden="true"></i><span>Day</span></button><button id="dusk" class="dock-button" data-mode="dusk" aria-pressed="false"><i class="ph ph-moon-stars" aria-hidden="true"></i><span>Dusk</span></button><span class="divider"></span><button id="weather" class="dock-button" aria-label="Weather: clear. Change weather" title="Weather"><i class="ph ph-cloud-sun" aria-hidden="true"></i><span>Clear</span></button><span class="divider"></span><button id="reset" class="icon-button" aria-label="Reset view" title="Reset view"><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i></button></nav><div class="zoom-controls"><button id="zoom-out" class="icon-button" aria-label="Zoom out" title="Zoom out"><i class="ph ph-minus" aria-hidden="true"></i></button><span></span><button id="zoom-in" class="icon-button" aria-label="Zoom in" title="Zoom in"><i class="ph ph-plus" aria-hidden="true"></i></button></div></footer>
+<div id="loading" role="status"><div class="loading-leaf"></div><p>Growing a little world</p></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="keyboard" class="sr-only">Arrow keys rotate the scene. W, A, S and D move around it; hold Shift to move faster. Plus and minus zoom. R resets the view. C changes the weather. Space pauses or resumes the environment. Click the water to make ripples. Two fingers pinch to zoom and drag to pan on touchscreens.</div>
+<script type="module" src="./app.js"></script>
+<script>window.addEventListener('unhandledrejection',()=>{document.querySelector('#loading p').textContent='The woodland could not load. Please refresh to try again.'});window.addEventListener('error',()=>{if(!document.body.classList.contains('ready')){const el=document.querySelector('#loading p');el.textContent='The woodland could not load. Please refresh to try again.'}});</script>
+</body></html>
