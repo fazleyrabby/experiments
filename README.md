@@ -15,6 +15,6 @@ Run `python3 scripts/build-projects.py` to rebuild the migrated projects, or pas
 
 Run `python3 scripts/serve-experiments.py` for the integrated preview at http://127.0.0.1:4180. Run `python3 scripts/check-projects.py` to validate gallery entries and entry-point assets.
 
-Deploy from this root directory with `vercel deploy --prod`. The root `.vercel` link points to **experiments**. The root routes serve each project's `dist` folder under its public path; `.vercelignore` keeps local sources, histories, dependencies, recordings and environment files out of the deployment.
+Pushes to `main` on GitHub deploy to production through the Vercel Git integration; `vercel deploy --prod` from this root directory still works. Projects that keep their own Git repositories (SimForge, rts, SKYBOUND, boatride, ctg-explorer, little-spider, stillwater-diorama) are not in this repository, so their builds are committed under `builds/`: run `python3 scripts/sync-builds.py` after rebuilding one of them (`build-projects.py` does it for you), then commit `builds/`. The root `.vercel` link points to **experiments**. The root routes serve each project's `dist` folder under its public path; `.vercelignore` keeps local sources, histories, dependencies, recordings and environment files out of the deployment.
 
 SimForge uses `/simforge/` as its router base and supports direct simulation links. Boatride and SimForge load their models relative to the configured project base.
