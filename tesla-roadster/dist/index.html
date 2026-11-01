@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#11161e" />
+    <meta name="description" content="A cinematic Three.js recreation of the Tesla Roadster ramp flight." />
+    <title>Roadster Flight</title>
+    <script type="module" crossorigin src="/tesla-roadster/assets/index-CG69p0WP.js"></script>
+    <link rel="stylesheet" crossorigin href="/tesla-roadster/assets/index-CTbT9qyL.css">
+  </head>
+  <body>
+    <main>
+      <div id="viewport" aria-label="Interactive 3D Roadster flight simulation"></div>
+      <div id="loading" class="loading" aria-live="polite">Loading scene</div>
+      <div id="error" class="error" hidden><p>The 3D scene couldn’t start. Enable WebGL or hardware acceleration, then reload.</p><button onclick="location.reload()">Reload</button></div>
+      <section class="controls" aria-label="Playback controls">
+        <button id="play" class="play" aria-label="Play simulation" title="Play / pause (Space)"><i class="ph-fill ph-play" aria-hidden="true"></i></button>
+        <button id="reset" aria-label="Restart simulation" title="Restart (R)"><i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i></button>
+        <label class="sr-only" for="scrubber">Simulation time</label><input id="scrubber" type="range" min="0" max="14" value="0" step="0.01" aria-valuetext="0 seconds" />
+        <span id="time">00.00</span>
+        <label class="sr-only" for="rate">Playback speed</label><select id="rate" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option></select>
+        <label class="sr-only" for="camera">Camera view</label><select id="camera" aria-label="Camera view"><option value="cinematic">Cinematic</option><option value="side">Side</option><option value="chase">Chase</option><option value="orbit">Free orbit</option></select>
+        <button id="loop" aria-label="Loop simulation" aria-pressed="false" title="Loop"><i class="ph ph-repeat" aria-hidden="true"></i></button>
+        <button id="mute" aria-label="Mute sound" aria-pressed="false" title="Mute sound"><i class="ph ph-speaker-high" aria-hidden="true"></i></button>
+        <button id="theme" aria-label="Switch to daylight" title="Day / night lighting"><i class="ph ph-sun" aria-hidden="true"></i></button>
+        <button id="clean" aria-label="Hide controls for recording" title="Clean view (H). Press H or Escape to restore controls."><i class="ph ph-corners-out" aria-hidden="true"></i></button>
+      </section>
+      <div id="hint" class="hint">Space to play · H to hide controls · R to restart</div>
+    </main>
+  </body>
+</html>

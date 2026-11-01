@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#080b10" />
+    <meta name="description" content="A cinematic, reversible Optimus Prime transformation. Built with procedural geometry, Three.js and GSAP." />
+    <title>Optimus Prime · Transformation</title>
+    <script type="module" crossorigin src="/optimusprime/assets/index-CCehFNEV.js"></script>
+    <link rel="stylesheet" crossorigin href="/optimusprime/assets/index-BE7aD5Xg.css">
+  </head>
+  <body>
+    <main id="app" aria-label="Optimus Prime transformation studio">
+      <h1 class="sr-only">Optimus Prime: truck to robot</h1>
+      <canvas id="scene" aria-label="Interactive 3D Optimus Prime. Drag to orbit, pinch or scroll to zoom." tabindex="0"></canvas>
+      <div class="controls" aria-label="Transformation controls">
+        <button id="replay" type="button" title="Replay the cinematic sequence (R)">Replay</button>
+        <button id="transform" type="button" aria-pressed="true" title="Switch between truck and robot (Space)">Truck mode</button>
+      </div>
+      <p id="status" class="sr-only" role="status" aria-live="polite">Preparing the transformation</p>
+      <div id="loading" class="loading"><span>Preparing Optimus Prime</span><i></i></div>
+      <div id="fallback" class="fallback" hidden><p id="error-message">This scene needs WebGL 2. Please enable hardware acceleration and reload.</p><button id="reload" type="button">Reload scene</button></div>
+    </main>
+  </body>
+</html>

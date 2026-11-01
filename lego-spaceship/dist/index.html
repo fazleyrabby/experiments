@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#05070d" />
+    <meta
+      name="description"
+      content="A procedural LEGO-style spacecraft that assembles itself brick by brick. Built with Three.js."
+    />
+    <title>Assemble the Impossible — Brick Labs / 001</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2305070d'/%3E%3Crect x='6' y='13' width='20' height='12' rx='1.5' fill='%23a80f1c'/%3E%3Crect x='9' y='9' width='5' height='4' rx='1' fill='%23a80f1c'/%3E%3Crect x='18' y='9' width='5' height='4' rx='1' fill='%23a80f1c'/%3E%3C/svg%3E"
+    />
+    <script type="module" crossorigin src="/lego-spaceship/assets/index-9Wi83_f_.js"></script>
+    <link rel="stylesheet" crossorigin href="/lego-spaceship/assets/index-DkfuEagL.css">
+  </head>
+  <body>
+    <div id="app" class="app" data-state="ASSEMBLING">
+      <canvas id="scene" class="scene" aria-label="Interactive 3D LEGO-style spaceship"></canvas>
+      <div class="vignette" aria-hidden="true"></div>
+
+      <header class="hud hud--top">
+        <div class="brand">
+          <p class="eyebrow"><span class="eyebrow__mark" aria-hidden="true"></span>BRICK LABS / 001</p>
+          <h1 class="title">Assemble the<br />Impossible</h1>
+          <p class="lede">A procedural spacecraft built brick by brick.</p>
+        </div>
+
+        <div class="aside">
+          <dl class="meta" aria-label="Model data">
+            <div class="meta__row">
+              <dt>Model</dt>
+              <dd>VX-9 Interceptor</dd>
+            </div>
+            <div class="meta__row">
+              <dt>Bricks</dt>
+              <dd id="meta-bricks">—</dd>
+            </div>
+            <div class="meta__row">
+              <dt>Sections</dt>
+              <dd id="meta-sections">—</dd>
+            </div>
+            <div class="meta__row">
+              <dt>Scale</dt>
+              <dd>1 stud = 1 u</dd>
+            </div>
+          </dl>
+          <p class="views" id="views" hidden>
+            <span class="views__dot" aria-hidden="true"></span>
+            <span class="views__count" id="views-count">0</span> views
+          </p>
+          <button type="button" class="sound" id="btn-sound" aria-pressed="false">
+            <span class="sound__bars" aria-hidden="true"><i></i><i></i><i></i></span>
+            Sound <span id="sound-state">Off</span>
+          </button>
+        </div>
+      </header>
+
+      <p class="hint" id="hint" aria-hidden="true">Drag to orbit <span>/</span> Scroll to zoom</p>
+
+      <footer class="hud hud--bottom">
+        <section class="status" aria-label="Assembly status">
+          <div class="status__head">
+            <span class="status__dot" aria-hidden="true"></span>
+            <span class="status__label" id="status-label" role="status" aria-live="polite">Assembling</span>
+            <span class="status__count" id="status-count" aria-hidden="true">000 / 000</span>
+          </div>
+          <div
+            class="progress"
+            id="progress"
+            role="progressbar"
+            aria-label="Assembly progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <div class="progress__fill" id="progress-fill"></div>
+          </div>
+          <span class="status__percent" id="status-percent" aria-hidden="true">000%</span>
+        </section>
+
+        <nav class="controls" aria-label="Spaceship controls">
+          <button type="button" class="button" id="btn-break" disabled>
+            <span class="button__index" aria-hidden="true">01</span>Break down
+          </button>
+          <button type="button" class="button" id="btn-reassemble" disabled>
+            <span class="button__index" aria-hidden="true">02</span>Reassemble
+          </button>
+          <button type="button" class="button" id="btn-reset">
+            <span class="button__index" aria-hidden="true">03</span>Reset view
+          </button>
+        </nav>
+      </footer>
+
+      <div class="fallback" id="fallback" hidden>
+        <p class="eyebrow">BRICK LABS / 001</p>
+        <p>This experience needs WebGL, which is not available in this browser.</p>
+      </div>
+    </div>
+
+    <noscript>This experience needs JavaScript and WebGL.</noscript>
+  </body>
+</html>

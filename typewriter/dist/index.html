@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#e7e8df" />
+    <meta name="description" content="A mechanical typewriter in 3D. Moving keys, ink on paper, and the sound of every keystroke." />
+    <title>Typewriter</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='16' fill='%2329443b'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-size='44' fill='%23eeeee5' font-family='Georgia'%3Ek%3C/text%3E%3C/svg%3E" />
+    <script type="module" crossorigin src="/typewriter/assets/index-GxTKsH4h.js"></script>
+    <link rel="stylesheet" crossorigin href="/typewriter/assets/index-DIKeKI5V.css">
+  </head>
+  <body>
+    <main class="viewport" aria-label="Interactive 3D typewriter">
+      <div id="scene" tabindex="0" aria-label="Typewriter. Click to write, or drag to rotate. Use your keyboard to type."></div>
+      <div class="scene-loading" id="scene-loading" role="status"><span></span></div>
+      <nav class="controls" aria-label="Typewriter controls">
+        <button id="play-demo" class="play-button" aria-label="Play demo"><i class="ph ph-play"></i><span>Play demo</span></button>
+        <span class="control-divider"></span>
+        <button id="edit-text" aria-label="Edit demo text" title="Edit demo text" aria-expanded="false" aria-controls="editor"><i class="ph ph-text-t"></i></button>
+        <button id="new-page" aria-label="Fresh page" title="Fresh page"><i class="ph ph-arrow-counter-clockwise"></i></button>
+        <span class="control-divider"></span>
+        <button data-view="studio" class="active" aria-label="Studio view" aria-pressed="true" title="Studio view"><i class="ph ph-cube"></i></button>
+        <button data-view="paper" aria-label="Paper view" aria-pressed="false" title="Paper view"><i class="ph ph-file-text"></i></button>
+        <button data-view="detail" aria-label="Keyboard view" aria-pressed="false" title="Keyboard view"><i class="ph ph-keyboard"></i></button>
+        <span class="control-divider"></span>
+        <button id="sound-toggle" aria-label="Mute sound" title="Mute sound" aria-pressed="true"><i class="ph ph-speaker-high"></i></button>
+        <button id="theme-toggle" aria-label="Switch color theme" title="Switch color theme"><i class="ph ph-sun"></i></button>
+        <button id="record-demo" aria-label="Record demo" title="Record demo"><i class="ph ph-record"></i></button>
+      </nav>
+      <section id="editor" class="editor" aria-label="Demo settings" hidden>
+        <div class="editor-heading"><label for="manuscript">Demo text</label><button id="close-editor" aria-label="Close editor"><i class="ph ph-x"></i></button></div>
+        <textarea id="manuscript" spellcheck="false" maxlength="650">Hi, fellow followers of X how are you doing?</textarea>
+        <div class="speed-setting"><label for="typing-speed">Pace</label><input id="typing-speed" type="range" min="1" max="5" value="3" aria-label="Typing speed" /></div>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <div class="sr-only" id="status" role="status">Ready to type.</div>
+    <div class="sr-only" id="accessible-transcript" aria-live="off"></div>
+    <textarea id="direct-input" class="direct-input" aria-label="Type directly on the typewriter" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+  </body>
+</html>

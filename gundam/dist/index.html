@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080b0e" />
+    <meta name="description" content="A detailed procedural RX-78-2. Break it down and assemble every component." />
+    <title>RX-78-2</title>
+    <link rel="icon" type="image/svg+xml" href="/gundam/favicon.svg" />
+    <script type="module" crossorigin src="/gundam/assets/index-BvARjO4Y.js"></script>
+    <link rel="stylesheet" crossorigin href="/gundam/assets/index-vMH7Jk1R.css">
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="scene" aria-label="3D RX-78-2 Gundam. Drag to orbit, scroll or pinch to zoom." tabindex="0"></canvas>
+      <div class="controls" aria-label="Assembly controls">
+        <button id="breakdown">Break down</button>
+        <button id="assemble" disabled>Assemble</button>
+      </div>
+      <span id="status" class="sr-only" role="status" aria-live="polite">Preparing model</span>
+      <div id="loading" class="loading" aria-label="Loading model"><span></span></div>
+      <div id="fallback" class="fallback" hidden><p>This viewer needs WebGL 2. Enable hardware acceleration and reload.</p><button onclick="location.reload()">Reload</button></div>
+      <noscript><div class="fallback">Enable JavaScript to view the model.</div></noscript>
+    </main>
+  </body>
+</html>
