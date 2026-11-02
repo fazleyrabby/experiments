@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const pwDir = process.env.PLAYWRIGHT_DIR || '/Users/rabbi/Desktop/showreel/node_modules';
 const { chromium } = require(path.join(pwDir, 'playwright'));
 
-const url = process.argv[2] || 'http://localhost:4190/?capture';
+const url = process.argv[2] || 'http://localhost:4190/living-nature/?capture';
 const out = path.resolve(process.argv[3] || 'living-nature-screencast.mp4');
 const DUR = 20, FPS = 30, N = DUR * FPS;
 const work = path.join(os.tmpdir(), 'living-nature-capture');
