@@ -1,5 +1,11 @@
 [
   {
+    "slug": "lawn-mowing",
+    "title": "Lawn Day",
+    "category": "Play",
+    "description": "Push a mower through an overgrown yard and leave stadium stripes behind you."
+  },
+  {
     "slug": "rust-restoration",
     "title": "Rust Restoration",
     "category": "Play",
