@@ -125,9 +125,32 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const maxAniso = renderer.capabilities.getMaxAnisotropy();
 
 const scene = new THREE.Scene();
-const skyTop = new THREE.Color(0x8fb6d6), skyLow = new THREE.Color(0xf2d6a8);
-scene.background = skyLow.clone().lerp(skyTop, 0.35);
-scene.fog = new THREE.Fog(scene.background, 14, 30);
+const HAZE = new THREE.Color(0xd9cdb2);
+scene.background = HAZE;
+scene.fog = new THREE.Fog(HAZE, 14, 30);
+
+// Late-afternoon sky: warm haze at the horizon, clear blue overhead, a glow around the sun.
+function makeSky(radius) {
+  return new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 24), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { uSun: { value: SUN } },
+    vertexShader: 'varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `
+      uniform vec3 uSun; varying vec3 vDir;
+      void main() {
+        vec3 d = normalize(vDir); float h = d.y;
+        vec3 c = mix(vec3(0.98, 0.83, 0.6), vec3(0.74, 0.81, 0.86), smoothstep(0.0, 0.22, h));
+        c = mix(c, vec3(0.3, 0.5, 0.78), smoothstep(0.18, 0.85, h));
+        float s = max(dot(d, uSun), 0.0);
+        c += vec3(1.0, 0.82, 0.55) * (pow(s, 6.0) * 0.35 + pow(s, 600.0) * 6.0);
+        c = mix(c, vec3(0.3, 0.3, 0.22), smoothstep(0.0, -0.25, h));
+        gl_FragColor = vec4(c, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  }));
+}
+scene.add(makeSky(45));
 const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 60);
 
 const sun = new THREE.DirectionalLight(0xffe1b0, 2.6);
@@ -137,7 +160,14 @@ sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30 });
 sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02; sun.shadow.radius = 4;
 scene.add(sun);
-scene.add(new THREE.HemisphereLight(0xa9c6e6, 0x3a3a1c, 0.75));
+scene.add(new THREE.HemisphereLight(0xa9c6e6, 0x3a3a1c, 0.45));
+{
+  const env = new THREE.Scene();
+  env.add(makeSky(10));
+  const g = new THREE.Mesh(new THREE.CircleGeometry(10, 32), new THREE.MeshBasicMaterial({ color: 0x3b4a22 }));
+  g.rotation.x = -Math.PI / 2; g.position.y = -0.5; env.add(g);
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(env, 0.02).texture;
+}
 
 // ───────────────────────────── Textures ─────────────────────────────
 
@@ -154,11 +184,16 @@ const speckle = (g, w, h, n, colors, size = [1, 3]) => {
   for (let i = 0; i < n; i++) { g.fillStyle = colors[(Math.random() * colors.length) | 0]; const s = rand(...size); g.fillRect(Math.random() * w, Math.random() * h, s, s); }
 };
 
-// Soil with thatch, seen between the blades.
+// Bark-chip mulch for the beds and borders.
 const soilTex = canvasTex(1024, 1024, (g, w, h) => {
-  g.fillStyle = '#5a4a30'; g.fillRect(0, 0, w, h);
-  speckle(g, w, h, 30000, ['#4a3c24', '#6a5838', '#7a6844', '#4f5a2a', '#5f6a30'], [1, 4]);
-  for (let i = 0; i < 2500; i++) { g.strokeStyle = `rgba(${Math.random() < 0.5 ? '120,105,60' : '60,75,30'},0.5)`; g.lineWidth = 1; g.beginPath(); const x = Math.random() * w, y = Math.random() * h, a = Math.random() * 6; g.moveTo(x, y); g.lineTo(x + Math.cos(a) * 14, y + Math.sin(a) * 14); g.stroke(); }
+  g.fillStyle = '#3b2a1a'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 9000; i++) {
+    const x = Math.random() * w, y = Math.random() * h, l = rand(6, 22), a = rand(0, Math.PI), t = rand(2, 6);
+    const v = rand(0.6, 1.25);
+    g.fillStyle = `rgb(${92 * v | 0},${60 * v | 0},${36 * v | 0})`;
+    g.save(); g.translate(x, y); g.rotate(a); g.fillRect(-l / 2, -t / 2, l, t); g.restore();
+  }
+  speckle(g, w, h, 8000, ['#22170d', '#5c4128', '#6d5034'], [1, 3]);
 }, true, [6, 4]);
 const stoneTex = canvasTex(512, 512, (g, w, h) => {
   g.fillStyle = '#8f8a80'; g.fillRect(0, 0, w, h);
@@ -211,24 +246,187 @@ for (const y of [0.25, 1.0]) {
 }
 scene.add(fence);
 
-// The tree: bark trunk with roots flaring into the lawn, and a clumped canopy overhead.
+// The tree: a tapering trunk that forks into boughs, each ending in clusters of leaf cards.
+// The leaves cast real, dappled shadows on the lawn.
 const tree = new THREE.Group();
-const trunk = new THREE.Mesh(new THREE.CylinderGeometry(TREE.r * 0.8, TREE.r * 1.25, 3.4, 20, 8), new THREE.MeshStandardMaterial({ map: barkTex, roughness: 0.95, bumpMap: barkTex, bumpScale: 2 }));
-trunk.position.y = 1.7; trunk.castShadow = true; trunk.receiveShadow = true;
-tree.add(trunk);
-const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f5f25, roughness: 0.9, flatShading: true });
-for (let i = 0; i < 9; i++) {
-  const geo = new THREE.IcosahedronGeometry(rand(0.7, 1.1), 2);
-  const p = geo.attributes.position;
-  for (let k = 0; k < p.count; k++) { const s = 1 + rand(-0.12, 0.12); p.setXYZ(k, p.getX(k) * s, p.getY(k) * s, p.getZ(k) * s); }
+const barkMat = new THREE.MeshStandardMaterial({ map: barkTex, roughness: 0.95, bumpMap: barkTex, bumpScale: 3 });
+function limb(points, r0, r1) {
+  const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+  const segs = 24, radial = 12, geo = new THREE.TubeGeometry(curve, segs, 1, radial, false);
+  const pos = geo.attributes.position, c = new THREE.Vector3(), v = new THREE.Vector3();
+  for (let i = 0; i <= segs; i++) {
+    curve.getPointAt(i / segs, c);
+    const r = r0 + (r1 - r0) * Math.pow(i / segs, 0.8);
+    for (let k = 0; k <= radial; k++) {
+      const idx = i * (radial + 1) + k;
+      v.fromBufferAttribute(pos, idx).sub(c).multiplyScalar(r).add(c);
+      pos.setXYZ(idx, v.x, v.y, v.z);
+    }
+  }
   geo.computeVertexNormals();
-  const c = new THREE.Mesh(geo, leafMat);
-  c.position.set(rand(-1.1, 1.1), 3.4 + rand(-0.3, 0.7), rand(-1.1, 0.6));
-  c.castShadow = true;
-  tree.add(c);
+  const m = new THREE.Mesh(geo, barkMat);
+  m.castShadow = m.receiveShadow = true;
+  tree.add(m);
+  return curve;
+}
+const tips = [];
+limb([[0, -0.05, 0], [0.04, 1.0, 0.02], [0.02, 2.0, -0.05], [0.08, 2.7, -0.1]], TREE.r * 1.3, TREE.r * 0.55);
+const boughs = [
+  [[0.03, 1.7, 0], [0.5, 2.3, 0.3], [1.1, 2.7, 0.6], [1.6, 3.2, 0.7]],
+  [[0.03, 1.9, 0], [-0.4, 2.5, 0.25], [-0.9, 3.0, 0.45]],
+  [[0.05, 2.2, -0.03], [0.6, 2.8, -0.4], [1.0, 3.4, -0.8]],
+  [[0.04, 2.4, -0.05], [-0.2, 3.1, -0.5], [-0.3, 3.7, -0.9]],
+  [[0.07, 2.6, -0.08], [0.3, 3.3, 0.2], [0.5, 3.9, 0.3]],
+];
+for (const b of boughs) {
+  const curve = limb(b, 0.09, 0.025);
+  for (const t of [0.55, 1]) tips.push(curve.getPointAt(t));
+  // Twigs off each bough.
+  for (let k = 0; k < 3; k++) {
+    const a = curve.getPointAt(rand(0.4, 0.9)), d = new THREE.Vector3(rand(-0.6, 0.6), rand(0.2, 0.6), rand(-0.6, 0.6));
+    const e = a.clone().add(d);
+    limb([[a.x, a.y, a.z], [(a.x + e.x) / 2, (a.y + e.y) / 2 + 0.05, (a.z + e.z) / 2], [e.x, e.y, e.z]], 0.025, 0.008);
+    tips.push(e);
+  }
+}
+// Leaf cards: a drawn leaf with a midrib and veins, alpha-tested so their shadows are leaf-shaped.
+const leafTex = canvasTex(128, 192, (g, w, h) => {
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = '#ffffff';
+  g.beginPath(); g.moveTo(w / 2, 4); g.bezierCurveTo(w * 1.02, h * 0.3, w * 0.86, h * 0.8, w / 2, h - 4); g.bezierCurveTo(w * 0.14, h * 0.8, -w * 0.02, h * 0.3, w / 2, 4); g.fill();
+  g.globalCompositeOperation = 'source-atop';
+  const grd = g.createLinearGradient(0, 0, w, h); grd.addColorStop(0, '#d8e8c0'); grd.addColorStop(1, '#a8c290'); g.fillStyle = grd; g.fillRect(0, 0, w, h);
+  g.strokeStyle = 'rgba(255,255,240,0.55)'; g.lineWidth = 3; g.beginPath(); g.moveTo(w / 2, 8); g.lineTo(w / 2, h - 8); g.stroke();
+  g.lineWidth = 1.5;
+  for (let y = 30; y < h - 30; y += 18) { g.beginPath(); g.moveTo(w / 2, y); g.lineTo(w * 0.15, y - 14); g.moveTo(w / 2, y); g.lineTo(w * 0.85, y - 14); g.stroke(); }
+});
+leafTex.colorSpace = THREE.SRGBColorSpace;
+const LEAVES = mobile ? 3500 : 7500;
+const leafGeo = new THREE.PlaneGeometry(0.09, 0.13); leafGeo.translate(0, 0.06, 0);
+const leafMat = new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.65 });
+const leaves = new THREE.InstancedMesh(leafGeo, leafMat, LEAVES);
+leaves.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: leafTex, alphaTest: 0.5 });
+leaves.castShadow = true;
+{
+  const m = new THREE.Object3D(), col = new THREE.Color();
+  for (let i = 0; i < LEAVES; i++) {
+    const tip = tips[(Math.random() * tips.length) | 0], r = Math.cbrt(Math.random()) * 0.65;
+    const a = rand(0, Math.PI * 2), b = Math.acos(rand(-1, 1));
+    m.position.set(tip.x + Math.sin(b) * Math.cos(a) * r, tip.y + Math.cos(b) * r * 0.7, tip.z + Math.sin(b) * Math.sin(a) * r);
+    m.rotation.set(rand(-1.4, 1.4), rand(0, Math.PI * 2), rand(-1.4, 1.4));
+    m.scale.setScalar(rand(0.8, 1.25));
+    m.updateMatrix();
+    leaves.setMatrixAt(i, m.matrix);
+    leaves.setColorAt(i, col.setHSL(rand(0.22, 0.29), rand(0.45, 0.65), rand(0.2, 0.32)));
+  }
+}
+tree.add(leaves);
+// Roots flaring into the lawn.
+for (let k = 0; k < 5; k++) {
+  const a = k / 5 * Math.PI * 2 + rand(-0.3, 0.3), l = rand(0.25, 0.45);
+  limb([[0, 0.12, 0], [Math.cos(a) * l * 0.5, 0.04, Math.sin(a) * l * 0.5], [Math.cos(a) * l, -0.02, Math.sin(a) * l]], 0.07, 0.02);
 }
 tree.position.set(TREE.x, 0, TREE.z);
 scene.add(tree);
+
+// ───────────────────────────── Around the lawn ─────────────────────────────
+
+// Brick edging: a soldier course along the front and sides, slightly uneven.
+const brickTex = canvasTex(256, 128, (g, w, h) => {
+  g.fillStyle = '#8c4a32'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 3000, ['#7a3e2a', '#a0583c', '#6a3222', '#b06a48'], [1, 3]);
+});
+const brickMat = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.9, bumpMap: brickTex, bumpScale: 1 });
+const brickGeo = new RoundedBoxGeometry(0.2, 0.06, 0.095, 2, 0.008);
+const bricks = [];
+for (let x = X0 - 0.05; x < -X0 + 0.05; x += 0.205) bricks.push([x, FRONT_Z + 0.05, 0]);
+for (let z = FENCE_Z + 0.1; z < FRONT_Z; z += 0.205) { bricks.push([X0 - 0.05, z, Math.PI / 2]); bricks.push([-X0 + 0.05, z, Math.PI / 2]); }
+const brickMesh = new THREE.InstancedMesh(brickGeo, brickMat, bricks.length);
+{
+  const m = new THREE.Object3D(), c = new THREE.Color();
+  bricks.forEach(([x, z, r], i) => {
+    m.position.set(x, 0.02 + rand(-0.006, 0.006), z); m.rotation.set(rand(-0.03, 0.03), r + rand(-0.03, 0.03), rand(-0.03, 0.03)); m.updateMatrix();
+    brickMesh.setMatrixAt(i, m.matrix); brickMesh.setColorAt(i, c.setHSL(0.04, rand(0.3, 0.5), rand(0.55, 0.8)));
+  });
+}
+brickMesh.castShadow = brickMesh.receiveShadow = true;
+scene.add(brickMesh);
+
+// Foliage helper: a clump of leaf cards around a rounded core, for shrubs, the hedge and the trees beyond the fence.
+function foliage(count, place, hsl, size = 1, cast = true) {
+  const geo = new THREE.PlaneGeometry(0.07 * size, 0.1 * size); geo.translate(0, 0.045 * size, 0);
+  const mesh = new THREE.InstancedMesh(geo, leafMat, count);
+  mesh.customDepthMaterial = leaves.customDepthMaterial;
+  const m = new THREE.Object3D(), c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    place(m.position);
+    m.rotation.set(rand(-1.5, 1.5), rand(0, Math.PI * 2), rand(-1.5, 1.5));
+    m.scale.setScalar(rand(0.8, 1.2)); m.updateMatrix();
+    mesh.setMatrixAt(i, m.matrix);
+    mesh.setColorAt(i, c.setHSL(rand(hsl[0], hsl[1]), rand(hsl[2], hsl[3]), rand(hsl[4], hsl[5])));
+  }
+  mesh.castShadow = cast; mesh.receiveShadow = true;
+  scene.add(mesh);
+  return mesh;
+}
+const coreMat = new THREE.MeshStandardMaterial({ color: 0x1d2e10, roughness: 1 });
+function bush(x, z, r, hsl, count) {
+  const core = new THREE.Mesh(new THREE.SphereGeometry(r * 0.85, 20, 14), coreMat);
+  core.position.set(x, r * 0.7, z); core.scale.y = 0.8; core.castShadow = true; scene.add(core);
+  return foliage(count, p => { const a = rand(0, Math.PI * 2), b = Math.acos(rand(-0.2, 1)), rr = r * Math.cbrt(rand(0.7, 1)); p.set(x + Math.sin(b) * Math.cos(a) * rr, r * 0.7 + Math.cos(b) * rr * 0.8, z + Math.sin(b) * Math.sin(a) * rr); }, hsl, 0.9);
+}
+
+// Front bed: mulch with shrubs and flowering perennials.
+const lite = mobile ? 0.5 : 1;
+for (let i = 0; i < 6; i++) bush(X0 + 0.6 + i * 1.4 + rand(-0.2, 0.2), FRONT_Z + 0.55, rand(0.25, 0.36), [0.22, 0.3, 0.4, 0.6, 0.16, 0.28], 700 * lite);
+const bloomGeo = new THREE.SphereGeometry(0.025, 8, 6);
+const bloomMesh = new THREE.InstancedMesh(bloomGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 }), 260);
+{
+  const m = new THREE.Object3D(), c = new THREE.Color(), palette = [[0.9, 0.7, 0.6], [0.78, 0.6, 0.7], [0.13, 0.85, 0.6], [0.0, 0.0, 0.95]];
+  for (let i = 0; i < 260; i++) {
+    const cl = (i / 40) | 0, cx = X0 + 1.3 + cl * 1.4, h = palette[cl % palette.length];
+    m.position.set(cx + rand(-0.35, 0.35), rand(0.25, 0.5), FRONT_Z + 0.45 + rand(-0.15, 0.3)); m.updateMatrix();
+    bloomMesh.setMatrixAt(i, m.matrix); bloomMesh.setColorAt(i, c.setHSL(h[0] + rand(-0.02, 0.02), h[1], h[2] * rand(0.85, 1)));
+  }
+  bloomMesh.castShadow = true; scene.add(bloomMesh);
+}
+
+// Clipped box hedge down the right side.
+{
+  const hx = -X0 + 0.55, len = LD + 0.4;
+  const core = new THREE.Mesh(new RoundedBoxGeometry(0.62, 0.85, len, 4, 0.12), coreMat);
+  core.position.set(hx, 0.42, 0); core.castShadow = core.receiveShadow = true; scene.add(core);
+  foliage(9000 * lite, p => {
+    const face = Math.random();
+    if (face < 0.45) p.set(hx + rand(-0.31, 0.31), 0.86, rand(-len / 2, len / 2));
+    else if (face < 0.95) p.set(hx - 0.32, rand(0.05, 0.85), rand(-len / 2, len / 2));
+    else p.set(hx + 0.32, rand(0.05, 0.85), rand(-len / 2, len / 2));
+  }, [0.24, 0.3, 0.45, 0.6, 0.13, 0.22], 0.8);
+}
+
+// Paver patio on the left, laid in a running bond with stone texture.
+{
+  const paverMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.85, bumpMap: stoneTex, bumpScale: 1.2 });
+  const paverGeo = new RoundedBoxGeometry(0.58, 0.05, 0.38, 2, 0.01);
+  const pavers = [];
+  for (let row = 0; row < 18; row++) for (let col = 0; col < 5; col++) pavers.push([X0 - 0.45 - col * 0.6 - (row % 2) * 0.3, FENCE_Z + 0.2 + row * 0.4]);
+  const pm = new THREE.InstancedMesh(paverGeo, paverMat, pavers.length);
+  const m = new THREE.Object3D(), c = new THREE.Color();
+  pavers.forEach(([x, z], i) => { m.position.set(x, 0.025, z); m.rotation.y = rand(-0.01, 0.01); m.updateMatrix(); pm.setMatrixAt(i, m.matrix); pm.setColorAt(i, c.setHSL(0.09, 0.1, rand(0.62, 0.82))); });
+  pm.receiveShadow = true; pm.castShadow = true; scene.add(pm);
+}
+
+// The neighbours' trees beyond the fence: a soft dark wall of foliage against the sky.
+for (let i = 0; i < 7; i++) {
+  const x = -6 + i * 2 + rand(-0.4, 0.4), z = FENCE_Z - rand(1.2, 2.2), y = rand(2.2, 3.2), r = rand(1.0, 1.5);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(r * 0.9, 20, 14), coreMat);
+  core.position.set(x, y, z); scene.add(core);
+  foliage(1200 * lite, p => { const a = rand(0, Math.PI * 2), b = Math.acos(rand(-1, 1)); p.set(x + Math.sin(b) * Math.cos(a) * r, y + Math.cos(b) * r * 0.85, z + Math.sin(b) * Math.sin(a) * r); }, [0.2, 0.3, 0.35, 0.55, 0.12, 0.24], 1.6, false);
+  const trunk2 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, y, 10), barkMat);
+  trunk2.position.set(x, y / 2, z); scene.add(trunk2);
+}
+
+
 
 // ───────────────────────────── Lawn state ─────────────────────────────
 // One texel per ~2.5 cm of lawn:
@@ -247,21 +445,6 @@ function resetLawn() {
 resetLawn();
 const toTexel = (x, z) => [(x - X0) / LW * SW, (z - Z0) / LD * SH];
 
-// Static shade on the lawn from the fence and the canopy, painted along the sun direction.
-const shadeTex = canvasTex(512, 352, (g, w, h) => {
-  g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
-  const sx = -SUN.x / SUN.y, sz = -SUN.z / SUN.y;      // ground offset per metre of height
-  const px = x => (x - X0) / LW * w, pz = z => (z - Z0) / LD * h;
-  g.filter = 'blur(10px)';
-  g.fillStyle = 'rgba(0,0,0,0.55)';
-  g.fillRect(0, 0, w, pz(FENCE_Z + 1.2 * sz));        // fence band
-  g.filter = 'blur(22px)';
-  for (const c of tree.children.slice(1)) {
-    const wx = TREE.x + c.position.x + c.position.y * sx, wz = TREE.z + c.position.z + c.position.y * sz;
-    g.fillStyle = 'rgba(0,0,0,0.42)';
-    g.beginPath(); g.ellipse(px(wx), pz(wz), 0.95 / LW * w, 0.8 / LD * h, 0, 0, 7); g.fill();
-  }
-}, false);
 
 // ───────────────────────────── Grass ─────────────────────────────
 // Instanced blades, each a tapered strip bent in the vertex shader by wind, by its own lean,
@@ -302,25 +485,28 @@ for (const [name, arr, size] of [['iOff', iOff, 2], ['iH', iH, 1], ['iRot', iRot
 bladeGeo.instanceCount = COUNT;
 
 const grassU = {
-  tState: { value: stateTex }, tShade: { value: shadeTex },
+  tState: { value: stateTex },
   uMin: { value: new THREE.Vector2(X0, Z0) }, uSize: { value: new THREE.Vector2(LW, LD) },
   uTime: { value: 0 }, uSun: { value: SUN.clone() },
-  uMower: { value: new THREE.Vector4(0, 3, 0, 0) }, uBlow: { value: new THREE.Vector4(0, 0, 0, 0) },
-  fogColor: { value: scene.fog.color }, fogNear: { value: scene.fog.near }, fogFar: { value: scene.fog.far },
+  uBlow: { value: new THREE.Vector4(0, 0, 0, 0) },
 };
+// Lights and fog uniforms come from three.js so the blades can read the sun's shadow map.
+const litUniforms = () => ({ ...THREE.UniformsUtils.merge([THREE.UniformsLib.lights, THREE.UniformsLib.fog]), ...grassU });
 const grassMat = new THREE.ShaderMaterial({
-  uniforms: grassU, side: THREE.DoubleSide, fog: true,
+  uniforms: litUniforms(), side: THREE.DoubleSide, fog: true, lights: true,
   vertexShader: `
-    uniform sampler2D tState, tShade;
+    #include <common>
+    #include <shadowmap_pars_vertex>
+    #include <fog_pars_vertex>
+    uniform sampler2D tState;
     uniform vec2 uMin, uSize;
     uniform float uTime;
     uniform vec4 uBlow;
     attribute float aT, aSide;
     attribute vec2 iOff;
     attribute float iH, iRot, iW, iTint, iBend;
-    varying float vT, vTint, vShade, vStripe, vCut;
+    varying float vT, vTint, vStripe, vCut;
     varying vec3 vN, vPos;
-    #include <fog_pars_vertex>
     void main() {
       vec2 suv = (iOff - uMin) / uSize;
       vec4 st = texture2D(tState, suv);
@@ -341,38 +527,42 @@ const grassMat = new THREE.ShaderMaterial({
       float b = min(1.4, length(bend));
       vec3 p = vec3(iOff.x, 0.0, iOff.y) + vec3(f.x, 0.0, f.y) * aSide * w;
       p.xz += bend * t * t * H * 0.85;
-      p.y = t * H * (1.0 - 0.32 * b * b * 0.5);
+      p.y = t * H * (1.0 - 0.16 * b * b);
       vec3 perp = normalize(vec3(-f.y, 0.0, f.x));
       vN = normalize(mix(perp, vec3(0.0, 1.0, 0.0), 0.45 + 0.3 * t));
       vT = t; vTint = iTint; vCut = cut;
-      vShade = texture2D(tShade, vec2(suv.x, 1.0 - suv.y)).r;
       vec2 toCam = normalize(iOff - cameraPosition.xz);
       vStripe = cut * clamp(length(lean) * 1.5, 0.0, 1.0) * dot(normalize(lean + 1e-4), toCam);
       vPos = p;
-      vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+      vec4 worldPosition = vec4(p, 1.0);
+      vec3 transformedNormal = normalMatrix * vN;
+      #include <shadowmap_vertex>
+      vec4 mvPosition = viewMatrix * worldPosition;
       gl_Position = projectionMatrix * mvPosition;
       #include <fog_vertex>
     }`,
   fragmentShader: `
-    uniform vec3 uSun;
-    uniform vec4 uMower;
-    varying float vT, vTint, vShade, vStripe, vCut;
-    varying vec3 vN, vPos;
+    #include <common>
+    #include <packing>
+    #include <lights_pars_begin>
+    #include <shadowmap_pars_fragment>
+    #include <shadowmask_pars_fragment>
     #include <fog_pars_fragment>
+    uniform vec3 uSun;
+    varying float vT, vTint, vStripe, vCut;
+    varying vec3 vN, vPos;
     void main() {
       vec3 root = vec3(0.045, 0.1, 0.02), tip = vec3(0.2, 0.36, 0.07);
       vec3 col = mix(root, tip, vT);
-      col = mix(col, vec3(0.32, 0.38, 0.11), vTint * 0.6 * vT);                         // paler varieties and clover
-      col = mix(col, vec3(0.46, 0.42, 0.17), (1.0 - vCut) * smoothstep(0.78, 1.0, vT) * 0.45);  // seed heads on the long grass
-      col = mix(col, vec3(0.3, 0.44, 0.14), vCut * smoothstep(0.7, 1.0, vT) * 0.25);           // fresh cut ends
+      col = mix(col, vec3(0.32, 0.38, 0.11), vTint * 0.6 * vT);                                 // paler varieties and clover
+      col = mix(col, vec3(0.46, 0.42, 0.17), (1.0 - vCut) * smoothstep(0.78, 1.0, vT) * 0.45);   // seed heads on the long grass
+      col = mix(col, vec3(0.3, 0.44, 0.14), vCut * smoothstep(0.7, 1.0, vT) * 0.25);              // fresh cut ends
       vec3 n = normalize(vN);
       vec3 v = normalize(cameraPosition - vPos);
       float diff = abs(dot(n, uSun)) * 0.7 + max(dot(n, uSun), 0.0) * 0.3;
-      float back = pow(max(dot(-v, uSun), 0.0), 3.0) * vT;                                // sun behind the blade
-      float lit = vShade;
-      vec2 dm = vPos.xz - uMower.xy;
-      lit *= 1.0 - 0.55 * uMower.w * smoothstep(0.55, 0.15, length(dm * vec2(1.0, 0.85))); // mower's shade
-      vec3 light = vec3(1.05, 0.93, 0.74) * (diff * 1.5 + back * 1.1) * lit + vec3(0.42, 0.52, 0.66) * 0.55;
+      float back = pow(max(dot(-v, uSun), 0.0), 3.0) * vT;                                        // sun behind the blade
+      float lit = getShadowMask();
+      vec3 light = vec3(1.05, 0.93, 0.74) * (diff * 1.5 + back * 1.1) * lit + vec3(0.42, 0.52, 0.66) * 0.5;
       col *= light;
       col *= 1.0 + 0.24 * vStripe;
       col *= mix(0.38, 1.0, smoothstep(0.0, 0.4, vT));
@@ -384,21 +574,33 @@ const grassMat = new THREE.ShaderMaterial({
 });
 // Turf under the blades: the dense mat a mown lawn shows, striped the same way.
 const turf = new THREE.Mesh(new THREE.PlaneGeometry(LW, LD), new THREE.ShaderMaterial({
-  uniforms: grassU, fog: true,
+  uniforms: litUniforms(), fog: true, lights: true,
   vertexShader: `
-    varying vec3 vPos;
+    #include <common>
+    #include <shadowmap_pars_vertex>
     #include <fog_pars_vertex>
-    void main() { vPos = (modelMatrix * vec4(position, 1.0)).xyz; vec4 mvPosition = viewMatrix * vec4(vPos, 1.0); gl_Position = projectionMatrix * mvPosition;
+    varying vec3 vPos;
+    void main() {
+      vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+      vPos = worldPosition.xyz;
+      vec3 transformedNormal = normalMatrix * vec3(0.0, 0.0, 1.0);
+      #include <shadowmap_vertex>
+      vec4 mvPosition = viewMatrix * worldPosition;
+      gl_Position = projectionMatrix * mvPosition;
       #include <fog_vertex>
     }`,
   fragmentShader: `
-    uniform sampler2D tState, tShade;
-    uniform vec2 uMin, uSize;
-    uniform vec4 uMower;
-    varying vec3 vPos;
+    #include <common>
+    #include <packing>
+    #include <lights_pars_begin>
+    #include <shadowmap_pars_fragment>
+    #include <shadowmask_pars_fragment>
     #include <fog_pars_fragment>
-    float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-    float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+    uniform sampler2D tState;
+    uniform vec2 uMin, uSize;
+    varying vec3 vPos;
+    float hh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(hh(i), hh(i + vec2(1, 0)), f.x), mix(hh(i + vec2(0, 1)), hh(i + vec2(1, 1)), f.x), f.y); }
     void main() {
       vec2 suv = (vPos.xz - uMin) / uSize;
       vec4 st = texture2D(tState, suv);
@@ -406,11 +608,10 @@ const turf = new THREE.Mesh(new THREE.PlaneGeometry(LW, LD), new THREE.ShaderMat
       vec2 lean = st.gb * 2.0 - 1.0;
       float n = vn(vPos.xz * 40.0) * 0.6 + vn(vPos.xz * 7.0) * 0.4;
       vec3 col = mix(vec3(0.035, 0.075, 0.015), vec3(0.085, 0.16, 0.035), n);
-      col = mix(col * 0.6, col, cut);                                   // deep in long grass it is darker
+      col = mix(col * 0.6, col, cut);                                     // deep in long grass it is darker
       float stripe = cut * clamp(length(lean) * 1.5, 0.0, 1.0) * dot(normalize(lean + 1e-4), normalize(vPos.xz - cameraPosition.xz));
-      float lit = texture2D(tShade, vec2(suv.x, 1.0 - suv.y)).r;
-      lit *= 1.0 - 0.55 * uMower.w * smoothstep(0.55, 0.15, length((vPos.xz - uMower.xy) * vec2(1.0, 0.85)));
-      col *= (vec3(1.05, 0.93, 0.74) * 1.3 * lit + vec3(0.42, 0.52, 0.66) * 0.55) * (1.0 + 0.5 * stripe);
+      float lit = getShadowMask();
+      col *= (vec3(1.05, 0.93, 0.74) * 1.3 * lit + vec3(0.42, 0.52, 0.66) * 0.5) * (1.0 + 0.5 * stripe);
       gl_FragColor = vec4(col, 1.0);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
@@ -419,8 +620,10 @@ const turf = new THREE.Mesh(new THREE.PlaneGeometry(LW, LD), new THREE.ShaderMat
 }));
 turf.rotation.x = -Math.PI / 2;
 turf.position.y = 0.003;
+turf.receiveShadow = true;
 scene.add(turf);
 const grass = new THREE.Mesh(bladeGeo, grassMat);
+grass.receiveShadow = true;
 grass.frustumCulled = false;
 scene.add(grass);
 
@@ -792,7 +995,6 @@ function frame() {
   for (const [i, w] of mower.userData.wheels.entries()) w.rotation.x = rolled / (i < 2 ? 0.075 : 0.095);
   const running = tool === 'mower' && down;
   mower.userData.body.position.y = running ? Math.sin(t * 90) * 0.0015 : 0;
-  grassU.uMower.value.set(mower.position.x, mower.position.z, heading, 1);
   if (running) {
     const fx = Math.sin(heading), fz = Math.cos(heading);
     const c = cutRect(mower.position.x, mower.position.z, heading, 0.23, 0.25, 0, fx, fz);
