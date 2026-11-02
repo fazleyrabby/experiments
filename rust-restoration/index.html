@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rust Restoration // 38</title>
+<style>
+  :root { --bg: #171512; --ink: #ece4d6; --chip: rgba(26, 23, 20, 0.8); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: none; }
+  canvas#stage.turning { cursor: grab; }
+  canvas#stage.turning.held { cursor: grabbing; }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(130% 100% at 50% 45%, transparent 50%, rgba(8, 6, 4, 0.55) 100%);
+  }
+  .label, .items {
+    position: fixed; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label { bottom: 26px; pointer-events: none; }
+  .label.left { left: 28px; }
+  .label.right { left: 28px; top: 24px; bottom: auto; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.6; }
+  .label .touch { display: none; }
+  @media (hover: none) {
+    .label .mouse { display: none; }
+    .label .touch { display: inline; }
+  }
+  .items { top: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--chip); }
+  .items button {
+    all: unset; cursor: pointer; padding: 6px 12px 5px; border-radius: 999px; color: var(--ink);
+    font: 600 10px/1 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif; letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .items button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .items button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .dock {
+    position: fixed; right: 22px; bottom: 22px;
+    display: flex; gap: 4px; padding: 6px; border-radius: 999px;
+    background: var(--chip); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .dock button {
+    all: unset; cursor: pointer; display: flex; align-items: center; gap: 7px;
+    padding: 8px 12px 8px 10px; border-radius: 999px; color: var(--ink);
+    font: 600 10px/1 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif; letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .dock button svg { width: 20px; height: 20px; flex: none; }
+  .dock button kbd { font: inherit; opacity: 0.4; }
+  .dock button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .dock button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .dock .sep { width: 1px; margin: 6px 2px; background: rgba(236, 228, 214, 0.2); }
+  @media (max-width: 1180px) {
+    .dock button span, .dock button kbd { display: none; }
+    .dock button { padding: 9px; }
+  }
+  @media (max-width: 860px) {
+    .dock { right: auto; left: 50%; transform: translateX(-50%); bottom: 74px; }
+  }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; right: 18px; }
+    .label.right { top: 16px; left: 18px; right: 120px; }
+    .label.visits { top: 16px; right: 18px; }
+    .items { top: 46px; }
+    .dock button { padding: 8px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+<div class="label left">
+  <div>Rust Restoration // 38</div>
+  <div class="hint">
+    <span class="mouse">Spray and let it soak, wire wheel, sand, polish, then wipe the haze off<br>Right-drag or Turn to reach every side / 1–6 tools / O overview / N new</span>
+    <span class="touch">Spray, wire wheel, sand, polish, then wipe<br>Two fingers or Turn to reach every side</span>
+  </div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+<div class="items" role="group" aria-label="Object">
+  <button type="button" data-item="wrench" aria-pressed="true">Wrench</button>
+  <button type="button" data-item="hatchet" aria-pressed="false">Hatchet</button>
+  <button type="button" data-item="pliers" aria-pressed="false">Pliers</button>
+</div>
+<nav class="dock" aria-label="Tools">
+  <button type="button" data-tool="spray" aria-pressed="true" title="Rust remover (1)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9h6v11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1z"/><path d="M9 9V6h5l2 2"/><path d="M14 6V4H9"/><path d="M19 4.5h.01M21 3h.01M20.5 6.5h.01M18.5 2h.01"/></svg>
+    <span>Spray</span><kbd>1</kbd>
+  </button>
+  <button type="button" data-tool="wheel" aria-pressed="false" title="Wire wheel (2)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="14" r="6"/><circle cx="9" cy="14" r="1.6"/><path d="M9 8V5M15 14h3M4.8 9.8 3 8M13.2 18.2 15 20M4.8 18.2 3 20"/><path d="M10.6 14H21"/></svg>
+    <span>Wire wheel</span><kbd>2</kbd>
+  </button>
+  <button type="button" data-tool="sand" aria-pressed="false" title="Orbital sander (3)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12a5 5 0 0 1 10 0"/><path d="M4 12h16v3H4z"/><path d="M5 18h14"/><path d="M12 7V4"/></svg>
+    <span>Sander</span><kbd>3</kbd>
+  </button>
+  <button type="button" data-tool="polish" aria-pressed="false" title="Polisher (4)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3h4v6h-4z"/><path d="M5 12a7 3 0 0 1 14 0v3H5z"/><path d="M5 15a7 3 0 0 0 14 0"/><path d="M20 5.5l1-1M21 8h1.5M4 5.5l-1-1"/></svg>
+    <span>Polish</span><kbd>4</kbd>
+  </button>
+  <button type="button" data-tool="wipe" aria-pressed="false" title="Microfiber cloth (5)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8c3-2 5 2 8 0s5 2 8 0v9c-3 2-5-2-8 0s-5-2-8 0z"/><path d="M8 11v4M12 10v5M16 11v4"/></svg>
+    <span>Wipe</span><kbd>5</kbd>
+  </button>
+  <button type="button" data-tool="turn" aria-pressed="false" title="Turn the piece (6)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-14.6 4.5"/><path d="M4 12a8 8 0 0 1 14.6-4.5"/><path d="M19 3v4.5h-4.5M5 21v-4.5h4.5"/></svg>
+    <span>Turn</span><kbd>6</kbd>
+  </button>
+  <div class="sep"></div>
+  <button type="button" data-action="overview" title="360° overview (O)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="9" ry="4"/><path d="M12 3a4 9 0 0 1 0 18"/><path d="M12 3a4 9 0 0 0 0 18"/></svg>
+    <span>Overview</span><kbd>O</kbd>
+  </button>
+  <button type="button" data-action="new" title="New rusty piece (N)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
+    <span>New</span><kbd>N</kbd>
+  </button>
+</nav>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const mobile = matchMedia('(hover: none)').matches || Math.min(innerWidth, innerHeight) < 600;
+
+// ───────────────────────────── Renderer ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, mobile ? 1.5 : 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const gl = renderer.getContext();
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x171512);
+
+// A small workshop to reflect: dark walls, a tall window, two tube lights and a warm lamp.
+// Polished steel shows these as recognisable highlights rather than a blank white room.
+{
+  const env = new THREE.Scene();
+  const room = new THREE.Mesh(new THREE.BoxGeometry(14, 7, 14), new THREE.MeshBasicMaterial({ color: 0x2a2520, side: THREE.BackSide }));
+  room.position.y = 2.5;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: 0x14110e }));
+  floor.rotation.x = -Math.PI / 2; floor.position.y = -1;
+  const glow = (c, w, h, x, y, z, ry = 0, rx = 0) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide }));
+    m.position.set(x, y, z); m.rotation.set(rx, ry, 0); env.add(m);
+  };
+  glow(new THREE.Color(5.5, 6, 6.6), 3.2, 2.6, -6.9, 2.4, -1.5, Math.PI / 2);          // window
+  glow(new THREE.Color(9, 8.6, 8), 5, 0.25, 0, 5.9, -0.8, 0, Math.PI / 2);             // tube lights
+  glow(new THREE.Color(9, 8.6, 8), 5, 0.25, 0, 5.9, 1.4, 0, Math.PI / 2);
+  glow(new THREE.Color(7, 4.6, 2.4), 0.9, 0.9, 5.5, 3.2, 3.5, -Math.PI / 3);            // lamp
+  glow(new THREE.Color(0.55, 0.5, 0.42), 6, 2, 0, 1.5, -6.9);                           // pale back wall
+  env.add(room, floor);
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(env, 0.02).texture;
+}
+
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
+RectAreaLightUniformsLib.init();
+const tube = new THREE.RectAreaLight(0xfff4e6, 2.4, 4.2, 0.3);
+tube.position.set(0.3, 3.4, -0.4);
+tube.lookAt(0, 0.4, 0.3);
+scene.add(tube);
+const sun = new THREE.DirectionalLight(0xffe4c6, 1.7);
+sun.position.set(-2.4, 5, 2.2);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -2.6, right: 2.6, top: 2.2, bottom: -2.2, near: 0.5, far: 12 });
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.01; sun.shadow.radius = 6;
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xc8d4e4, 0x2a2016, 0.12));
+
+// ───────────────────────────── Bench ─────────────────────────────
+
+function hash2(x, y, s) {
+  let h = (x * 374761393 + y * 668265263 + s * 1442695041) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+function vnoise(x, y, s = 0) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s), c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, y, s = 0, oct = 4) {
+  let t = 0, amp = 0.5, f = 1;
+  for (let i = 0; i < oct; i++) { t += amp * vnoise(x * f, y * f, s + i); f *= 2.03; amp *= 0.5; }
+  return t / (1 - Math.pow(0.5, oct));
+}
+
+const BW = 9, BD = 6;
+const benchCanvas = document.createElement('canvas');
+benchCanvas.width = 2048; benchCanvas.height = 1366;
+const bench2d = benchCanvas.getContext('2d');
+function paintBench() {
+  const g = bench2d, W = benchCanvas.width, H = benchCanvas.height;
+  const img = g.createImageData(W, H), d = img.data;
+  const planks = 7, ph = H / planks;
+  for (let p = 0; p < planks; p++) {
+    const tone = 0.82 + hash2(p, 3, 9) * 0.32, s = p * 17;
+    for (let y = 0; y < ph; y++) {
+      for (let x = 0; x < W; x++) {
+        // Flat-sawn oak: long wavy grain lines with fine pores.
+        const yy = y + fbm(x * 0.0016, y * 0.01, s, 3) * 26;
+        const ring = 0.5 + 0.5 * Math.sin(yy * 0.34 + fbm(x * 0.0009, yy * 0.02, s + 3, 2) * 9);
+        const pores = vnoise(x * 0.9, yy * 0.18, s + 5) > 0.83 ? 0.82 : 1;
+        const v = (0.62 + 0.38 * ring) * pores * tone;
+        const k = ((p * ph + y) | 0) * W + x;
+        d[k * 4] = 112 * v; d[k * 4 + 1] = 76 * v; d[k * 4 + 2] = 46 * v; d[k * 4 + 3] = 255;
+      }
+    }
+  }
+  g.putImageData(img, 0, 0);
+  for (let p = 1; p < planks; p++) { g.fillStyle = 'rgba(12,8,4,0.85)'; g.fillRect(0, p * ph - 2, W, 4); }
+  for (let i = 0; i < 18; i++) {
+    const x = Math.random() * W, y = Math.random() * H, r = 30 + Math.random() * 150;
+    const rg = g.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, `rgba(18,11,5,${0.15 + Math.random() * 0.25})`); rg.addColorStop(1, 'rgba(18,11,5,0)');
+    g.fillStyle = rg; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+}
+paintBench();
+const benchTex = new THREE.CanvasTexture(benchCanvas);
+benchTex.colorSpace = THREE.SRGBColorSpace;
+benchTex.anisotropy = maxAniso;
+const bench = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD),
+  new THREE.MeshStandardMaterial({ map: benchTex, roughness: 0.74, metalness: 0, bumpMap: benchTex, bumpScale: 0.5, envMapIntensity: 0.35 }));
+bench.rotation.x = -Math.PI / 2;
+bench.receiveShadow = true;
+scene.add(bench);
+let benchDirty = false;
+function dustOnBench(x, z, a) {
+  const u = (x + BW / 2) / BW, v = (z + BD / 2) / BD;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return;
+  const r = 0.8 + Math.random() * 2;
+  bench2d.fillStyle = `rgba(${105 + Math.random() * 50 | 0},${42 + Math.random() * 25 | 0},${15 + Math.random() * 10 | 0},${a})`;
+  bench2d.beginPath(); bench2d.arc(u * benchCanvas.width, v * benchCanvas.height, r, 0, Math.PI * 2); bench2d.fill();
+  benchDirty = true;
+}
+
+// ───────────────────────────── Pieces ─────────────────────────────
+// Each piece is a mesh in its own object space, centred on the origin and lying flat (y up),
+// plus where its maker's stamp sits.
+
+function stampCanvas(lines, w = 1024, h = 256) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.filter = 'blur(1.4px)';
+  for (const [text, x, y, size, weight = 700, spacing = 0.18] of lines) {
+    g.font = `${weight} ${size * h}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    if ('letterSpacing' in g) g.letterSpacing = `${spacing * size * h}px`;
+    g.fillText(text, x * w, y * h);
+  }
+  return c;
+}
+
+function finish(geo, stamp) {
+  geo.computeBoundingBox();
+  const c = geo.boundingBox.getCenter(new THREE.Vector3());
+  geo.translate(-c.x, -c.y, -c.z);
+  stamp.rect[0] -= c.x; stamp.rect[1] -= c.z;
+  geo.computeBoundingBox(); geo.computeBoundingSphere();
+  return { geo, stamp };
+}
+
+function wrench() {
+  const RING = { x: -0.98, r: 0.235, hole: 0.128 }, OPEN = { x: 0.95, r: 0.27, gap: 0.098, angle: THREE.MathUtils.degToRad(15) };
+  const pts = [];
+  const hw = x => 0.072 + 0.022 * Math.pow(Math.abs(x) / 0.7, 2);
+  const sx0 = -0.76, sx1 = 0.68;
+  for (let i = 0; i <= 40; i++) { const x = sx0 + (sx1 - sx0) * i / 40; pts.push([x, -hw(x)]); }
+  const C = [OPEN.x, 0], R = OPEN.r, dir = [Math.cos(OPEN.angle), Math.sin(OPEN.angle)], nrm = [-dir[1], dir[0]];
+  const along = Math.sqrt(R * R - OPEN.gap * OPEN.gap);
+  const at = (a, b) => [C[0] + dir[0] * a + nrm[0] * b, C[1] + dir[1] * a + nrm[1] * b];
+  const ang = p => Math.atan2(p[1] - C[1], p[0] - C[0]);
+  let a0 = ang([sx1, -hw(sx1)]), a1 = ang(at(along, -OPEN.gap));
+  if (a1 < a0) a1 += Math.PI * 2;
+  for (let i = 1; i <= 48; i++) { const a = a0 + (a1 - a0) * i / 48; pts.push([C[0] + Math.cos(a) * R, C[1] + Math.sin(a) * R]); }
+  const back = -0.035;
+  for (let i = 1; i <= 10; i++) pts.push(at(along + (back - along) * i / 10, -OPEN.gap));
+  for (let i = 1; i < 16; i++) { const t = -Math.PI / 2 - Math.PI * i / 16; pts.push(at(back + Math.cos(t) * OPEN.gap, Math.sin(t) * OPEN.gap)); }
+  for (let i = 0; i <= 10; i++) pts.push(at(back + (along - back) * i / 10, OPEN.gap));
+  a0 = ang(at(along, OPEN.gap)); a1 = ang([sx1, hw(sx1)]);
+  if (a1 < a0) a1 += Math.PI * 2;
+  for (let i = 1; i <= 48; i++) { const a = a0 + (a1 - a0) * i / 48; pts.push([C[0] + Math.cos(a) * R, C[1] + Math.sin(a) * R]); }
+  for (let i = 1; i < 40; i++) { const x = sx1 + (sx0 - sx1) * i / 40; pts.push([x, hw(x)]); }
+  a0 = Math.atan2(hw(sx0), sx0 - RING.x); a1 = Math.atan2(-hw(sx0), sx0 - RING.x) + Math.PI * 2;
+  for (let i = 0; i <= 72; i++) { const a = a0 + (a1 - a0) * i / 72; pts.push([RING.x + Math.cos(a) * RING.r, Math.sin(a) * RING.r]); }
+  const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+  const hole = [];
+  for (let i = 0; i < 24; i++) {
+    const a = i / 24 * Math.PI * 2 + Math.PI / 24, r = i % 2 ? RING.hole : RING.hole * 1.1;
+    hole.push(new THREE.Vector2(RING.x + Math.cos(a) * r, Math.sin(a) * r));
+  }
+  shape.holes.push(new THREE.Path(hole));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.07, bevelEnabled: true, bevelThickness: 0.018, bevelSize: 0.016, bevelSegments: 4, curveSegments: 1 });
+  geo.rotateX(-Math.PI / 2);
+  return finish(geo, {
+    canvas: stampCanvas([['DROP FORGED', 0.42, 0.5, 0.42], ['CR-V', 0.1, 0.5, 0.3, 600], ['19', 0.84, 0.5, 0.5]]),
+    rect: [-0.12, 0, 1.6, 0.4],
+  });
+}
+
+function hatchet() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.62, -0.17);
+  s.quadraticCurveTo(-0.64, 0, -0.62, 0.17);
+  s.quadraticCurveTo(-0.6, 0.215, -0.52, 0.22);
+  s.lineTo(-0.1, 0.235);
+  s.quadraticCurveTo(0.36, 0.24, 0.66, 0.52);
+  s.quadraticCurveTo(0.72, 0.56, 0.76, 0.48);
+  s.quadraticCurveTo(0.96, 0, 0.76, -0.5);
+  s.quadraticCurveTo(0.72, -0.58, 0.64, -0.53);
+  s.quadraticCurveTo(0.34, -0.26, -0.1, -0.235);
+  s.lineTo(-0.52, -0.22);
+  s.quadraticCurveTo(-0.6, -0.215, -0.62, -0.17);
+  const eye = new THREE.Path();
+  eye.absellipse(-0.33, 0, 0.115, 0.185, 0, Math.PI * 2, true);
+  s.holes.push(eye);
+  const T = 0.26;
+  let geo = new THREE.ExtrudeGeometry(s, { depth: T, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.018, bevelSegments: 5, curveSegments: 28 });
+  // Taper the cheeks from the full thickness at the eye down to a fine cutting edge.
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i) - T / 2;
+    const t = smooth(-0.12, 0.84, x);
+    const k = (1 - t) * (1 - t * 0.35) * (1 + 0.08 * Math.sin(Math.min(1, t * 1.4) * Math.PI)) + 0.035;
+    pos.setZ(i, z * k);
+  }
+  geo.deleteAttribute('normal'); geo.deleteAttribute('uv');
+  geo = mergeVertices(geo, 1e-4);
+  geo.computeVertexNormals();
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
+  geo.rotateX(-Math.PI / 2);
+  return finish(geo, {
+    canvas: stampCanvas([['FORGED', 0.5, 0.36, 0.3], ['N° 3', 0.5, 0.7, 0.26, 600]], 512, 384),
+    rect: [0.1, 0, 0.42, 0.32],
+  });
+}
+
+function pliers() {
+  const half = mirror => {
+    const m = mirror ? -1 : 1, pts = [];
+    const ln = (x, y) => pts.push(new THREE.Vector2(x, y * m));
+    const q = (cx, cy, x, y, n = 16) => {
+      const p0 = pts[pts.length - 1], x0 = p0.x, y0 = p0.y * m;
+      for (let i = 1; i <= n; i++) { const t = i / n, u = 1 - t; ln(u * u * x0 + 2 * u * t * cx + t * t * x, u * u * y0 + 2 * u * t * cy + t * t * y); }
+    };
+    const arc = (a0, a1) => { for (let i = 1; i <= 24; i++) { const a = a0 + (a1 - a0) * i / 24; ln(Math.cos(a) * 0.15, Math.sin(a) * 0.15); } };
+    const deg = d => d * Math.PI / 180;
+    ln(0.64, 0.016);
+    q(0.69, 0.05, 0.6, 0.078);
+    q(0.36, 0.12, 0.11, 0.105);
+    arc(deg(43.7), deg(200));
+    q(-0.6, -0.11, -1.25, -0.13);
+    q(-1.37, -0.2, -1.26, -0.285);
+    q(-0.62, -0.27, Math.cos(deg(250)) * 0.15, Math.sin(deg(250)) * 0.15);
+    arc(deg(250), deg(318));
+    ln(0.16, 0.024);
+    for (let x = 0.17; x < 0.6; x += 0.032) { ln(x + 0.008, 0.005); ln(x + 0.024, 0.024); }
+    if (mirror) pts.reverse();                      // mirroring flips the winding
+    return new THREE.Shape(pts);
+  };
+  const D = 0.055, opts = { depth: D, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.011, bevelSegments: 3, curveSegments: 1 };
+  const a = new THREE.ExtrudeGeometry(half(false), opts);
+  const b = new THREE.ExtrudeGeometry(half(true), opts);
+  b.translate(0, 0, -D - 0.026);
+  const rivet = new THREE.CylinderGeometry(0.05, 0.05, 2 * D + 0.06, 40, 1).toNonIndexed();
+  rivet.rotateX(Math.PI / 2);
+  rivet.translate(0, 0, -0.013);
+  const geo = mergeGeometries([a, b, rivet]);
+  geo.rotateX(-Math.PI / 2);
+  return finish(geo, {
+    canvas: stampCanvas([['DROP FORGED', 0.5, 0.5, 0.42]], 1024, 160),
+    rect: [-0.62, 0.2, 0.62, 0.075],
+  });
+}
+
+const BUILDERS = { wrench, hatchet, pliers };
+
+// ─────────────────────── Surface state (3D) ───────────────────────
+// What has happened to the steel is held in two small 3D textures wrapped around the piece,
+// so every face, edge and hole has its own state with no unwrapping:
+//   A: cleaned (rust removed), wet, softened by the remover, polishing haze
+//   B: wire-wheel swirl, sanding, polish
+// The rust itself, its colour, pits and flakes come from 3D noise in the shader.
+
+const VOX = mobile ? 120 : 150;   // voxels per unit
+let V = null;                      // { nx, ny, nz, min, size, A, B, texA, texB }
+let samples = null;                // surface sample points: voxel index, position, normal
+
+function makeVolume(geo) {
+  const bb = geo.boundingBox, pad = 0.04;
+  const min = bb.min.clone().subScalar(pad), size = bb.getSize(new THREE.Vector3()).addScalar(pad * 2);
+  const nx = Math.ceil(size.x * VOX), ny = Math.max(8, Math.ceil(size.y * VOX)), nz = Math.ceil(size.z * VOX);
+  const A = new Uint8Array(nx * ny * nz * 4), B = new Uint8Array(nx * ny * nz * 4);
+  const tex = data => {
+    const t = new THREE.Data3DTexture(data, nx, ny, nz);
+    t.format = THREE.RGBAFormat; t.type = THREE.UnsignedByteType;
+    t.minFilter = t.magFilter = THREE.LinearFilter;
+    t.wrapS = t.wrapT = t.wrapR = THREE.ClampToEdgeWrapping;
+    t.unpackAlignment = 1; t.needsUpdate = true;
+    return t;
+  };
+  return { nx, ny, nz, min, size, A, B, texA: tex(A), texB: tex(B), dirty: null };
+}
+
+// Area-weighted points over the whole surface, for the progress readout and for the remover's fizz.
+function sampleSurface(geo, n) {
+  const pos = geo.attributes.position, idx = geo.index;
+  const tri = idx ? idx.count / 3 : pos.count / 3;
+  const get = (t, c) => idx ? idx.getX(t * 3 + c) : t * 3 + c;
+  const cdf = new Float32Array(tri); let total = 0;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let t = 0; t < tri; t++) {
+    a.fromBufferAttribute(pos, get(t, 0)); b.fromBufferAttribute(pos, get(t, 1)); c.fromBufferAttribute(pos, get(t, 2));
+    total += b.sub(a).cross(c.sub(a)).length() / 2;
+    cdf[t] = total;
+  }
+  const out = { idx: new Uint32Array(n), p: new Float32Array(n * 3) };
+  for (let i = 0; i < n; i++) {
+    const r = Math.random() * total;
+    let lo = 0, hi = tri - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cdf[mid] < r) lo = mid + 1; else hi = mid; }
+    let u = Math.random(), v = Math.random();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    a.fromBufferAttribute(pos, get(lo, 0)); b.fromBufferAttribute(pos, get(lo, 1)); c.fromBufferAttribute(pos, get(lo, 2));
+    const px = a.x + (b.x - a.x) * u + (c.x - a.x) * v, py = a.y + (b.y - a.y) * u + (c.y - a.y) * v, pz = a.z + (b.z - a.z) * u + (c.z - a.z) * v;
+    out.p.set([px, py, pz], i * 3);
+    out.idx[i] = voxelOf(px, py, pz);
+  }
+  return out;
+}
+function voxelOf(x, y, z) {
+  const i = Math.min(V.nx - 1, Math.max(0, Math.floor((x - V.min.x) / V.size.x * V.nx)));
+  const j = Math.min(V.ny - 1, Math.max(0, Math.floor((y - V.min.y) / V.size.y * V.ny)));
+  const k = Math.min(V.nz - 1, Math.max(0, Math.floor((z - V.min.z) / V.size.z * V.nz)));
+  return (k * V.ny + j) * V.nx + i;
+}
+function markDirty(i0, j0, k0, i1, j1, k1) {
+  const d = V.dirty;
+  if (!d) V.dirty = [i0, j0, k0, i1, j1, k1];
+  else { d[0] = Math.min(d[0], i0); d[1] = Math.min(d[1], j0); d[2] = Math.min(d[2], k0); d[3] = Math.max(d[3], i1); d[4] = Math.max(d[4], j1); d[5] = Math.max(d[5], k1); }
+}
+
+// Upload only the changed block of each 3D texture.
+function uploadVolume() {
+  const d = V.dirty;
+  if (!d) return;
+  V.dirty = null;
+  for (const [tex, data] of [[V.texA, V.A], [V.texB, V.B]]) {
+    const props = renderer.properties.get(tex);
+    if (!props.__webglTexture || props.__version !== tex.version) { tex.needsUpdate = true; continue; }
+    renderer.state.activeTexture(gl.TEXTURE0);
+    renderer.state.bindTexture(gl.TEXTURE_3D, props.__webglTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, V.nx);
+    gl.pixelStorei(gl.UNPACK_IMAGE_HEIGHT, V.ny);
+    gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, d[0]);
+    gl.pixelStorei(gl.UNPACK_SKIP_ROWS, d[1]);
+    gl.pixelStorei(gl.UNPACK_SKIP_IMAGES, d[2]);
+    gl.texSubImage3D(gl.TEXTURE_3D, 0, d[0], d[1], d[2], d[3] - d[0] + 1, d[4] - d[1] + 1, d[5] - d[2] + 1, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    for (const p of [gl.UNPACK_ROW_LENGTH, gl.UNPACK_IMAGE_HEIGHT, gl.UNPACK_SKIP_PIXELS, gl.UNPACK_SKIP_ROWS, gl.UNPACK_SKIP_IMAGES]) gl.pixelStorei(p, 0);
+  }
+}
+
+// ───────────────────────────── Material ─────────────────────────────
+
+// Tileable scratch patterns, sampled triplanar in the shader.
+function scratchCanvas(kind) {
+  const N = 1024, c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, N, N);
+  g.lineCap = 'round';
+  const wrapDraw = fn => { for (const dx of [-N, 0, N]) for (const dy of [-N, 0, N]) { g.save(); g.translate(dx, dy); fn(); g.restore(); } };
+  const count = kind === 'swirl' ? 5200 : 4200;
+  for (let i = 0; i < count; i++) {
+    const x = Math.random() * N, y = Math.random() * N, alpha = 0.05 + Math.random() * 0.32, w = 0.5 + Math.random() * 0.9;
+    const stroke = kind === 'swirl'
+      ? (() => { const r = 18 + Math.random() * 80, a = Math.random() * Math.PI * 2, l = 0.2 + Math.random() * 0.6; return () => { g.beginPath(); g.arc(x, y, r, a, a + l); g.stroke(); }; })()
+      : (() => { const l = 80 + Math.random() * 500, a = (Math.random() - 0.5) * 0.06; return () => { g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }; })();
+    g.strokeStyle = `rgba(255,255,255,${alpha})`; g.lineWidth = w;
+    wrapDraw(stroke);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = maxAniso;
+  return t;
+}
+const texSwirl = scratchCanvas('swirl'), texLinear = scratchCanvas('linear');
+const dummy = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1); dummy.needsUpdate = true;
+const stampTex = new THREE.CanvasTexture(document.createElement('canvas'));
+
+const U = {
+  tA: { value: null }, tB: { value: null }, tSwirl: { value: texSwirl }, tLinear: { value: texLinear }, tStamp: { value: stampTex },
+  uMin: { value: new THREE.Vector3() }, uSize: { value: new THREE.Vector3(1, 1, 1) },
+  uStamp: { value: new THREE.Vector4() }, uSeed: { value: new THREE.Vector3() },
+};
+const steelMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 1, roughness: 0.5, bumpMap: dummy, envMapIntensity: 0.95 });
+steelMat.onBeforeCompile = sh => {
+  Object.assign(sh.uniforms, U);
+  sh.vertexShader = 'varying vec3 vObjPos;\nvarying vec3 vObjN;\n' + sh.vertexShader
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjPos = position;\nvObjN = normal;');
+  sh.fragmentShader = `
+uniform highp sampler3D tA, tB;
+uniform sampler2D tSwirl, tLinear, tStamp;
+uniform vec3 uMin, uSize, uSeed;
+uniform vec4 uStamp;
+varying vec3 vObjPos;
+varying vec3 vObjN;
+float cRough, cMetal, cH;
+float h31(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float n3(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(h31(i), h31(i + vec3(1,0,0)), f.x), mix(h31(i + vec3(0,1,0)), h31(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(h31(i + vec3(0,0,1)), h31(i + vec3(1,0,1)), f.x), mix(h31(i + vec3(0,1,1)), h31(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm3(vec3 p, int oct) {
+  float s = 0.0, a = 0.5, t = 0.0;
+  for (int i = 0; i < 6; i++) { if (i >= oct) break; s += a * n3(p); t += a; p = p * 2.03 + vec3(1.7, 9.2, 3.1); a *= 0.5; }
+  return s / t;
+}
+vec3 triW(vec3 n) { vec3 w = pow(abs(n), vec3(6.0)); return w / (w.x + w.y + w.z); }
+float tri(sampler2D t, vec3 p, vec3 w, float s) {
+  return texture2D(t, p.zy * s).r * w.x + texture2D(t, p.xz * s).r * w.y + texture2D(t, p.xy * s).r * w.z;
+}
+` + sh.fragmentShader
+    .replace('#include <map_fragment>', `
+      vec3 p = vObjPos, on = normalize(vObjN), q = p + uSeed;
+      vec3 uvw = (p - uMin) / uSize;
+      vec4 sa = texture(tA, uvw), sb = texture(tB, uvw);
+      float cleaned = sa.r, wetness = sa.g, softened = sa.b, haze = sa.a;
+      float wheel = sb.r, sanded = sb.g, shine = sb.b;
+      vec3 w = triW(on);
+      float swirl = tri(tSwirl, p, w, 1.6), lin = tri(tLinear, p, w, 1.2);
+      // Maker's stamp on the top face.
+      float stamp = 0.0;
+      vec2 suv = vec2((p.x - uStamp.x) / uStamp.z + 0.5, 0.5 - (p.z - uStamp.y) / uStamp.w);
+      if (on.y > 0.55 && all(greaterThan(suv, vec2(0.0))) && all(lessThan(suv, vec2(1.0)))) stamp = texture2D(tStamp, suv).r;
+      // Rust as it came: heavy in patches, thin flash rust between, pitting under the heavy crust.
+      float heavy = smoothstep(0.32, 0.72, fbm3(q * 2.4, 4));
+      float detail = fbm3(q * 11.0, 4);
+      float rust0 = clamp(0.25 + 0.85 * heavy + 0.4 * (detail - 0.5), 0.0, 1.0);
+      float edge = fbm3(q * 34.0, 3);
+      float rust = rust0 * clamp(1.0 - cleaned * (1.15 + 0.6 * (edge - 0.5)), 0.0, 1.0);
+      float pitN = fbm3(q * 30.0 + 4.0, 3);
+      float pit = smoothstep(0.62, 0.82, pitN) * (0.35 + 0.65 * heavy) * (1.0 - 0.8 * sanded) * (1.0 - 0.5 * shine);
+      // Bare steel.
+      float forge = fbm3(q * 1.6, 3);
+      vec3 steel = vec3(0.56, 0.57, 0.59) * (0.9 + 0.2 * forge);
+      steel *= 1.0 - 0.62 * pit;
+      steel *= 1.0 - 0.4 * stamp * (1.0 - 0.6 * shine);
+      float rough = 0.52 + 0.12 * forge;
+      rough = mix(rough, 0.28 + 0.34 * swirl, wheel);
+      rough = mix(rough, 0.16 + 0.18 * lin, sanded);
+      rough = mix(rough, 0.025 + 0.03 * lin * (1.0 - sanded), shine * shine);
+      rough = max(rough, pit * 0.6);
+      // Compound haze from the polisher, smeared in arcs until it is wiped.
+      float smear = 0.65 + 0.35 * swirl;
+      steel = mix(steel, vec3(0.05, 0.05, 0.055), haze * smear * 0.85);
+      rough = mix(rough, 0.6, haze * 0.85);
+      // Rust colour: near-black pits and scale, deep browns, bright orange bloom on the crust.
+      float tone = fbm3(q * 6.0 + 7.0, 4), flake = fbm3(q * 42.0, 3);
+      vec3 rBlack = vec3(0.04, 0.022, 0.016), rDark = vec3(0.15, 0.055, 0.024), rMid = vec3(0.38, 0.14, 0.04), rHi = vec3(0.6, 0.29, 0.08);
+      vec3 rustCol = mix(rDark, rMid, smoothstep(0.28, 0.72, tone * 0.7 + flake * 0.3));
+      rustCol = mix(rustCol, rHi, smoothstep(0.7, 0.95, flake) * 0.8 * heavy);
+      rustCol = mix(rustCol, rBlack, smoothstep(0.55, 0.9, pitN + (1.0 - tone) * 0.35) * 0.7);
+      rustCol *= 0.6 + 0.6 * rust * (0.7 + 0.6 * flake);
+      float cover = smoothstep(0.05, 0.42, rust);
+      float stain = smoothstep(0.0, 0.1, rust) * (1.0 - cover);
+      vec3 col = mix(steel, steel * vec3(0.7, 0.48, 0.32), stain * 0.85);
+      col = mix(col, rustCol, cover);
+      cMetal = mix(1.0, 0.0, cover);
+      rough = mix(rough, 0.95, cover);
+      rough = min(1.0, rough + 0.3 * stain);
+      // The remover: wet rust darkens and shines, softened rust goes sludgy orange.
+      col = mix(col, col * vec3(1.3, 1.02, 0.8), softened * cover * 0.55);
+      col *= 1.0 - 0.45 * wetness * cover - 0.12 * wetness * (1.0 - cover);
+      rough = mix(rough, 0.14, wetness * 0.85);
+      cRough = rough;
+      cH = rust * (0.5 + 0.5 * flake) * (1.0 - 0.5 * softened) * 1.3
+         - pit * 0.9 * (1.0 - cover)
+         - stamp * 0.9
+         + (swirl * wheel * (1.0 - sanded) + lin * sanded) * (1.0 - shine) * 0.2;
+      diffuseColor.rgb = col;`)
+    .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = cRough;')
+    .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = cMetal;')
+    .replace('#include <normal_fragment_maps>', `
+      vec2 dHdxy = vec2(dFdx(cH), dFdy(cH)) * 0.05;
+      normal = perturbNormalArb(-vViewPosition, normal, dHdxy, faceDirection);`);
+};
+
+// ───────────────────────────── Piece in the scene ─────────────────────────────
+
+const holder = new THREE.Group();       // turned by the user
+holder.position.y = 0.48;
+scene.add(holder);
+let mesh = null, itemName = 'wrench', radius = 1.3;
+
+function loadItem(name, fresh = true) {
+  itemName = name;
+  for (const b of document.querySelectorAll('.items [data-item]')) b.setAttribute('aria-pressed', String(b.dataset.item === name));
+  if (mesh) { holder.remove(mesh); mesh.geometry.dispose(); }
+  if (V) { V.texA.dispose(); V.texB.dispose(); }
+  const { geo, stamp } = BUILDERS[name]();
+  V = makeVolume(geo);
+  // Each piece's stamp canvas is a different size; free the old GPU storage so the new one isn't
+  // copied into a texture allocated for the previous size (GL_INVALID_VALUE: offset overflows).
+  stampTex.dispose(); stampTex.image = stamp.canvas; stampTex.needsUpdate = true;
+  U.uStamp.value.set(...stamp.rect);
+  U.tA.value = V.texA; U.tB.value = V.texB;
+  U.uMin.value.copy(V.min); U.uSize.value.copy(V.size);
+  const seed = Math.random() * 100;
+  U.uSeed.value.set(seed, seed * 0.37, seed * 0.71);
+  mesh = new THREE.Mesh(geo, steelMat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  holder.add(mesh);
+  radius = geo.boundingSphere.radius;
+  samples = sampleSurface(geo, 30000);
+  wetList = [];
+  restored = false;
+  if (fresh) { holder.quaternion.identity(); spin.set(0, 0); }
+  frameCamera();
+}
+
+// ───────────────────────────── Tools ─────────────────────────────
+// Each tool is modelled with its contact point at the origin and the surface normal along +y,
+// with the user's side along +z. It is placed on the piece at whatever angle the surface faces.
+
+const M = {
+  steel: new THREE.MeshStandardMaterial({ color: 0xc4c8cd, metalness: 1, roughness: 0.26 }),
+  darkSteel: new THREE.MeshStandardMaterial({ color: 0x6b6f75, metalness: 1, roughness: 0.36 }),
+  rubber: new THREE.MeshStandardMaterial({ color: 0x17181a, metalness: 0, roughness: 0.85 }),
+  plastic: new THREE.MeshStandardMaterial({ color: 0x2a2c2f, metalness: 0, roughness: 0.46 }),
+  body: new THREE.MeshPhysicalMaterial({ color: 0x4f5a37, metalness: 0, roughness: 0.4, clearcoat: 0.45, clearcoatRoughness: 0.32 }),
+  accent: new THREE.MeshStandardMaterial({ color: 0xd06a1c, metalness: 0, roughness: 0.4 }),
+};
+
+function knurled(r0, r1, h, ridges, segs = 64) {
+  const g = new THREE.CylinderGeometry(r0, r1, h, segs, 1);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i), r = Math.hypot(x, z);
+    if (r < 1e-4) continue;
+    const k = 1 + 0.06 * Math.max(0, Math.cos(Math.atan2(z, x) * ridges));
+    p.setX(i, x * k); p.setZ(i, z * k);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+const lathe = (profile, segs = 64) => new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), segs);
+function labelTexture(lines, bg, fg, w = 1024, h = 512) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  for (const [text, x, y, size, color = fg, weight = 800] of lines) {
+    g.fillStyle = color; g.font = `${weight} ${size}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    if ('letterSpacing' in g) g.letterSpacing = `${size * 0.08}px`;
+    g.fillText(text, x * w, y * h);
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = maxAniso;
+  return { t, g };
+}
+// Fine surface grain for moulded plastic and rubber, so tools do not read as smooth CG.
+const grainTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'), img = g.createImageData(256, 256);
+  for (let i = 0; i < img.data.length; i += 4) { const v = 110 + Math.random() * 40; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(4, 4); return t;
+})();
+for (const k of ['rubber', 'plastic', 'body']) { M[k].bumpMap = grainTex; M[k].bumpScale = 0.15; }
+
+function makeSprayer() {
+  const g = new THREE.Group(), rig = new THREE.Group(), parts = new THREE.Group();
+  // HDPE bottle with moulded shoulders, the orange gel inside, a wrap label and the dip tube.
+  const bottle = new THREE.Mesh(lathe([[0, 0], [0.085, 0], [0.095, 0.012], [0.098, 0.04], [0.098, 0.27], [0.09, 0.31], [0.06, 0.35], [0.032, 0.37], [0.032, 0.4], [0, 0.4]]),
+    new THREE.MeshPhysicalMaterial({ color: 0xf2f0e8, roughness: 0.38, transmission: 0.55, thickness: 0.05, ior: 1.5 }));
+  const gel = new THREE.Mesh(lathe([[0, 0.006], [0.088, 0.006], [0.091, 0.04], [0.091, 0.2], [0, 0.2]]),
+    new THREE.MeshPhysicalMaterial({ color: 0xd4692a, roughness: 0.2, transmission: 0.35, thickness: 0.2 }));
+  const lab = labelTexture([['RUST', 0.5, 0.28, 120], ['REMOVER', 0.5, 0.5, 96], ['GEL  ·  ACID-FREE  ·  500 ML', 0.5, 0.74, 34, '#3a3a3a', 600]], '#efe7d4', '#b3361c');
+  lab.g.fillStyle = '#b3361c'; lab.g.fillRect(0, 0, 1024, 18); lab.g.fillRect(0, 494, 1024, 18); lab.t.needsUpdate = true;
+  const label = new THREE.Mesh(new THREE.CylinderGeometry(0.0995, 0.0995, 0.15, 64, 1, true, -Math.PI * 0.55, Math.PI * 1.1),
+    new THREE.MeshStandardMaterial({ map: lab.t, roughness: 0.55 }));
+  label.position.y = 0.15; label.rotation.y = Math.PI;
+  const dip = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.38, 8), new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.4, transparent: true, opacity: 0.7 }));
+  dip.position.set(0.02, 0.2, 0);
+  // Trigger head: ribbed collar, shroud, adjustable nozzle and the lever.
+  const collar = new THREE.Mesh(knurled(0.042, 0.042, 0.04, 30, 48), M.plastic);
+  collar.position.y = 0.42;
+  const shroud = new THREE.Mesh(new RoundedBoxGeometry(0.07, 0.085, 0.17, 4, 0.02), M.plastic);
+  shroud.position.set(0, 0.48, 0.045);
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.02, 0.04, 6), M.accent);
+  nozzle.rotation.x = Math.PI / 2; nozzle.position.set(0, 0.49, 0.145);
+  const trigger = new THREE.Group();
+  const lever = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.11, 0.026, 3, 0.01), M.plastic);
+  lever.position.y = -0.05;
+  trigger.add(lever); trigger.position.set(0, 0.45, 0.1);
+  parts.add(bottle, gel, label, dip, collar, shroud, nozzle, trigger);
+  // Pivot the model at its nozzle. The rig's +z is the jet, so aiming it at the origin makes
+  // the remover land on the pointer's contact point from any face of the piece.
+  parts.position.copy(nozzle.position).negate();
+  rig.add(parts);
+  // Held just above and beside the touch point, so the can never hides its own jet.
+  rig.position.set(0.22, 0.34, 0.12);
+  rig.lookAt(0, 0, 0);
+  // Ghost the can: when it passes in front of the piece, the surface stays visible through it.
+  const ghosted = new Map();
+  rig.traverse(o => {
+    if (!o.isMesh) return;
+    let m = ghosted.get(o.material);
+    if (!m) {
+      m = o.material.clone();
+      m.transparent = true; m.depthWrite = false; m.opacity = 0.34;
+      if (m.transmission) m.transmission = 0;
+      ghosted.set(o.material, m);
+    }
+    o.material = m;
+  });
+  gel.material.opacity = 0.5;
+  label.material.opacity = 0.55;
+  nozzle.material.opacity = 0.8;   // keep the business end readable
+  dip.material.opacity = 0.45;
+  g.add(rig);
+  g.userData = { trigger, nozzleWorld: () => nozzle.getWorldPosition(new THREE.Vector3()) };
+  return g;
+}
+
+function makeDrill() {
+  const g = new THREE.Group(), drill = new THREE.Group(), spinner = new THREE.Group();
+  // Crimped steel wire wheel: wavy strands between two hub washers.
+  const R = 0.13, verts = [], cols = [];
+  for (let i = 0; i < 1400; i++) {
+    const a = Math.random() * Math.PI * 2, z = (Math.random() - 0.5) * 0.04, r1 = R * (0.92 + Math.random() * 0.08);
+    let px = Math.cos(a) * 0.04, py = Math.sin(a) * 0.04, pz = z * 0.4;
+    for (let s = 1; s <= 5; s++) {
+      const r = 0.04 + (r1 - 0.04) * s / 5, wob = (s % 2 ? 1 : -1) * 0.012;
+      const nx = Math.cos(a + wob) * r, ny = Math.sin(a + wob) * r, nz = z * (0.4 + 0.12 * s) + (s % 2 ? 0.003 : -0.003);
+      verts.push(px, py, pz, nx, ny, nz);
+      const c = 0.5 + Math.random() * 0.35;
+      cols.push(c, c, c * 1.03, c * 1.1, c * 1.1, c * 1.13);
+      px = nx; py = ny; pz = nz;
+    }
+  }
+  const wg = new THREE.BufferGeometry();
+  wg.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  wg.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  spinner.add(new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })));
+  for (const z of [-0.026, 0.026]) {
+    const washer = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.006, 40), M.steel);
+    washer.rotation.x = Math.PI / 2; washer.position.z = z; spinner.add(washer);
+  }
+  const nut = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.016, 6), M.darkSteel);
+  nut.rotation.x = Math.PI / 2; nut.position.z = 0.034; spinner.add(nut);
+  // Arbor, keyless chuck with grip ridges, motor housing with vents, grip, trigger and battery.
+  const arbor = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.14, 12), M.steel);
+  arbor.rotation.x = Math.PI / 2; arbor.position.z = -0.08;
+  const chuck = new THREE.Mesh(knurled(0.034, 0.03, 0.09, 24), M.rubber);
+  chuck.rotation.x = Math.PI / 2; chuck.position.z = -0.19;
+  const chuckNose = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.028, 0.03, 32), M.darkSteel);
+  chuckNose.rotation.x = Math.PI / 2; chuckNose.position.z = -0.135;
+  const clutch = new THREE.Mesh(knurled(0.05, 0.05, 0.03, 20, 48), M.plastic);
+  clutch.rotation.x = Math.PI / 2; clutch.position.z = -0.25;
+  const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.058, 0.24, 40), M.body);
+  motor.rotation.x = Math.PI / 2; motor.position.z = -0.38;
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.062, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), M.body);
+  cap.rotation.x = -Math.PI / 2; cap.position.z = -0.5;
+  for (let i = 0; i < 6; i++) {
+    const vent = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.03, 0.05), M.rubber);
+    const a = -0.6 + i * 0.24;
+    vent.position.set(Math.sin(a) * 0.06, Math.cos(a) * 0.06, -0.45); vent.rotation.z = -a;
+    drill.add(vent);
+  }
+  const grip = new THREE.Mesh(new RoundedBoxGeometry(0.075, 0.24, 0.1, 4, 0.03), M.rubber);
+  grip.position.set(0, -0.15, -0.4); grip.rotation.x = 0.18;
+  const trig = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.06, 0.03, 3, 0.01), M.accent);
+  trig.position.set(0, -0.07, -0.33);
+  const battery = new THREE.Mesh(new RoundedBoxGeometry(0.11, 0.08, 0.17, 4, 0.02), M.plastic);
+  battery.position.set(0, -0.3, -0.42);
+  const leds = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.006, 0.012), new THREE.MeshStandardMaterial({ color: 0x6fd36f, emissive: 0x3aa83a, emissiveIntensity: 1.2 }));
+  leds.position.set(0, -0.258, -0.34);
+  drill.add(arbor, chuck, chuckNose, clutch, motor, cap, grip, trig, battery, leds);
+  // Held so the wheel's rim touches the surface, the body running away and up.
+  spinner.position.y = R;
+  drill.position.y = R;
+  drill.rotation.x = -0.35;
+  g.add(spinner, drill);
+  g.userData = { spinner };
+  return g;
+}
+
+function makeSander() {
+  const g = new THREE.Group(), shake = new THREE.Group();
+  // Hook-and-loop pad with a perforated sandpaper disc, palm-grip body, dust port and switch.
+  const paperTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    const x = c.getContext('2d');
+    x.fillStyle = '#8a6a48'; x.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 26000; i++) { const v = 90 + Math.random() * 110; x.fillStyle = `rgba(${v},${v * 0.78},${v * 0.55},0.6)`; x.fillRect(Math.random() * 512, Math.random() * 512, 1.6, 1.6); }
+    x.fillStyle = '#17120e';
+    for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; x.beginPath(); x.arc(256 + Math.cos(a) * 150, 256 + Math.sin(a) * 150, 14, 0, Math.PI * 2); x.fill(); }
+    x.font = '700 30px Helvetica, Arial'; x.fillStyle = 'rgba(250,240,220,0.7)'; x.textAlign = 'center'; x.fillText('P400', 256, 268);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const paperMat = new THREE.MeshStandardMaterial({ map: paperTex, roughness: 1 });
+  const paper = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.006, 64), [new THREE.MeshStandardMaterial({ color: 0x7a5c3e, roughness: 1 }), paperMat, paperMat]);
+  paper.position.y = 0.003;
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.126, 0.03, 64), M.rubber);
+  pad.position.y = 0.021;
+  const skirt = new THREE.Mesh(lathe([[0.125, 0.036], [0.128, 0.05], [0.12, 0.07], [0.0, 0.07]]), M.plastic);
+  const shell = new THREE.Mesh(lathe([[0.11, 0.07], [0.112, 0.1], [0.1, 0.14], [0.085, 0.18], [0.07, 0.205], [0.04, 0.222], [0, 0.226]]), M.body);
+  const palm = new THREE.Mesh(new THREE.SphereGeometry(0.075, 40, 20, 0, Math.PI * 2, 0, Math.PI / 2), M.rubber);
+  palm.position.y = 0.2; palm.scale.set(1, 0.55, 1);
+  const port = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.026, 0.12, 24, 1, true), M.plastic);
+  port.rotation.x = Math.PI / 2; port.position.set(0, 0.06, -0.15);
+  const bag = new THREE.Mesh(new THREE.SphereGeometry(0.06, 24, 16), new THREE.MeshStandardMaterial({ color: 0x3b3e42, roughness: 0.95 }));
+  bag.position.set(0, 0.07, -0.25); bag.scale.set(0.9, 0.75, 1.4);
+  const sw = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.02, 0.03, 3, 0.008), M.accent);
+  sw.position.set(0, 0.14, 0.098); sw.rotation.x = 0.6;
+  shake.add(paper, pad, skirt, shell, palm, port, bag, sw);
+  g.add(shake);
+  g.userData = { shake };
+  return g;
+}
+
+function makePolisher() {
+  const g = new THREE.Group(), spinner = new THREE.Group(), body = new THREE.Group();
+  // Grooved orange foam pad with compound worked into it, on a backing plate under the gear head.
+  const pad = new THREE.Mesh(lathe([[0, 0], [0.12, 0], [0.135, 0.008], [0.14, 0.03], [0.13, 0.045], [0, 0.045]]),
+    new THREE.MeshStandardMaterial({ color: 0xe0782e, roughness: 0.95 }));
+  const smearTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const x = c.getContext('2d');
+    x.fillStyle = '#e0782e'; x.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 9; i++) { x.strokeStyle = `rgba(40,30,25,${0.25 + Math.random() * 0.3})`; x.lineWidth = 6 + Math.random() * 10; x.beginPath(); x.arc(128, 128, 30 + i * 11, Math.random() * 6, Math.random() * 6 + 2.5); x.stroke(); }
+    for (let r = 20; r < 128; r += 18) { x.strokeStyle = 'rgba(120,50,15,0.5)'; x.lineWidth = 2; x.beginPath(); x.arc(128, 128, r, 0, Math.PI * 2); x.stroke(); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const face = new THREE.Mesh(new THREE.CircleGeometry(0.12, 48), new THREE.MeshStandardMaterial({ map: smearTex, roughness: 0.95 }));
+  face.rotation.x = Math.PI / 2; face.position.y = 0.0005;
+  const backing = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.115, 0.016, 48), M.rubber);
+  backing.position.y = 0.053;
+  spinner.add(pad, face, backing);
+  const spindle = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.05, 16), M.darkSteel);
+  spindle.position.y = 0.085;
+  const head = new THREE.Mesh(lathe([[0.065, 0.1], [0.07, 0.13], [0.066, 0.18], [0.05, 0.2], [0, 0.205]]), M.darkSteel);
+  const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.34, 40), M.body);
+  motor.rotation.x = Math.PI / 2; motor.position.set(0, 0.15, -0.21);
+  const tail = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.09, 0.12, 4, 0.03), M.rubber);
+  tail.position.set(0, 0.15, -0.42);
+  const dh = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.016, 12, 40, Math.PI), M.rubber);
+  dh.rotation.y = Math.PI / 2; dh.position.set(0, 0.2, -0.02);
+  const sw = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.02, 0.05, 3, 0.008), M.accent);
+  sw.position.set(0, 0.215, -0.3);
+  body.add(spindle, head, motor, tail, dh, sw);
+  g.add(spinner, body);
+  g.userData = { spinner };
+  return g;
+}
+
+function makeCloth() {
+  const g = new THREE.Group();
+  // A folded microfibre cloth: a soft pad of folds with a dense, slightly fuzzy weave.
+  const geo = new THREE.PlaneGeometry(0.34, 0.26, 48, 36);
+  geo.rotateX(-Math.PI / 2);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i), r = Math.hypot(x / 0.17, z / 0.13);
+    p.setY(i, 0.006 + 0.05 * Math.max(0, 1 - r * r) + 0.012 * Math.sin(x * 38 + z * 9) * Math.max(0, 1 - r) + (r > 0.85 ? -(r - 0.85) * 0.12 : 0));
+  }
+  geo.computeVertexNormals();
+  const weave = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const x = c.getContext('2d');
+    x.fillStyle = '#3d6f9e'; x.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 9000; i++) { x.fillStyle = `rgba(${Math.random() > 0.5 ? '120,170,215' : '20,45,70'},0.35)`; x.fillRect(Math.random() * 256, Math.random() * 256, 1.5, 1.5); }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 3); return t;
+  })();
+  const mat = new THREE.MeshPhysicalMaterial({ map: weave, roughness: 0.95, sheen: 1, sheenColor: new THREE.Color(0x9ec4e8), sheenRoughness: 0.6, side: THREE.DoubleSide });
+  const cloth = new THREE.Mesh(geo, mat);
+  const fold = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.03, 12, 24, Math.PI), mat);
+  fold.rotation.set(0, Math.PI / 2, 0); fold.position.set(0, 0.05, -0.1); fold.scale.set(1, 0.7, 1.6);
+  g.add(cloth, fold);
+  return g;
+}
+
+const tools = { spray: makeSprayer(), wheel: makeDrill(), sand: makeSander(), polish: makePolisher(), wipe: makeCloth() };
+for (const [name, t] of Object.entries(tools)) {
+  t.visible = false;
+  t.traverse(o => { if (o.isMesh) o.castShadow = name !== 'spray'; });   // a ghost can casts no solid shadow
+  scene.add(t);
+}
+const RADIUS = { spray: 0.17, wheel: 0.085, sand: 0.12, polish: 0.12, wipe: 0.14 };
+
+// ─────────────────────────── Particles ───────────────────────────
+
+const MAXP = 4000;
+function particleLayer(additive) {
+  const pos = new Float32Array(MAXP * 3), col = new Float32Array(MAXP * 4), size = new Float32Array(MAXP);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 4).setUsage(THREE.DynamicDrawUsage));
+  g.setAttribute('size', new THREE.BufferAttribute(size, 1).setUsage(THREE.DynamicDrawUsage));
+  const m = new THREE.ShaderMaterial({
+    uniforms: { uScale: { value: 1 } },
+    vertexShader: `attribute float size; attribute vec4 color; uniform float uScale; varying vec4 vC;
+      void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = max(1.0, size * uScale / -mv.z); vC = color; }`,
+    fragmentShader: additive
+      ? `varying vec4 vC; void main() { float d = length(gl_PointCoord - 0.5) * 2.0; gl_FragColor = vec4(vC.rgb, vC.a * (1.0 - smoothstep(0.0, 1.0, d))); }`
+      : `varying vec4 vC; void main() { vec2 c = gl_PointCoord * 2.0 - 1.0; float r2 = dot(c, c); if (r2 > 1.0) discard;
+          float ring = vC.a < 0.0 ? smoothstep(0.5, 0.9, r2) + 0.12 : 1.0; float a = abs(vC.a) * ring * (1.0 - smoothstep(0.8, 1.0, r2));
+          gl_FragColor = vec4(vC.rgb * (0.8 + 0.25 * (1.0 - c.y)), a); }`,
+    transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+  });
+  const pts = new THREE.Points(g, m);
+  pts.frustumCulled = false;
+  scene.add(pts);
+  return { pos, col, size, g, m, list: [] };
+}
+const fine = particleLayer(false), sparks = particleLayer(true);
+const emit = (L, p) => { if (L.list.length < MAXP) L.list.push(p); };
+
+// ───────────────────────────── Layout ─────────────────────────────
+
+const camBase = new THREE.Vector3();
+function frameCamera() {
+  const vfov = THREE.MathUtils.degToRad(camera.fov);
+  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+  const dist = Math.max(radius * 1.12 / Math.sin(Math.min(vfov, hfov) / 2), 2.2);
+  camBase.set(0, holder.position.y + dist * 0.82, dist * 0.57);
+}
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  frameCamera();
+  const scale = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+  fine.m.uniforms.uScale.value = sparks.m.uniforms.uScale.value = scale;
+}
+addEventListener('resize', resize);
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, S = null;
+function ensureAudio() {
+  if (!audio) {
+    try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    const len = audio.sampleRate * 2, buf = audio.createBuffer(1, len, audio.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const noise = () => { const s = audio.createBufferSource(); s.buffer = buf; s.loop = true; s.start(); return s; };
+    const chain = (src, type, f, q) => { const fl = audio.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; const g = audio.createGain(); g.gain.value = 0; src.connect(fl).connect(g).connect(audio.destination); return g; };
+    const osc = (type, f) => { const o = audio.createOscillator(); o.type = type; o.frequency.value = f; o.start(); return o; };
+    const drill = osc('sawtooth', 118), sander = osc('square', 190), buffer = osc('triangle', 150);
+    S = {
+      drill, sander, buffer,
+      drillHum: chain(drill, 'lowpass', 700, 0.7), grit: chain(noise(), 'bandpass', 2800, 0.7), ping: chain(noise(), 'bandpass', 6200, 3),
+      sandHum: chain(sander, 'lowpass', 520, 0.8), scrape: chain(noise(), 'bandpass', 1500, 1.1),
+      whir: chain(buffer, 'lowpass', 420, 0.7), buff: chain(noise(), 'lowpass', 650, 0.5),
+      swish: chain(noise(), 'bandpass', 900, 0.6), hiss: chain(noise(), 'highpass', 3800, 0.5), fizz: chain(noise(), 'bandpass', 7000, 2.5),
+    };
+  }
+  if (audio.state === 'suspended') audio.resume();
+}
+const level = (n, v, k = 0.04) => { if (S) S[n].gain.setTargetAtTime(v, audio.currentTime, k); };
+function chime() {
+  if (!audio) return;
+  [880, 1320, 1760].forEach((f, i) => {
+    const t = audio.currentTime + i * 0.11, o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+    o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 1.6);
+  });
+}
+
+// ──────────────────────────── Controls ────────────────────────────
+
+const TOOLS = ['spray', 'wheel', 'sand', 'polish', 'wipe', 'turn'];
+let tool = 'spray', down = false, turning = false, hasPointer = false;
+const pointer = new THREE.Vector2(), ray = new THREE.Raycaster(), lastClient = { x: 0, y: 0 };
+const spin = new THREE.Vector2();       // turning momentum
+const touches = new Map();
+
+function setTool(name) {
+  tool = name;
+  for (const b of document.querySelectorAll('.dock [data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
+  canvas.classList.toggle('turning', name === 'turn');
+}
+for (const b of document.querySelectorAll('.dock button')) {
+  b.addEventListener('click', () => {
+    if (b.dataset.tool) setTool(b.dataset.tool);
+    else if (b.dataset.action === 'new') loadItem(itemName);
+    else startOverview();
+  });
+}
+for (const b of document.querySelectorAll('.items [data-item]')) b.addEventListener('click', () => loadItem(b.dataset.item));
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k >= '1' && k <= '6') setTool(TOOLS[+k - 1]);
+  else if (k === 'n') loadItem(itemName);
+  else if (k === 'o') startOverview();
+});
+addEventListener('wheel', e => {
+  const list = TOOLS.slice(0, 5), i = Math.max(0, list.indexOf(tool));
+  setTool(list[(i + (e.deltaY > 0 ? 1 : list.length - 1)) % list.length]);
+}, { passive: true });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+const axisY = new THREE.Vector3(0, 1, 0), right = new THREE.Vector3(), qTmp = new THREE.Quaternion();
+function turnBy(dx, dy) {
+  right.setFromMatrixColumn(camera.matrixWorld, 0);
+  holder.quaternion.premultiply(qTmp.setFromAxisAngle(axisY, dx * 0.008));
+  holder.quaternion.premultiply(qTmp.setFromAxisAngle(right, dy * 0.008));
+  spin.set(dx, dy);
+}
+canvas.addEventListener('pointerdown', e => {
+  ensureAudio();
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+  lastClient.x = e.clientX; lastClient.y = e.clientY;
+  overview = null;
+  turning = e.button === 2 || tool === 'turn' || touches.size >= 2;
+  down = !turning;
+  canvas.classList.add('held');
+  setPointer(e);
+});
+canvas.addEventListener('pointermove', e => {
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (turning) {
+    const n = Math.max(1, touches.size);
+    turnBy((e.clientX - lastClient.x) / n, (e.clientY - lastClient.y) / n);
+  }
+  lastClient.x = e.clientX; lastClient.y = e.clientY;
+  setPointer(e);
+});
+const release = e => { touches.delete(e.pointerId); if (!touches.size) { down = false; turning = false; canvas.classList.remove('held'); } };
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hasPointer = false; });
+function setPointer(e) { pointer.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); hasPointer = true; }
+
+// The overview turns the piece through a full circle and tips it to show the underside.
+let overview = null;
+function startOverview() { overview = { t: 0, from: holder.quaternion.clone() }; spin.set(0, 0); }
+
+// ─────────────────────── Working the surface ───────────────────────
+
+const clamp255 = x => x < 0 ? 0 : x > 255 ? 255 : x;
+const local = new THREE.Vector3(), localN = new THREE.Vector3();
+let contact = { rust: 0, metal: 0 }, wetList = [], restored = false;
+
+// Visit the voxels near the hit, in a disc flattened along the surface normal so a tool on
+// one face never reaches through a thin piece to the other side.
+function brush(radiusW, fn) {
+  const r = radiusW, rn = radiusW * 0.3;
+  const sx = V.nx / V.size.x, sy = V.ny / V.size.y, sz = V.nz / V.size.z;
+  const ci = (local.x - V.min.x) * sx, cj = (local.y - V.min.y) * sy, ck = (local.z - V.min.z) * sz;
+  const i0 = Math.max(0, Math.floor(ci - r * sx)), i1 = Math.min(V.nx - 1, Math.ceil(ci + r * sx));
+  const j0 = Math.max(0, Math.floor(cj - r * sy)), j1 = Math.min(V.ny - 1, Math.ceil(cj + r * sy));
+  const k0 = Math.max(0, Math.floor(ck - r * sz)), k1 = Math.min(V.nz - 1, Math.ceil(ck + r * sz));
+  const nx = localN.x, ny = localN.y, nz = localN.z;
+  for (let k = k0; k <= k1; k++) {
+    const dz = V.min.z + (k + 0.5) / sz - local.z;
+    for (let j = j0; j <= j1; j++) {
+      const dy = V.min.y + (j + 0.5) / sy - local.y;
+      for (let i = i0; i <= i1; i++) {
+        const dx = V.min.x + (i + 0.5) / sx - local.x;
+        const dn = dx * nx + dy * ny + dz * nz;
+        const tx = dx - nx * dn, ty = dy - ny * dn, tz = dz - nz * dn;
+        const d2 = (tx * tx + ty * ty + tz * tz) / (r * r) + (dn * dn) / (rn * rn);
+        if (d2 >= 1) continue;
+        const f = (1 - d2) * (1 - d2);
+        fn(((k * V.ny + j) * V.nx + i) * 4, f);
+      }
+    }
+  }
+  markDirty(i0, j0, k0, i1, j1, k1);
+}
+
+function work(dt, speed) {
+  const A = V.A, B = V.B;
+  const motion = 0.35 + 0.65 * Math.min(1, speed / 1.0);
+  let rust = 0, metal = 0;
+  if (tool === 'spray') {
+    brush(RADIUS.spray, (o, f) => {
+      if (A[o + 1] === 0 && A[o] < 230) wetList.push(o);
+      A[o + 1] = clamp255(A[o + 1] + f * dt * 1300);
+    });
+  } else if (tool === 'wheel') {
+    brush(RADIUS.wheel, (o, f) => {
+      A[o] = clamp255(A[o] + f * dt * (330 + 900 * A[o + 2] / 255));
+      if (A[o] < 230) rust += f;
+      else {
+        B[o] = clamp255(B[o] + f * dt * 800);
+        B[o + 1] = clamp255(B[o + 1] - f * dt * 420);
+        B[o + 2] = clamp255(B[o + 2] - f * dt * 560);
+        A[o + 3] = clamp255(A[o + 3] - f * dt * 600);
+        metal += f;
+      }
+      A[o + 1] = clamp255(A[o + 1] - f * dt * 500);
+    });
+  } else if (tool === 'sand') {
+    brush(RADIUS.sand, (o, f) => {
+      const g = f * dt * motion;
+      A[o] = clamp255(A[o] + g * (A[o] < 160 ? 70 : 140));
+      if (A[o] < 200) { rust += f; return; }
+      B[o + 1] = clamp255(B[o + 1] + g * 230);
+      B[o] = clamp255(B[o] - g * 190);
+      B[o + 2] = clamp255(B[o + 2] - g * 230);
+      A[o + 3] = clamp255(A[o + 3] - g * 300);
+      A[o + 1] = clamp255(A[o + 1] - g * 300);
+      metal += f;
+    });
+  } else if (tool === 'polish') {
+    brush(RADIUS.polish, (o, f) => {
+      if (A[o] < 225) return;
+      const g = f * dt * motion, cap = 80 + 175 * B[o + 1] / 255;      // without sanding first, the pits and swirls stay
+      if (B[o + 2] < cap) B[o + 2] = Math.min(cap, B[o + 2] + g * (70 + 160 * B[o + 1] / 255));
+      A[o + 3] = clamp255(A[o + 3] + g * 260);
+      A[o + 1] = clamp255(A[o + 1] - g * 400);
+      metal += f;
+    });
+  } else if (tool === 'wipe') {
+    brush(RADIUS.wipe, (o, f) => {
+      const g = f * dt * motion;
+      A[o + 3] = clamp255(A[o + 3] - g * 520);
+      A[o + 1] = clamp255(A[o + 1] - g * 700);
+      metal += f;
+    });
+  }
+  const area = Math.PI * (RADIUS[tool] * VOX) ** 2 * 0.35;
+  contact = { rust: Math.min(1, rust / area), metal: Math.min(1, metal / area) };
+}
+
+// The remover keeps working while you do other things: wet rust softens, the wet slowly dries.
+let soakClock = 0, fizz = 0;
+function soak(dt) {
+  soakClock += dt;
+  if (soakClock < 0.1) return;
+  const step = soakClock; soakClock = 0;
+  const A = V.A;
+  let wet = 0, keep = 0;
+  for (let n = 0; n < wetList.length; n++) {
+    const o = wetList[n], w = A[o + 1];
+    if (!w) continue;
+    if (A[o] < 230) { A[o + 2] = clamp255(A[o + 2] + w * step * 0.32); wet += w; }
+    A[o + 1] = Math.max(0, w - step * 7);
+    wetList[keep++] = o;
+  }
+  wetList.length = keep;
+  if (keep) markDirty(0, 0, 0, V.nx - 1, V.ny - 1, V.nz - 1);
+  fizz += (Math.min(1, wet / 255 / 4000) - fizz) * 0.3;
+}
+
+// ───────────────────────────── Frame ─────────────────────────────
+
+let statsClock = 0, lastStatus = '';
+const clock = new THREE.Clock(), prevHit = new THREE.Vector3(), tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
+const basis = new THREE.Matrix4(), bx = new THREE.Vector3(), by = new THREE.Vector3(), bz = new THREE.Vector3();
+const toCam = new THREE.Vector3(), toolAt = new THREE.Vector3();
+
+function stats() {
+  const A = V.A, B = V.B, idx = samples.idx;
+  let clean = 0, mirror = 0, n = 0;
+  for (let i = 0; i < idx.length; i += 3, n++) {
+    const o = idx[i] * 4;
+    if (A[o] > 225) clean++;
+    if (B[o + 2] > 215 && A[o + 3] < 40 && A[o] > 225) mirror++;
+  }
+  const rustPct = Math.round(100 * (1 - clean / n)), mirrorPct = Math.round(100 * mirror / n);
+  if (!restored && rustPct <= 1 && mirrorPct >= 92) { restored = true; chime(); }
+  const text = restored ? 'Restored' : `Rust ${rustPct}% / Mirror ${mirrorPct}%`;
+  if (text !== lastStatus) statusEl.textContent = lastStatus = text;
+}
+
+function placeTool(g, point, normal) {
+  by.copy(normal).normalize();
+  toCam.copy(camera.position).sub(point);
+  bz.copy(toCam).addScaledVector(by, -toCam.dot(by));
+  if (bz.lengthSq() < 1e-6) bz.set(0, 0, 1).addScaledVector(by, -by.z);
+  bz.normalize();
+  bx.crossVectors(by, bz).normalize();
+  basis.makeBasis(bx, by, bz);
+  g.quaternion.setFromRotationMatrix(basis);
+  g.position.copy(point);
+}
+
+function frame() {
+  const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime;
+
+  // Turning: overview, momentum after a fling, or nothing.
+  if (overview) {
+    overview.t += dt / 6;
+    const e = Math.min(1, overview.t), ease = e * e * (3 - 2 * e);
+    const yaw = new THREE.Quaternion().setFromAxisAngle(axisY, ease * Math.PI * 2);
+    const tip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.sin(ease * Math.PI) * 1.15);
+    holder.quaternion.copy(tip).multiply(yaw).multiply(overview.from);
+    if (e >= 1) overview = null;
+  } else if (!turning && spin.lengthSq() > 0.01) {
+    turnBy(spin.x * 0.92, spin.y * 0.92);
+  }
+
+  camera.position.copy(camBase).add(tmp.set(pointer.x * 0.1, pointer.y * 0.04, 0));
+  camera.lookAt(0, holder.position.y - 0.08, 0);
+  camera.updateMatrixWorld();
+
+  let hit = null, benchHit = null;
+  if (hasPointer && tool !== 'turn' && !turning) {
+    ray.setFromCamera(pointer, camera);
+    hit = ray.intersectObject(mesh)[0] || null;
+    if (!hit) benchHit = ray.intersectObject(bench)[0] || null;
+  }
+  const at = hit ? hit.point : benchHit ? benchHit.point : null;
+  let speed = 0;
+  if (at) { speed = prevHit.distanceTo(at) / Math.max(dt, 1e-3); prevHit.copy(at); }
+
+  const working = down && hit && !overview;
+  const worldN = hit ? tmp2.copy(hit.face.normal).transformDirection(mesh.matrixWorld) : tmp2.set(0, 1, 0);
+  if (working) {
+    mesh.worldToLocal(local.copy(hit.point));
+    localN.copy(hit.face.normal).normalize();
+    work(dt, speed);
+  } else contact = { rust: 0, metal: 0 };
+  soak(dt);
+
+  // Tools follow the pointer and lie against the surface they touch.
+  for (const [name, g] of Object.entries(tools)) g.visible = name === tool && !!at;
+  if (at && tools[tool]) {
+    const g = tools[tool], lift = down ? 0 : 0.04;
+    placeTool(g, toolAt.copy(at).addScaledVector(worldN, lift), worldN);
+    if (tool === 'wheel') g.userData.spinner.rotation.z -= dt * (down ? 62 : 40);
+    if (tool === 'polish') g.userData.spinner.rotation.y += dt * (down ? 42 : 30);
+    if (tool === 'sand') { const s = down ? 0.006 : 0.002; g.userData.shake.position.set(Math.sin(t * 90) * s, 0, Math.cos(t * 90) * s); }
+    if (tool === 'spray') g.userData.trigger.rotation.x = down ? 0.35 : 0;
+  }
+
+  // Debris and spray.
+  if (working) {
+    const p = hit.point;
+    if (tool === 'spray') {
+      const from = tools.spray.userData.nozzleWorld();
+      for (let i = 0; i < 26; i++) {
+        // Keep the cone on the contact disc. Aiming at a ball around the point let some
+        // jets fire back past the nozzle now that it is held close to the surface.
+        tmp.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(RADIUS.spray * 1.6);
+        tmp.addScaledVector(worldN, -tmp.dot(worldN)).add(p);
+        const flight = 0.12 + Math.random() * 0.06, k = 1 / flight;
+        emit(fine, { x: from.x, y: from.y, z: from.z, vx: (tmp.x - from.x) * k, vy: (tmp.y - from.y) * k, vz: (tmp.z - from.z) * k, life: flight + 0.02, s: 0.0075, r: 0.92, g: 0.68, b: 0.48, a: 0.42, type: 'mist' });
+      }
+    } else if (tool === 'wheel') {
+      // Thrown off the bottom of the wheel, toward the user, along the direction it spins.
+      tmp.copy(camera.position).sub(p);
+      bz.copy(tmp).addScaledVector(worldN, -tmp.dot(worldN)).normalize();
+      const dust = Math.round(contact.rust * 28), spark = Math.round(contact.metal * 8 + contact.rust * 3);
+      for (let i = 0; i < dust; i++) {
+        const sp = 0.8 + Math.random() * 2;
+        emit(fine, { x: p.x, y: p.y, z: p.z, vx: bz.x * sp + worldN.x + (Math.random() - 0.5) * 1.5, vy: bz.y * sp + worldN.y * (0.6 + Math.random()), vz: bz.z * sp + worldN.z + (Math.random() - 0.5) * 1.5,
+          life: 2, s: 0.006 + Math.random() * 0.008, r: 0.4 + Math.random() * 0.15, g: 0.17 + Math.random() * 0.06, b: 0.06, a: 0.95, type: 'dust' });
+      }
+      for (let i = 0; i < spark; i++) {
+        const sp = 2.6 + Math.random() * 3.4;
+        emit(sparks, { x: p.x, y: p.y, z: p.z, vx: bz.x * sp + (Math.random() - 0.5) * 2, vy: bz.y * sp + 0.6 + Math.random() * 1.4, vz: bz.z * sp + (Math.random() - 0.5) * 2,
+          life: 0.25 + Math.random() * 0.35, s: 0.012 + Math.random() * 0.01, r: 1, g: 0.6, b: 0.2, a: 1, type: 'spark' });
+      }
+    } else if (tool === 'sand' && Math.random() < 0.7 && (contact.rust || contact.metal)) {
+      for (let i = 0; i < 4; i++) {
+        const red = contact.rust > contact.metal;
+        emit(fine, { x: p.x + (Math.random() - 0.5) * 0.24, y: p.y, z: p.z + (Math.random() - 0.5) * 0.24, vx: (Math.random() - 0.5) * 0.5, vy: 0.15 + Math.random() * 0.25, vz: (Math.random() - 0.5) * 0.5,
+          life: 2, s: 0.005, r: red ? 0.45 : 0.62, g: red ? 0.21 : 0.62, b: red ? 0.08 : 0.62, a: 0.75, type: 'dust' });
+      }
+    }
+  }
+  // Fizz: small bubbles rise where the remover sits on rust, on any face.
+  if (fizz > 0.002 && wetList.length) {
+    const A = V.A, tries = Math.min(70, Math.round(fizz * 900));
+    for (let i = 0; i < tries; i++) {
+      const s = (Math.random() * samples.idx.length) | 0, o = samples.idx[s] * 4;
+      if (Math.random() > A[o + 1] / 255 * (A[o] < 230 ? 1 : 0)) continue;
+      tmp.fromArray(samples.p, s * 3);
+      mesh.localToWorld(tmp);
+      emit(fine, { x: tmp.x, y: tmp.y, z: tmp.z, vx: 0, vy: 0, vz: 0, life: 0.6 + Math.random() * 1.2, s: 0.005 + Math.random() * 0.009, r: 0.95, g: 0.88, b: 0.76, a: -0.75, type: 'bubble' });
+    }
+  }
+  stepParticles(fine, dt);
+  stepParticles(sparks, dt);
+
+  if (S) {
+    const on = down && !!at;
+    level('drillHum', tool === 'wheel' && on ? 0.05 : 0);
+    S.drill.frequency.setTargetAtTime(tool === 'wheel' && working ? 104 : 118, audio.currentTime, 0.08);
+    level('grit', tool === 'wheel' ? 0.32 * contact.rust : 0, 0.03);
+    level('ping', tool === 'wheel' ? 0.09 * contact.metal : 0, 0.03);
+    level('sandHum', tool === 'sand' && on ? 0.035 : 0);
+    level('scrape', tool === 'sand' && working ? 0.05 + 0.2 * (contact.metal + contact.rust) : 0, 0.03);
+    level('whir', tool === 'polish' && on ? 0.06 : 0);
+    level('buff', tool === 'polish' && working ? 0.1 * contact.metal : 0);
+    level('swish', tool === 'wipe' && working ? 0.12 * Math.min(1, speed / 1.2) : 0, 0.03);
+    level('hiss', tool === 'spray' && on ? 0.12 : 0, 0.02);
+    level('fizz', Math.min(0.06, fizz * 0.5) * (0.6 + 0.4 * Math.random()), 0.05);
+  }
+
+  uploadVolume();
+  if (benchDirty) { benchTex.needsUpdate = true; benchDirty = false; }
+  statsClock += dt;
+  if (statsClock > 0.4) { statsClock = 0; stats(); }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+function stepParticles(L, dt) {
+  const list = L.list;
+  let w = 0;
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    p.life -= dt;
+    if (p.type === 'bubble') p.s += dt * 0.004;
+    else {
+      if (p.type !== 'mist') p.vy -= 9.8 * dt;
+      const drag = p.type === 'dust' ? 0.985 : 0.99;
+      p.vx *= drag; p.vz *= drag;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      if (p.type === 'spark' && p.y < 0.002) { p.y = 0.002; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6; }
+      if (p.type === 'dust' && p.y < 0.001) { dustOnBench(p.x, p.z, 0.5); p.life = 0; }
+      if (p.type === 'mist' && p.life < 0.05) p.life = 0;
+    }
+    if (p.life > 0) list[w++] = p;
+  }
+  list.length = w;
+  const n = Math.min(w, MAXP);
+  for (let i = 0; i < n; i++) {
+    const p = list[i], k = i * 3, c = i * 4;
+    L.pos[k] = p.x; L.pos[k + 1] = p.y; L.pos[k + 2] = p.z;
+    const fade = p.type === 'spark' || p.type === 'bubble' ? Math.min(1, p.life / 0.15) : 1;
+    L.col[c] = p.r; L.col[c + 1] = p.g; L.col[c + 2] = p.b; L.col[c + 3] = p.a * fade;
+    L.size[i] = p.s;
+  }
+  L.g.setDrawRange(0, n);
+  L.g.attributes.position.needsUpdate = L.g.attributes.color.needsUpdate = L.g.attributes.size.needsUpdate = true;
+}
+
+// ───────────────────────────── Start ─────────────────────────────
+
+const params = new URLSearchParams(location.search);
+resize();
+loadItem(params.get('item') in BUILDERS ? params.get('item') : 'wrench');
+if (params.has('demo')) {
+  // Preview: the right half fully restored, so before and after sit side by side.
+  const A = V.A, B = V.B;
+  for (let k = 0; k < V.nz; k++) for (let j = 0; j < V.ny; j++) for (let i = 0; i < V.nx; i++) {
+    const x = V.min.x + (i + 0.5) / V.nx * V.size.x, t = smooth(-0.08, 0.08, x), o = ((k * V.ny + j) * V.nx + i) * 4;
+    A[o] = 255 * t; B[o + 1] = 255 * t; B[o + 2] = 255 * t; B[o] = 255 * smooth(-0.25, -0.1, x) * (1 - t);
+  }
+  V.texA.needsUpdate = V.texB.needsUpdate = true;
+  holder.quaternion.setFromAxisAngle(axisY, -0.25);
+}
+requestAnimationFrame(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="rust-restoration"></script>
+</body>
+</html>
