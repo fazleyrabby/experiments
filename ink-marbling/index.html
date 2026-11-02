@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ink Marbling // 37</title>
+<style>
+  :root { --bg: #e7e1d5; --ink: #2b2722; --line: rgba(43, 39, 34, 0.26); --paper: #f5efe3; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .label, .controls, .actions {
+    position: fixed; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  }
+  .label { pointer-events: none; }
+  .label.left { left: 28px; bottom: 26px; }
+  .label.right { left: 28px; top: 24px; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.55; }
+  .label .touch { display: none; }
+  .controls { right: 28px; bottom: 26px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .row { display: flex; gap: 8px; }
+  button {
+    font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--ink);
+    background: transparent; border: 1px solid var(--line); padding: 5px 11px 4px; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s, color 0.2s;
+  }
+  button:hover { border-color: var(--ink); }
+  button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  button:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+  .swatches { display: flex; gap: 6px; }
+  .swatch { width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); position: relative; }
+  .swatch[aria-pressed="true"] { border-color: var(--ink); background: inherit; }
+  .swatch[aria-pressed="true"]::after { content: ""; position: absolute; inset: -5px; border: 1px solid var(--ink); }
+  .swatch.clear { background: repeating-linear-gradient(45deg, #f3f0e8 0 4px, #e3ddd0 4px 5px); }
+
+  /* Printing: the sheet lays on the water, soaks, then flips over to show the print. */
+  .stage { position: fixed; inset: 0; pointer-events: none; perspective: 1800px; z-index: 5; transition: background 0.9s; }
+  .stage.lifted { background: rgba(231, 225, 213, 0.96); pointer-events: auto; }
+  .sheet {
+    position: absolute; transform-style: preserve-3d; opacity: 0;
+    transform: translateY(-36px) scale(1.03);
+    transition: left 1.2s cubic-bezier(.2,.75,.2,1), top 1.2s cubic-bezier(.2,.75,.2,1), width 1.2s cubic-bezier(.2,.75,.2,1),
+                height 1.2s cubic-bezier(.2,.75,.2,1), transform 1.2s cubic-bezier(.2,.75,.2,1), opacity 0.55s ease-out;
+  }
+  .sheet.laid { opacity: 1; transform: none; }
+  .sheet.lifted { transform: rotateY(180deg) rotateZ(-1.2deg); }
+  .face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: var(--paper); overflow: hidden;
+          box-shadow: 0 1px 2px rgba(40, 30, 20, 0.18), 0 8px 26px rgba(40, 30, 20, 0.16); }
+  .sheet.lifted .face { box-shadow: 0 2px 4px rgba(40, 30, 20, 0.16), 0 30px 70px rgba(40, 30, 20, 0.28); }
+  .face img { display: block; width: 100%; height: 100%; }
+  .back img { transform: scaleX(-1); opacity: 0; mix-blend-mode: multiply; filter: blur(0.8px) saturate(0.6); transition: opacity 1.4s; }
+  .sheet.soak .back img { opacity: 0.32; }
+  .front { transform: rotateY(180deg); }
+  .actions { left: 0; right: 0; bottom: 34px; display: flex; justify-content: center; gap: 10px; opacity: 0; pointer-events: none; transition: opacity 0.5s; z-index: 6; }
+  .actions.show { opacity: 1; pointer-events: auto; }
+  .actions a { color: inherit; text-decoration: none; }
+  .actions button, .actions a { background: var(--bg); border: 1px solid var(--line); padding: 7px 14px 6px; }
+  .actions a:hover { border-color: var(--ink); }
+
+  @media (hover: none) {
+    .label .mouse { display: none; }
+    .label .touch { display: inline; }
+  }
+  @media (max-width: 720px) {
+    .label, .controls, .actions { font-size: 10px; }
+    .label.left { left: 18px; right: 18px; bottom: 116px; }
+    .label.right { top: 16px; left: 18px; }
+    .label.visits { top: 16px; right: 18px; }
+    .controls { left: 18px; right: 18px; bottom: 18px; align-items: stretch; }
+    .row { justify-content: space-between; gap: 6px; }
+    .row button { flex: 1; padding-left: 4px; padding-right: 4px; }
+    .swatches { justify-content: space-between; }
+    .swatch { flex: 1; height: 26px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label left">
+  <div>Ink Marbling // 37</div>
+  <div class="hint">
+    <span class="mouse">Click the water to drop ink / Hold to let it spread<br>Drag to swirl / Print to lift it onto paper</span>
+    <span class="touch">Tap the water to drop ink / Hold to let it spread<br>Drag to swirl / Print to lift it onto paper</span>
+  </div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+<div class="controls">
+  <div class="swatches" id="swatches"></div>
+  <div class="row">
+    <button type="button" id="stylus" aria-pressed="true">Stylus</button>
+    <button type="button" id="comb" aria-pressed="false">Comb</button>
+    <button type="button" id="sound" aria-pressed="true">Sound</button>
+    <button type="button" id="clear">Clear</button>
+    <button type="button" id="print">Print</button>
+  </div>
+</div>
+<div class="stage" id="printStage">
+  <div class="sheet" id="sheet">
+    <div class="face back"><img id="backImg" alt=""></div>
+    <div class="face front"><img id="frontImg" alt="Your marbled print"></div>
+  </div>
+</div>
+<div class="actions" id="actions">
+  <a id="save" href="#" download="ink-marbling.png">Save print</a>
+  <button type="button" id="again">Back to the water</button>
+</div>
+
+<script>
+'use strict';
+
+// ───────────────────────────── Config ─────────────────────────────
+
+const WATER = '#efece4';
+const INKS = [
+  { name: 'Sumi', color: '#1f1d1c' },
+  { name: 'Indigo', color: '#28406d' },
+  { name: 'Vermilion', color: '#c2432b' },
+  { name: 'Ochre', color: '#d29c3a' },
+  { name: 'Pine', color: '#2f6b5f' },
+  { name: 'Clear', color: WATER },        // surfactant: pushes ink apart and leaves a pale ring
+];
+const MAX_EDGE = 2.2;          // longest polygon edge before it is split, tray pixels
+const MIN_EDGE = 0.45;         // shorter edges are merged
+const MAX_VERTS = 240000;      // oldest ink is dropped beyond this
+const STEP = 3;                // tool strokes are applied in steps this long
+const STYLUS = 15;             // stylus falloff length
+const COMB = { falloff: 8, spacing: 30 };
+
+// ─────────────────────────── Ink on water ───────────────────────────
+// Each drop is a closed polygon in tray coordinates, oldest first. Ink never mixes: a new drop
+// of radius r pushes every point outward, P' = C + (P − C)·√(1 + r²/|P − C|²), which keeps each
+// region's area. Tools drag points along the stroke with a falloff by distance.
+
+let polys = [];
+let base = WATER;              // colour under everything once an old drop has covered the whole tray
+let TW = 1, TH = 1;            // tray size
+let dirty = true;
+
+function circle(cx, cy, r) {
+  const n = Math.max(24, Math.ceil(2 * Math.PI * r / (MAX_EDGE * 0.8)));
+  const p = new Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2;
+    p[i * 2] = cx + Math.cos(a) * r;
+    p[i * 2 + 1] = cy + Math.sin(a) * r;
+  }
+  return p;
+}
+
+function shade(hex, k) {
+  const v = parseInt(hex.slice(1), 16);
+  const f = c => Math.round(Math.max(0, Math.min(255, c * k)));
+  return `rgb(${f(v >> 16)}, ${f((v >> 8) & 255)}, ${f(v & 255)})`;
+}
+
+function pushOut(cx, cy, r2, skip) {
+  for (const poly of polys) {
+    if (poly === skip) continue;
+    const p = poly.p;
+    for (let i = 0; i < p.length; i += 2) {
+      const dx = p[i] - cx, dy = p[i + 1] - cy;
+      const k = Math.sqrt(1 + r2 / (dx * dx + dy * dy + 1e-6));
+      p[i] = cx + dx * k;
+      p[i + 1] = cy + dy * k;
+    }
+  }
+}
+
+// One step of a tool, from (ax, ay) to (bx, by).
+function drag(ax, ay, bx, by, tool) {
+  const vx = bx - ax, vy = by - ay, len = Math.hypot(vx, vy);
+  if (len < 1e-3) return;
+  if (tool === 'stylus') {
+    const reach = STYLUS * 7, l2 = len * len;
+    for (const poly of polys) {
+      const b = poly.bb;
+      if (bx < b[0] - reach || bx > b[2] + reach || by < b[1] - reach || by > b[3] + reach) continue;
+      const p = poly.p;
+      for (let i = 0; i < p.length; i += 2) {
+        const px = p[i] - ax, py = p[i + 1] - ay;
+        let t = (px * vx + py * vy) / l2;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const d = Math.hypot(px - vx * t, py - vy * t);
+        if (d > reach) continue;
+        const f = Math.exp(-d / STYLUS);
+        p[i] += vx * f; p[i + 1] += vy * f;
+      }
+    }
+  } else {
+    // A comb is a row of tines spanning the tray, perpendicular to the stroke. Drawn through the
+    // bath it shears it: ink slides along with the nearest tine line by an amount that depends only
+    // on how far it is from that line, so nothing piles up ahead of the tines.
+    const nx = -vy / len, ny = vx / len, sp = COMB.spacing;
+    for (const poly of polys) {
+      const p = poly.p;
+      for (let i = 0; i < p.length; i += 2) {
+        const s = (p[i] - bx) * nx + (p[i + 1] - by) * ny;
+        const f = Math.exp(-Math.abs(s - Math.round(s / sp) * sp) / COMB.falloff);
+        p[i] += vx * f; p[i + 1] += vy * f;
+      }
+    }
+  }
+}
+
+function stroke(ax, ay, bx, by, tool) {
+  const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / STEP));
+  for (let s = 0; s < n; s++) {
+    drag(ax + (bx - ax) * s / n, ay + (by - ay) * s / n, ax + (bx - ax) * (s + 1) / n, ay + (by - ay) * (s + 1) / n, tool);
+  }
+  refine();
+}
+
+function inside(p, x, y) {
+  let c = false;
+  for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+    const yi = p[i + 1], yj = p[j + 1];
+    if ((yi > y) !== (yj > y) && x < (p[j] - p[i]) * (y - yi) / (yj - yi) + p[i]) c = !c;
+  }
+  return c;
+}
+
+// Keep edges short enough to stay smooth and long enough to stay cheap, and retire ink that has
+// left the tray. An outline that lies wholly outside either covers the whole tray (it becomes
+// the base colour, hiding everything older) or none of it.
+function refine() {
+  let total = 0;
+  const pad = 3;
+  for (let k = 0; k < polys.length; k++) {
+    const poly = polys[k], p = poly.p, n = p.length / 2;
+    const out = [];
+    let px = p[0], py = p[1], minx = px, miny = py, maxx = px, maxy = py, onTray = 0;
+    out.push(px, py);
+    for (let i = 1; i <= n; i++) {
+      const j = (i % n) * 2, x = p[j], y = p[j + 1];
+      const dx = x - px, dy = y - py, len = Math.hypot(dx, dy);
+      if (len < MIN_EDGE && i < n) continue;
+      if (len > MAX_EDGE) {
+        const m = Math.ceil(len / MAX_EDGE);
+        for (let s = 1; s < m; s++) out.push(px + dx * s / m, py + dy * s / m);
+      }
+      if (i < n) out.push(x, y);
+      px = x; py = y;
+      if (x < minx) minx = x; else if (x > maxx) maxx = x;
+      if (y < miny) miny = y; else if (y > maxy) maxy = y;
+      if (x > -pad && x < TW + pad && y > -pad && y < TH + pad) onTray++;
+    }
+    poly.p = out.length >= 16 ? out : p;
+    poly.bb = [minx, miny, maxx, maxy];
+    if (!onTray) {
+      if (inside(poly.p, TW / 2, TH / 2)) { base = poly.color; polys.splice(0, k + 1); k = -1; total = 0; }
+      else { polys.splice(k, 1); k--; }
+      continue;
+    }
+    total += poly.p.length / 2;
+  }
+  while (total > MAX_VERTS && polys.length > 1) total -= polys.shift().p.length / 2;
+  dirty = true;
+}
+
+function addDrop(cx, cy, r, color) {
+  pushOut(cx, cy, r * r, null);
+  polys.push({ p: circle(cx, cy, r), color, rim: shade(color, color === WATER ? 0.93 : 0.72), bb: [cx - r, cy - r, cx + r, cy + r] });
+  refine();
+}
+
+function clearWater() { polys = []; base = WATER; dirty = true; }
+
+// ───────────────────────────── Drawing ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+let dpr = 1, W = 0, H = 0;
+const tray = { x: 0, y: 0 };
+const ripples = [];
+
+// Fine paper-like grain over the water, tiled.
+const grain = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 192;
+  const g = c.getContext('2d');
+  const img = g.createImageData(192, 192);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 128 + (Math.random() - 0.5) * 90;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+})();
+let grainPattern = null;
+
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+
+function tracePoly(g, p) {
+  g.beginPath();
+  g.moveTo(p[0], p[1]);
+  for (let i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]);
+  g.closePath();
+}
+
+function draw(now) {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  // The tray: a dark walnut frame with a soft shadow on the table.
+  const rim = Math.max(10, Math.min(18, TW * 0.02));
+  ctx.save();
+  ctx.shadowColor = 'rgba(50, 35, 20, 0.35)';
+  ctx.shadowBlur = 40; ctx.shadowOffsetY = 18;
+  roundRect(ctx, tray.x - rim, tray.y - rim, TW + rim * 2, TH + rim * 2, 10);
+  const wood = ctx.createLinearGradient(tray.x, tray.y - rim, tray.x + TW, tray.y + TH + rim);
+  wood.addColorStop(0, '#5a4433'); wood.addColorStop(1, '#2e231b');
+  ctx.fillStyle = wood;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  roundRect(ctx, tray.x, tray.y, TW, TH, 4);
+  ctx.clip();
+  ctx.translate(tray.x, tray.y);
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, TW, TH);
+  ctx.lineWidth = 0.9;
+  for (const poly of polys) {
+    tracePoly(ctx, poly.p);
+    ctx.fillStyle = poly.color;
+    ctx.fill();
+    ctx.strokeStyle = poly.rim;
+    ctx.globalAlpha = 0.55;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // Water: grain, a broad sheen, and the rings a fresh drop sends out.
+  if (!grainPattern) grainPattern = ctx.createPattern(grain, 'repeat');
+  ctx.globalAlpha = 0.05;
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.fillStyle = grainPattern;
+  ctx.fillRect(0, 0, TW, TH);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  const sheen = ctx.createLinearGradient(0, 0, TW, TH);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.16)');
+  sheen.addColorStop(0.45, 'rgba(255,255,255,0)');
+  sheen.addColorStop(1, 'rgba(255,255,255,0.07)');
+  ctx.fillStyle = sheen;
+  ctx.fillRect(0, 0, TW, TH);
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const rp = ripples[i], t = (now - rp.t) / 1100;
+    if (t >= 1) { ripples.splice(i, 1); continue; }
+    const r = rp.r + 70 * t;
+    ctx.beginPath(); ctx.arc(rp.x, rp.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,255,255,${0.45 * (1 - t)})`; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.beginPath(); ctx.arc(rp.x, rp.y, r + 2.5, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(40,30,20,${0.12 * (1 - t)})`; ctx.lineWidth = 1; ctx.stroke();
+  }
+  // Inner lip of the tray.
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = 'rgba(30,20,10,0.12)';
+  ctx.strokeRect(-1, -1, TW + 2, TH + 2);
+  ctx.restore();
+}
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  const narrow = W < 720;
+  const top = narrow ? 64 : 72, bottom = narrow ? 196 : 132, side = narrow ? 28 : 64;
+  let w = W - side * 2, h = H - top - bottom;
+  if (w / h > 1.6) w = h * 1.6;
+  if (h / w > 1.35) h = w * 1.35;
+  // Keep the ink's proportions when the tray changes shape: scale evenly about the centre.
+  if (polys.length && TW > 1) {
+    const k = Math.min(w / TW, h / TH), ox = TW / 2, oy = TH / 2, nx = w / 2, ny = h / 2;
+    for (const poly of polys) {
+      for (let i = 0; i < poly.p.length; i += 2) {
+        poly.p[i] = nx + (poly.p[i] - ox) * k;
+        poly.p[i + 1] = ny + (poly.p[i + 1] - oy) * k;
+      }
+    }
+  }
+  TW = Math.max(100, w); TH = Math.max(100, h);
+  tray.x = (W - TW) / 2;
+  tray.y = top + (H - top - bottom - TH) / 2;
+  if (polys.length) refine();
+  dirty = true;
+}
+addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, soundOn = true;
+const soundBtn = document.getElementById('sound');
+try { if (localStorage.getItem('ink-marbling:sound') === 'off') soundOn = false; } catch { /* storage blocked */ }
+soundBtn.setAttribute('aria-pressed', String(soundOn));
+
+function ensureAudio() {
+  if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; } }
+  if (audio.state === 'suspended') audio.resume();
+  return audio;
+}
+
+function plip(size) {
+  if (!soundOn || !audio) return;
+  const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain();
+  const f = 1500 - Math.min(1, size) * 700 + Math.random() * 200;
+  o.type = 'sine';
+  o.frequency.setValueAtTime(f, t);
+  o.frequency.exponentialRampToValueAtTime(f * 0.32, t + 0.11);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.16, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+  o.connect(g).connect(audio.destination);
+  o.start(t); o.stop(t + 0.2);
+}
+
+function rustle(duration) {
+  if (!soundOn || !audio) return;
+  const t = audio.currentTime, len = Math.floor(audio.sampleRate * duration);
+  const buf = audio.createBuffer(1, len, audio.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (0.6 + 0.4 * Math.sin(i / len * Math.PI * 7) ** 2);
+  const src = audio.createBufferSource(), bp = audio.createBiquadFilter(), g = audio.createGain();
+  src.buffer = buf;
+  bp.type = 'bandpass'; bp.frequency.value = 2400; bp.Q.value = 0.6;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.09, t + duration * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+  src.connect(bp).connect(g).connect(audio.destination);
+  src.start(t);
+}
+
+// ──────────────────────────── Controls ────────────────────────────
+
+let inkIndex = 0, tool = 'stylus';
+const swatchBox = document.getElementById('swatches');
+INKS.forEach((ink, i) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'swatch' + (ink.color === WATER ? ' clear' : '');
+  if (ink.color !== WATER) b.style.background = ink.color;
+  b.setAttribute('aria-label', ink.name + ' ink');
+  b.title = ink.name;
+  b.addEventListener('click', () => setInk(i));
+  swatchBox.appendChild(b);
+});
+function setInk(i) {
+  inkIndex = i;
+  [...swatchBox.children].forEach((b, j) => b.setAttribute('aria-pressed', String(j === i)));
+  updateStatus();
+}
+function setTool(t) {
+  tool = t;
+  document.getElementById('stylus').setAttribute('aria-pressed', String(t === 'stylus'));
+  document.getElementById('comb').setAttribute('aria-pressed', String(t === 'comb'));
+  updateStatus();
+}
+let lastStatus = '';
+function updateStatus() {
+  const text = `${INKS[inkIndex].name} / ${tool === 'comb' ? 'Comb' : 'Stylus'}`;
+  if (text !== lastStatus) statusEl.textContent = lastStatus = text;
+}
+setInk(0);
+setTool('stylus');
+
+document.getElementById('stylus').addEventListener('click', () => setTool('stylus'));
+document.getElementById('comb').addEventListener('click', () => setTool('comb'));
+document.getElementById('clear').addEventListener('click', () => { clearWater(); ensureAudio(); rustle(0.35); });
+soundBtn.addEventListener('click', () => {
+  soundOn = !soundOn;
+  soundBtn.setAttribute('aria-pressed', String(soundOn));
+  try { localStorage.setItem('ink-marbling:sound', soundOn ? 'on' : 'off'); } catch { /* storage blocked */ }
+});
+addEventListener('keydown', e => {
+  if (printing) return;
+  const k = e.key.toLowerCase();
+  if (k >= '1' && k <= String(INKS.length)) setInk(+k - 1);
+  else if (k === 'c') setInk((inkIndex + 1) % INKS.length);
+  else if (k === 's') setTool('stylus');
+  else if (k === 'k') setTool('comb');
+  else if (k === 'p') startPrint();
+  else if (k === 'backspace' || k === 'delete') clearWater();
+});
+
+// A press that stays put becomes a drop, growing for as long as it is held. One that moves is a stroke.
+const HOLD_MS = 140;
+let press = null, active = null;
+const toTray = e => [e.clientX - tray.x, e.clientY - tray.y];
+const onTray = ([x, y]) => x >= 0 && y >= 0 && x <= TW && y <= TH;
+
+// Grow a drop still settling from a quick tap to its full size at once, before the next one lands.
+function settleActive() {
+  if (!active) return;
+  const goal = TAP_R() ** 2;
+  if (active.r2 < goal) {
+    pushOut(active.x, active.y, goal - active.r2, active.poly);
+    active.poly.p = circle(active.x, active.y, Math.sqrt(goal));
+    refine();
+  }
+  active = null;
+}
+
+function startDrop(x, y) {
+  settleActive();
+  const color = INKS[inkIndex].color;
+  active = { x, y, r2: 4, color, holding: true, poly: { p: circle(x, y, 2), color, rim: shade(color, color === WATER ? 0.93 : 0.72), bb: [x - 2, y - 2, x + 2, y + 2] } };
+  pushOut(x, y, 4, null);
+  polys.push(active.poly);
+  ripples.push({ x, y, r: 6, t: performance.now() });
+  plip(0.2 + Math.random() * 0.3);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  if (printing || press) return;
+  const pt = toTray(e);
+  if (!onTray(pt)) return;
+  ensureAudio();
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+  press ={ id: e.pointerId, x0: pt[0], y0: pt[1], last: pt, t0: performance.now(), mode: 'pending' };
+});
+canvas.addEventListener('pointermove', e => {
+  if (!press || e.pointerId !== press.id) return;
+  const pt = toTray(e);
+  const moved = Math.hypot(pt[0] - press.x0, pt[1] - press.y0);
+  if (press.mode === 'pending' && moved > 6) press.mode = 'stroke';
+  if (press.mode === 'drop' && moved > 16) { active.holding = false; press.mode = 'stroke'; press.last = [active.x, active.y]; }
+  if (press.mode === 'stroke') {
+    stroke(press.last[0], press.last[1], pt[0], pt[1], tool);
+    press.last = pt;
+  }
+});
+function endPress(e) {
+  if (!press || e.pointerId !== press.id) return;
+  if (press.mode === 'pending') { startDrop(press.x0, press.y0); press.mode = 'drop'; }
+  if (active) active.holding = false;
+  press = null;
+}
+canvas.addEventListener('pointerup', endPress);
+canvas.addEventListener('pointercancel', endPress);
+
+// ───────────────────────────── Printing ─────────────────────────────
+// The paper takes the ink as it lies, so the print is the mirror image of the water. Clear
+// regions stay paper. Absorption is never perfectly even, so a few soft patches and specks fade.
+
+const stageEl = document.getElementById('printStage'), sheet = document.getElementById('sheet');
+const actions = document.getElementById('actions'), saveLink = document.getElementById('save');
+let printing = false, printURL = null;
+
+function makePrint() {
+  const s = 1600 / Math.max(TW, TH), w = Math.round(TW * s), h = Math.round(TH * s);
+  const ink = document.createElement('canvas');
+  ink.width = w; ink.height = h;
+  const g = ink.getContext('2d');
+  g.setTransform(-s, 0, 0, s, w, 0);
+  if (base !== WATER) { g.fillStyle = base; g.fillRect(0, 0, TW, TH); }
+  for (const poly of polys) {
+    tracePoly(g, poly.p);
+    g.globalCompositeOperation = poly.color === WATER ? 'destination-out' : 'source-over';
+    g.fillStyle = poly.color === WATER ? '#000' : poly.color;
+    g.fill();
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 26; i++) {
+    const x = Math.random() * w, y = Math.random() * h, r = (0.08 + Math.random() * 0.22) * w;
+    const rg = g.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, `rgba(0,0,0,${0.05 + Math.random() * 0.1})`);
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rg;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.3 + Math.random() * 0.5})`;
+    g.beginPath(); g.arc(Math.random() * w, Math.random() * h, 0.6 + Math.random() * 1.8, 0, Math.PI * 2); g.fill();
+  }
+
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const o = out.getContext('2d');
+  o.fillStyle = '#f5efe3';
+  o.fillRect(0, 0, w, h);
+  for (let i = 0; i < 5000; i++) {
+    const x = Math.random() * w, y = Math.random() * h, a = Math.random() * Math.PI, l = 3 + Math.random() * 9;
+    o.strokeStyle = `rgba(120,100,70,${0.03 + Math.random() * 0.05})`;
+    o.lineWidth = 0.6;
+    o.beginPath(); o.moveTo(x, y); o.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); o.stroke();
+  }
+  o.globalCompositeOperation = 'multiply';
+  o.globalAlpha = 0.94;
+  o.drawImage(ink, 0, 0);
+  o.globalAlpha = 1;
+  o.globalCompositeOperation = 'source-over';
+  const edge = o.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.75);
+  edge.addColorStop(0, 'rgba(120,95,60,0)');
+  edge.addColorStop(1, 'rgba(120,95,60,0.12)');
+  o.fillStyle = edge;
+  o.fillRect(0, 0, w, h);
+  return out;
+}
+
+function place(el, x, y, w, h) {
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.style.width = w + 'px'; el.style.height = h + 'px';
+}
+
+function startPrint() {
+  if (printing) return;
+  printing = true;
+  ensureAudio();
+  const art = makePrint();
+  art.toBlob(blob => {
+    if (printURL) URL.revokeObjectURL(printURL);
+    printURL = URL.createObjectURL(blob);
+    document.getElementById('frontImg').src = printURL;
+    document.getElementById('backImg').src = printURL;
+    saveLink.href = printURL;
+
+    sheet.style.transition = 'none';
+    sheet.className = 'sheet';
+    place(sheet, tray.x, tray.y, TW, TH);
+    void sheet.offsetWidth;
+    sheet.style.transition = '';
+    rustle(0.7);
+    requestAnimationFrame(() => sheet.classList.add('laid'));
+    setTimeout(() => sheet.classList.add('soak'), 700);
+    setTimeout(() => {
+      clearWater();                            // the paper took the ink with it
+      const k = Math.min((W * (W < 720 ? 0.86 : 0.74)) / TW, (H * (W < 720 ? 0.6 : 0.66)) / TH);
+      const w = TW * k, h = TH * k;
+      place(sheet, (W - w) / 2, (H - h) / 2 - (W < 720 ? 30 : 20), w, h);
+      stageEl.classList.add('lifted');
+      sheet.classList.add('lifted');
+      rustle(1.1);
+    }, 2300);
+    setTimeout(() => actions.classList.add('show'), 3500);
+  }, 'image/png');
+}
+
+function endPrint() {
+  actions.classList.remove('show');
+  stageEl.classList.remove('lifted');
+  sheet.className = 'sheet lifted';
+  sheet.style.opacity = '0';
+  setTimeout(() => { sheet.style.opacity = ''; sheet.className = 'sheet'; printing = false; }, 600);
+}
+document.getElementById('print').addEventListener('click', startPrint);
+document.getElementById('again').addEventListener('click', endPrint);
+
+// ───────────────────────────── Frame ─────────────────────────────
+
+const GROW = () => (Math.min(TW, TH) * 0.3) ** 2 / 2.6;     // r² per second while held
+const TAP_R = () => Math.max(14, Math.min(TW, TH) * 0.045);
+
+function frame(now) {
+  if (press && press.mode === 'pending' && now - press.t0 > HOLD_MS) { startDrop(press.x0, press.y0); press.mode = 'drop'; }
+  if (active) {
+    const goal = TAP_R() ** 2, rate = GROW() * (active.holding ? 1 : 3);
+    const dt = Math.min(0.05, (now - (active.t || now)) / 1000) || 1 / 60;
+    active.t = now;
+    let dr2 = rate * dt;
+    if (!active.holding) dr2 = Math.min(dr2, Math.max(0, goal - active.r2));
+    if (active.holding && active.r2 > (Math.min(TW, TH) * 0.34) ** 2) dr2 = 0;
+    if (dr2 > 0) {
+      active.r2 += dr2;
+      pushOut(active.x, active.y, dr2, active.poly);
+      const r = Math.sqrt(active.r2);
+      active.poly.p = circle(active.x, active.y, r);
+      active.poly.bb = [active.x - r, active.y - r, active.x + r, active.y + r];
+      refine();
+    }
+    if (!active.holding && active.r2 >= goal - 0.5) active = null;
+    else if (!active.holding && dr2 === 0) active = null;
+  }
+  if (dirty || ripples.length) { draw(now); dirty = false; }
+  requestAnimationFrame(frame);
+}
+
+// A first bloom so the water is never empty: alternating sumi, indigo and clear rings.
+const params = new URLSearchParams(location.search);
+function bloom(cx, cy, colors, r) { colors.forEach(c => addDrop(cx, cy, r, c)); }
+if (params.has('demo')) {
+  // Preview: a grid of ring stacks, combed one way and then back for feathers.
+  // Every drop pushes all the others outward, so the stacks go down in a shuffled order and small
+  // enough that the earliest are not pushed off the tray.
+  const cols = 7, rows = 5, spots = [];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) spots.push([i, j]);
+  for (let k = spots.length - 1; k > 0; k--) { const m = (k * 7919) % (k + 1); [spots[k], spots[m]] = [spots[m], spots[k]]; }
+  for (const [i, j] of spots) {
+    const set = [[INKS[1].color, WATER, INKS[3].color, WATER, INKS[2].color], [INKS[0].color, WATER, INKS[1].color, WATER, INKS[4].color]][(i + j) % 2];
+    bloom((i + 0.5 + (j % 2 ? 0.25 : -0.25)) * TW / cols, (j + 0.5) * TH / rows, set, Math.min(TW, TH) * 0.034);
+  }
+  // Nonpareil: comb across and back with the tines shifted half a gap, then once downward.
+  const d = TW * 0.09, half = COMB.spacing / 2;
+  stroke(TW * 0.5 - d / 2, TH * 0.5, TW * 0.5 + d / 2, TH * 0.5, 'comb');
+  stroke(TW * 0.5 + d / 2, TH * 0.5 + half, TW * 0.5 - d / 2, TH * 0.5 + half, 'comb');
+  stroke(TW * 0.5, TH * 0.5 - d / 2, TW * 0.5, TH * 0.5 + d / 2, 'comb');
+} else {
+  const seq = [INKS[0].color, WATER, INKS[1].color, WATER, INKS[0].color, WATER, INKS[2].color];
+  seq.forEach((c, i) => setTimeout(() => {
+    addDrop(TW / 2, TH / 2, Math.min(TW, TH) * 0.06, c);
+    ripples.push({ x: TW / 2, y: TH / 2, r: 10, t: performance.now() });
+  }, 400 + i * 220));
+}
+requestAnimationFrame(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="ink-marbling"></script>
+</body>
+</html>

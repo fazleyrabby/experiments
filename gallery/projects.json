@@ -1,5 +1,11 @@
 [
   {
+    "slug": "ink-marbling",
+    "title": "Ink Marbling",
+    "category": "Play",
+    "description": "Float ink on water, comb it into feathers, and lift it off as a print."
+  },
+  {
     "slug": "chladni-plate",
     "title": "Chladni Plate",
     "category": "Play",
