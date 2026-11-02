@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Living Nature</title>
+<meta name="description" content="A living pixel-art lakeside with a day and night cycle, weather and spatial ambient sound.">
+<style>
+  :root { --bg: #070b10; --ink: #eef3e6; --chip: rgba(10, 16, 22, 0.66); --line: rgba(238, 243, 230, 0.16); --accent: #9fe08a; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; color: var(--ink); }
+  body { font: 500 11px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; -webkit-font-smoothing: antialiased; }
+  #stage { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); image-rendering: pixelated; image-rendering: crisp-edges; display: block; background: #000; }
+  #stage:focus { outline: none; }
+</style>
+</head>
+<body>
+<canvas id="stage" width="480" height="270" tabindex="0" aria-label="Animated pixel-art lakeside landscape"></canvas>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

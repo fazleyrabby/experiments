@@ -1,5 +1,11 @@
 [
   {
+    "slug": "living-nature",
+    "title": "Living Nature",
+    "category": "Worlds",
+    "description": "A pixel-art lakeside that cycles through day, night and weather, with sounds placed in the scene."
+  },
+  {
     "slug": "lawn-mowing",
     "title": "Lawn Day",
     "category": "Play",
