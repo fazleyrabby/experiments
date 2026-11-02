@@ -139,12 +139,29 @@ if (!CAPTURE) {
       if (o.camTarget !== undefined) cam.tx = o.camTarget;
       if (o.hour !== undefined) { state.hour = o.hour; }
     },
-    step(dt, hour) {
+    step(dt, hour, focus) {
       state.hour = hour;
       const e = tick(dt, true);
-      log.env.push({ t: state.t, hour: e.hour, wind: e.wind, windT: e.windT, rain: e.rain, cover: e.cover, mist: e.mist, lights: e.lights, night: e.night, camX: e.camX });
+      log.env.push({ t: state.t, hour: e.hour, wind: e.wind, windT: e.windT, rain: e.rain, cover: e.cover, mist: e.mist, lights: e.lights, night: e.night, camX: e.camX, focus });
     },
-    png: () => canvas.toDataURL('image/png').split(',')[1],
+    // 1920x1080 frame; view = {cx, cy, z} crops into the scene (centre in land coordinates, z = zoom)
+    png(view) {
+      if (!this._big) {
+        this._big = document.createElement('canvas'); this._big.width = 1920; this._big.height = 1080;
+        this._out = document.createElement('canvas'); this._out.width = 1920; this._out.height = 1080;
+        this._big.getContext('2d').imageSmoothingEnabled = false;
+      }
+      const b = this._big.getContext('2d');
+      b.drawImage(canvas, 0, 0, 1920, 1080); // exact 4x nearest-neighbour
+      if (!view || view.z <= 1.001) return this._big.toDataURL('image/png').split(',')[1];
+      const o = this._out.getContext('2d');
+      o.imageSmoothingEnabled = true; o.imageSmoothingQuality = 'high';
+      const w = 480 / view.z, h = 270 / view.z;
+      const cx = Math.min(480 - w / 2, Math.max(w / 2, view.cx - Math.round(cam.x * 13))); // follow the land layer's parallax
+      const cy = Math.min(270 - h / 2, Math.max(h / 2, view.cy));
+      o.drawImage(this._big, (cx - w / 2) * 4, (cy - h / 2) * 4, w * 4, h * 4, 0, 0, 1920, 1080);
+      return this._out.toDataURL('image/png').split(',')[1];
+    },
     async audio(duration, volume) {
       const a = new NatureAudio();
       const buf = await a.renderOffline({ duration, envLog: log.env, events: log.events, volume });

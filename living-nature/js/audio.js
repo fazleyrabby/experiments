@@ -169,12 +169,13 @@ export class NatureAudio {
     input.connect(lp); lp.connect(pan); pan.connect(this.mixIn); lp.connect(rs); rs.connect(this.conv);
     return { input, pan, w, gainAtten: 1 / (1 + w.d / 14) };
   }
-  setListener(x) {
-    const L = this.ctx.listener;
+  // x: head position in metres; yaw: radians to turn toward the point of interest (zoomed shots)
+  setListener(x, yaw = 0) {
+    const L = this.ctx.listener, fx = Math.sin(yaw), fz = -Math.cos(yaw);
     if (L.positionX) {
       L.positionX.value = x; L.positionY.value = 1.6; L.positionZ.value = 0;
-      L.forwardX.value = 0; L.forwardY.value = 0; L.forwardZ.value = -1; L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
-    } else { L.setPosition(x, 1.6, 0); L.setOrientation(0, 0, -1, 0, 1, 0); }
+      L.forwardX.value = fx; L.forwardY.value = 0; L.forwardZ.value = fz; L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
+    } else { L.setPosition(x, 1.6, 0); L.setOrientation(fx, 0, fz, 0, 1, 0); }
   }
 
   // ---------- continuous layers ----------
@@ -483,17 +484,19 @@ export class NatureAudio {
     const warm = h >= 12 ? smooth(24, 19, h) : smooth(3, 5.5, h);
     const T = (p, v, tc = 1.4) => p.setTargetAtTime(v, now, tc);
 
-    this.setListener(env.camX * 2.5);
+    // zoomed shots: the sound image turns toward the subject and its sources come forward
+    const fc = env.focus?.cabin || 0, fb = env.focus?.bridge || 0, fm = Math.max(fc, fb);
+    this.setListener(env.camX * 2.5, -0.5 * fc + 0.29 * fb);
     // context: fog and rain muffle the air; night stretches the reverb tail
     T(this.air.frequency, 16500 - env.mist * 7500 - rain * 2600, 1.2);
     this.revBoost = (1 + night * 0.5 + env.mist * 0.3) * (1 + rain * 0.2);
     T(this.revOut.gain, 0.8 * this.revBoost, 1.5);
 
     // beds
-    T(this.lake.gain, 0.2 + wind * 0.12 + night * 0.04 - rain * 0.04, 2);
-    T(this.stream.gain, 0.42 + night * 0.1, 2);
+    T(this.lake.gain, (0.2 + wind * 0.12 + night * 0.04 - rain * 0.04) * (1 - 0.35 * fm), 1.2);
+    T(this.stream.gain, (0.42 + night * 0.1) * (1 + 0.7 * fb), 1.2);
     const g1 = wind * wind;
-    T(this.windBody.gain, g1 * 0.5 + 0.015, 0.5);
+    T(this.windBody.gain, (g1 * 0.5 + 0.015) * (1 - 0.3 * fm), 0.5);
     T(this.windBp.frequency, 280 + wind * 800, 0.6);
     this.windPan.pan.setTargetAtTime(Math.sin(env.windT * 0.23) * 0.65, now, 0.3);
     const foliage = 0.35 + 0.65 * (1 - night * 0.6);
@@ -501,7 +504,7 @@ export class NatureAudio {
     this.rainWash.forEach((g) => T(g.gain, Math.pow(rain, 1.2) * 0.14, 1.8));
     T(this.rainBody.gain, rain * 0.2, 1.8);
     const fireOn = env.lights * (1 - 0.3 * rain);
-    T(this.fire.gain, fireOn * 0.09, 2);
+    T(this.fire.gain, fireOn * 0.09 * (1 + 2.4 * fc), 1.2);
     T(this.cricketBus.gain, cAct * 0.85, 2.5);
     for (const k of this.crickets) T(k.trill.frequency, k.base * lerp(0.8, 1.14, warm), 3);
 
@@ -532,7 +535,7 @@ export class NatureAudio {
     tm.pop -= dt;
     if (fireOn > 0.1 && tm.pop <= 0) {
       tm.pop = rnd(0.12, 0.6);
-      this.tick(clamp(-0.55 + rnd(-0.1, 0.1) - env.camX * 0.2, -1, 1), rnd(1200, 4200), 0.1 * fireOn, rnd(0.015, 0.045));
+      this.tick(clamp(-0.55 * (1 - 0.8 * fc) + rnd(-0.1, 0.1) - env.camX * 0.2, -1, 1), rnd(1200, 4200), 0.1 * fireOn * (1 + 1.6 * fc), rnd(0.015, 0.045));
     }
     tm.bubble -= dt;
     if (tm.bubble <= 0) {
