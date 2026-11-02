@@ -973,14 +973,14 @@ function frame() {
   if (mowing) target.copy(ground);
   if (tool === 'mower' && down && ground) {
     const dx = target.x - mower.position.x, dz = target.z - mower.position.z, d = Math.hypot(dx, dz);
-    const want = d > 0.12 ? Math.min(1.7, d * 3) : 0;
+    const want = d > 0.12 ? Math.min(1.8, d * 3.5) : 0;
     mowerSpeed += (want - mowerSpeed) * Math.min(1, dt * 4);
     if (d > 0.12) {
       let diff = Math.atan2(dx, dz) - heading;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      // A push mower turns on the spot slowly and drives mostly straight.
-      heading += Math.max(-dt * 2.6, Math.min(dt * 2.6, diff));
-      const fwd = Math.max(0, Math.cos(diff));
+      // Tipped back on its rear wheels a push mower pivots quickly, still rolling a little as it turns.
+      heading += Math.max(-dt * 4.2, Math.min(dt * 4.2, diff));
+      const fwd = Math.max(0.3, Math.cos(diff));
       mower.position.x += Math.sin(heading) * mowerSpeed * fwd * dt;
       mower.position.z += Math.cos(heading) * mowerSpeed * fwd * dt;
       rolled += mowerSpeed * fwd * dt;
