@@ -1,5 +1,11 @@
 [
   {
+    "slug": "high-road",
+    "title": "The High Road",
+    "category": "Worlds",
+    "description": "An endless drive across a high plateau toward a snow dome under its cap cloud, by day or by starlight, all generated in code."
+  },
+  {
     "slug": "living-nature",
     "title": "Living Nature",
     "category": "Worlds",
