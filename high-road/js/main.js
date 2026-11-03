@@ -156,7 +156,7 @@ function applyLight(key) {
   shared.uHeadOn.value = night ? 450 : 0;
   shared.uLampBoost.value = night ? 12 : 1;
   glow = night;
-  audio.setNight?.(night);
+  audio.setMood(key);
   clouds.reset();
   const btn = $('lightBtn');
   if (btn) btn.textContent = L.label;
@@ -252,13 +252,22 @@ function render() {
   r.render(quadScene, quadCam);
 }
 
+// Offline capture drives the clock itself (see window.__hr.capture below).
+let manual = false;
+let fadeOverride = null;
+
 function tick(now) {
   requestAnimationFrame(tick);
   let dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if (document.hidden) return;
+  if (document.hidden || manual) return;
   adapt(dt);
   if (paused) dt = 0;
+  advance(dt);
+  render();
+}
+
+function advance(dt) {
   t += dt;
   s += SPEED * dt;
   if (s > PERIOD) { s -= PERIOD; traffic.wrap(); }
@@ -266,11 +275,10 @@ function tick(now) {
   clouds.update(dt, t);
   traffic.update(dt, t, s, SPEED, shared.uSunDir.value, glow);
   skyDome.material.uniforms.uTime.value = t;
-  fade = Math.min(1, fade + (now > 0 ? 0.02 : 0));
-  finalMat.uniforms.uFade.value = fade * fade;
+  fade = Math.min(1, fade + 0.02);
+  finalMat.uniforms.uFade.value = fadeOverride ?? fade * fade;
   finalMat.uniforms.uTime.value = t;
   audio.update(dt, traffic.list, s, SPEED);
-  render();
 }
 
 // ---------- UI ----------
@@ -350,6 +358,14 @@ async function start() {
   requestAnimationFrame(tick);
 }
 
-window.__hr = { THREE, farCam, nearCam, renderer, farScene, nearScene, ground, road, traffic, clouds, mountains, skyLUT, shared, composite, finalMat, get s() { return s; }, set s(v) { s = v; }, get t() { return t; }, get rtMain() { return rtMain; } };
+window.__hr = {
+  // deterministic capture: stop the live loop, then step and render at a fixed rate
+  capture: {
+    start() { manual = true; quality = 1; resize(); },
+    step(dt) { advance(dt); render(); },
+    light(key) { applyLight(key); },
+    fade(v) { fadeOverride = v; },
+  },
+  THREE, farCam, nearCam, renderer, farScene, nearScene, ground, road, traffic, clouds, mountains, skyLUT, shared, composite, finalMat, get s() { return s; }, set s(v) { s = v; }, get t() { return t; }, get rtMain() { return rtMain; } };
 
 start().catch((e) => { console.error(e); status('Something went wrong: ' + e.message); });
