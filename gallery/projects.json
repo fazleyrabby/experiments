@@ -1,5 +1,11 @@
 [
   {
+    "slug": "squeegee",
+    "title": "Squeegee",
+    "category": "Play",
+    "description": "Soap a filthy shop window and pull the squeegee through to the evening street outside."
+  },
+  {
     "slug": "high-road",
     "title": "The High Road",
     "category": "Worlds",

@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Squeegee // 40</title>
+<style>
+  :root { --bg: #0e0f13; --ink: #f1ebdf; --chip: rgba(20, 20, 24, 0.72); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  canvas#stage { touch-action: none; }
+  canvas#tools { pointer-events: none; }
+  body.using canvas#stage { cursor: none; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+  }
+  .label.left { left: 40px; }
+  .label.right { left: 40px; top: 34px; bottom: auto; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 34px; bottom: auto; right: 40px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.75; }
+  .label .touch { display: none; }
+  @media (hover: none) { .label .mouse { display: none; } .label .touch { display: inline; } }
+  .dock {
+    position: fixed; right: 36px; bottom: 34px; display: flex; gap: 6px; padding: 6px; border-radius: 999px;
+    background: var(--chip); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
+  .dock button {
+    all: unset; cursor: pointer; display: flex; align-items: center; gap: 7px; padding: 8px 14px 8px 10px; border-radius: 999px; color: var(--ink);
+    font: 600 10px/1 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif; letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .dock button svg { width: 20px; height: 20px; flex: none; }
+  .dock button kbd { font: inherit; opacity: 0.45; }
+  .dock button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+  .dock button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  @media (max-width: 860px) {
+    .dock { right: auto; left: 50%; transform: translateX(-50%); bottom: 84px; }
+    .dock button { padding: 9px; }
+    .dock button span, .dock button kbd { display: none; }
+  }
+  @media (max-width: 520px) {
+    .label { bottom: 26px; font-size: 10px; }
+    .label.left { left: 26px; right: 26px; }
+    .label.right { top: 26px; left: 26px; right: 120px; }
+    .label.visits { top: 26px; right: 26px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<canvas id="tools"></canvas>
+<div class="label left">
+  <div>Squeegee // 40</div>
+  <div class="hint">
+    <span class="mouse">Scrub on the suds, pull the squeegee in clean strokes, then towel the edges<br>1 · 2 · 3 to switch / N for a new dirty window</span>
+    <span class="touch">Scrub, squeegee, then towel the edges</span>
+  </div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+<nav class="dock" aria-label="Tools">
+  <button type="button" data-tool="scrub" aria-pressed="true" title="Scrubber (1)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="6" rx="3"/><path d="M5 8h.01M9 8h.01M13 8h.01M17 8h.01"/><path d="M12 11v10"/></svg>
+    <span>Scrubber</span><kbd>1</kbd>
+  </button>
+  <button type="button" data-tool="squeegee" aria-pressed="false" title="Squeegee (2)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M4 6V4h16v2"/><path d="M12 4l-2 9 2 8"/></svg>
+    <span>Squeegee</span><kbd>2</kbd>
+  </button>
+  <button type="button" data-tool="towel" aria-pressed="false" title="Towel (3)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M5 9h14M9 5v4"/></svg>
+    <span>Towel</span><kbd>3</kbd>
+  </button>
+  <button type="button" data-action="new" title="New dirty window (N)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
+    <span>New</span><kbd>N</kbd>
+  </button>
+</nav>
+
+<script type="module">
+import * as THREE from 'three';
+
+const mobile = matchMedia('(hover: none)').matches || Math.min(innerWidth, innerHeight) < 600;
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+
+// ───────────────────────────── The street outside ─────────────────────────────
+// Painted once onto a canvas: a dusk sky, the buildings across the road with their lit
+// windows and shop signs, lamps, and the wet road reflecting it all. The camera is focused
+// on the glass, so the whole view is blurred into bokeh before it is used.
+
+function paintStreet() {
+  const W = 2048, H = 1152, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, H * 0.5);
+  sky.addColorStop(0, '#16203a'); sky.addColorStop(0.55, '#3a3552'); sky.addColorStop(1, '#b0685a');
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  // Distant skyline.
+  for (let x = -40; x < W; x += rand(50, 120)) {
+    const h = rand(H * 0.12, H * 0.32), w = rand(60, 140);
+    g.fillStyle = `rgb(${30 + rand(0, 12)},${30 + rand(0, 12)},${48 + rand(0, 15)})`;
+    g.fillRect(x, H * 0.5 - h, w, h + 10);
+    for (let i = 0; i < w * h / 900; i++) if (Math.random() < 0.35) { g.fillStyle = Math.random() < 0.8 ? '#ffcf86' : '#9ec4ff'; g.fillRect(x + rand(4, w - 6), H * 0.5 - h + rand(4, h), 3, 4); }
+  }
+  // The block across the street: brick and render facades, windows, shopfronts at street level.
+  const signs = ['NOODLES', 'LAUNDRY', 'BOOKS', 'OPEN', 'FLOWERS', 'RAMEN', 'BAR', 'PHARMACY', 'VINYL', 'TAILOR'];
+  const neon = ['#ff4d6d', '#4dd2ff', '#ffd24d', '#7dff8a', '#ff8a3d', '#c77dff'];
+  let x = -30;
+  while (x < W) {
+    const w = rand(220, 380), top = H * rand(0.08, 0.3), base = H * 0.66;
+    const tone = rand(0.7, 1.15), brick = Math.random() < 0.6;
+    g.fillStyle = brick ? `rgb(${78 * tone | 0},${44 * tone | 0},${36 * tone | 0})` : `rgb(${92 * tone | 0},${86 * tone | 0},${80 * tone | 0})`;
+    g.fillRect(x, top, w, base - top);
+    g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(x + w - 6, top, 6, base - top);
+    // Upper-floor windows.
+    const cols = Math.max(2, Math.round(w / 70)), rows = Math.max(2, Math.round((base - top - 150) / 85));
+    for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
+      const wx = x + 18 + k * (w - 36) / cols, wy = top + 30 + r * 85, ww = (w - 36) / cols - 18, wh = 52;
+      const lit = Math.random(), col = lit < 0.42 ? (Math.random() < 0.85 ? '#ffc46e' : '#8fb8ff') : lit < 0.5 ? '#ff9e5a' : '#1a1b22';
+      g.fillStyle = col; g.fillRect(wx, wy, ww, wh);
+      if (lit < 0.5) { g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(wx, wy + wh * rand(0.2, 0.6), ww, 2); g.fillRect(wx + ww / 2 - 1, wy, 2, wh); }
+    }
+    // Shopfront with a glowing window and a neon sign.
+    g.fillStyle = '#ffd9a0'; g.globalAlpha = 0.85; g.fillRect(x + 20, base - 120, w - 40, 100); g.globalAlpha = 1;
+    g.fillStyle = 'rgba(40,20,10,0.5)'; for (let s = 0; s < 4; s++) g.fillRect(x + 30 + s * (w - 60) / 4, base - 110, (w - 60) / 4 - 14, 80);
+    const awn = neon[(Math.random() * neon.length) | 0];
+    g.fillStyle = `rgb(${rand(60, 140) | 0},${rand(30, 60) | 0},${rand(30, 60) | 0})`; g.fillRect(x + 10, base - 150, w - 20, 26);
+    g.font = '700 46px "Helvetica Neue", Arial, sans-serif'; g.textAlign = 'center';
+    g.shadowColor = awn; g.shadowBlur = 30; g.fillStyle = awn;
+    g.fillText(signs[(Math.random() * signs.length) | 0], x + w / 2, base - 172);
+    g.shadowBlur = 0;
+    x += w + rand(6, 20);
+  }
+  // Pavement, road, kerb.
+  g.fillStyle = '#2a2a30'; g.fillRect(0, H * 0.66, W, H * 0.05);
+  g.fillStyle = '#121318'; g.fillRect(0, H * 0.71, W, H * 0.29);
+  // Wet road: the lights above, smeared down as long reflections.
+  const above = g.getImageData(0, H * 0.4, W, H * 0.26);
+  const ref = document.createElement('canvas'); ref.width = W; ref.height = H * 0.26;
+  ref.getContext('2d').putImageData(above, 0, 0);
+  g.save(); g.globalAlpha = 0.4; g.translate(0, H * 1.42); g.scale(1, -1.15); g.filter = 'blur(6px)'; g.drawImage(ref, 0, 0); g.restore();
+  g.fillStyle = 'rgba(12,13,18,0.35)'; g.fillRect(0, H * 0.71, W, H * 0.29);
+  for (let i = 0; i < 6; i++) { g.fillStyle = 'rgba(230,220,180,0.5)'; g.fillRect(i * 380 + 60, H * 0.85, 160, 8); }
+  // Street lamps with their glow.
+  for (let lx = 180; lx < W; lx += 560) {
+    g.fillStyle = '#0b0b0e'; g.fillRect(lx, H * 0.35, 8, H * 0.36);
+    const glow = g.createRadialGradient(lx + 4, H * 0.35, 0, lx + 4, H * 0.35, 120);
+    glow.addColorStop(0, 'rgba(255,220,160,1)'); glow.addColorStop(0.15, 'rgba(255,200,130,0.6)'); glow.addColorStop(1, 'rgba(255,180,120,0)');
+    g.fillStyle = glow; g.fillRect(lx - 120, H * 0.35 - 120, 248, 240);
+  }
+  // Focus on the glass: everything outside goes soft, and the brightest points open into bokeh discs.
+  const out = document.createElement('canvas'); out.width = W; out.height = H;
+  const o = out.getContext('2d');
+  o.filter = 'blur(20px)'; o.drawImage(c, 0, 0); o.filter = 'none';
+  o.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 160; i++) {
+    const px = Math.random() * W, py = Math.random() * H * 0.72;
+    const d = g.getImageData(px | 0, py | 0, 1, 1).data;
+    if (d[0] + d[1] + d[2] < 420) continue;
+    const r = rand(16, 40);
+    const grd = o.createRadialGradient(px, py, r * 0.6, px, py, r);
+    grd.addColorStop(0, `rgba(${d[0]},${d[1]},${d[2]},0.16)`); grd.addColorStop(0.9, `rgba(${d[0]},${d[1]},${d[2]},0.22)`); grd.addColorStop(1, 'rgba(0,0,0,0)');
+    o.fillStyle = grd; o.beginPath(); o.arc(px, py, r, 0, Math.PI * 2); o.fill();
+  }
+  return out;
+}
+
+// The dirt that does not change: grime density, mineral water-spot rings, dust and handprint smudges.
+function paintGrime() {
+  const W = 1024, H = 576;
+  const layer = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, W, H); return [c, g]; };
+  const [c1, g1] = layer();       // film: blotchy, heavier at the bottom where the rain ran down
+  for (let i = 0; i < 260; i++) { const x = rand(0, W), y = rand(0, H), r = rand(20, 120); const grd = g1.createRadialGradient(x, y, 0, x, y, r); grd.addColorStop(0, `rgba(255,255,255,${rand(0.05, 0.22)})`); grd.addColorStop(1, 'rgba(255,255,255,0)'); g1.fillStyle = grd; g1.fillRect(x - r, y - r, r * 2, r * 2); }
+  const fade = g1.createLinearGradient(0, 0, 0, H); fade.addColorStop(0, 'rgba(255,255,255,0.25)'); fade.addColorStop(1, 'rgba(255,255,255,0.6)'); g1.fillStyle = fade; g1.fillRect(0, 0, W, H);
+  for (let i = 0; i < 70; i++) { const x = rand(0, W), y = rand(0, H * 0.7), l = rand(60, 300); g1.strokeStyle = `rgba(255,255,255,${rand(0.08, 0.25)})`; g1.lineWidth = rand(2, 6); g1.beginPath(); g1.moveTo(x, y); g1.bezierCurveTo(x + rand(-8, 8), y + l * 0.3, x + rand(-10, 10), y + l * 0.6, x + rand(-6, 6), y + l); g1.stroke(); }
+  const [c2, g2] = layer();       // dried water spots: rings with darker rims
+  for (let i = 0; i < 900; i++) { const x = rand(0, W), y = rand(0, H), r = rand(1.5, 7); g2.strokeStyle = `rgba(255,255,255,${rand(0.3, 0.8)})`; g2.lineWidth = rand(0.6, 1.6); g2.beginPath(); g2.ellipse(x, y, r, r * rand(0.8, 1.1), 0, 0, Math.PI * 2); g2.stroke(); g2.fillStyle = `rgba(255,255,255,${rand(0.05, 0.2)})`; g2.fill(); }
+  const [c3, g3] = layer();       // dust and specks
+  for (let i = 0; i < 6000; i++) { g3.fillStyle = `rgba(255,255,255,${rand(0.2, 1)})`; const s = rand(0.6, 2.2); g3.fillRect(rand(0, W), rand(0, H), s, s); }
+  const [c4, g4] = layer();       // handprints and finger smears
+  for (let h = 0; h < 4; h++) {
+    const hx = rand(W * 0.15, W * 0.85), hy = rand(H * 0.35, H * 0.85), sc = rand(0.8, 1.2), a = rand(-0.4, 0.4);
+    g4.save(); g4.translate(hx, hy); g4.rotate(a); g4.scale(sc, sc);
+    g4.fillStyle = 'rgba(255,255,255,0.35)';
+    g4.beginPath(); g4.ellipse(0, 0, 30, 36, 0, 0, Math.PI * 2); g4.fill();
+    for (let f = 0; f < 5; f++) { const fa = -1.9 + f * 0.42 + (f === 0 ? -0.5 : 0); g4.save(); g4.rotate(fa + Math.PI / 2); g4.beginPath(); g4.ellipse(0, -62 - (f === 0 ? -20 : 0), 9, f === 0 ? 20 : 26, 0, 0, Math.PI * 2); g4.fill(); g4.restore(); }
+    g4.restore();
+  }
+  for (let i = 0; i < 10; i++) { const x = rand(0, W), y = rand(H * 0.3, H); g4.strokeStyle = 'rgba(255,255,255,0.2)'; g4.lineWidth = rand(10, 18); g4.lineCap = 'round'; g4.beginPath(); g4.moveTo(x, y); g4.lineTo(x + rand(-40, 40), y + rand(30, 90)); g4.stroke(); }
+  const out = document.createElement('canvas'); out.width = W; out.height = H;
+  const o = out.getContext('2d'), img = o.createImageData(W, H);
+  const chan = (c, k) => { const d = c.getContext('2d').getImageData(0, 0, W, H).data; for (let i = 0; i < d.length; i += 4) img.data[i + k] = d[i]; };
+  chan(c1, 0); chan(c2, 1); chan(c3, 2);
+  const d4 = c4.getContext('2d').getImageData(0, 0, W, H).data;
+  for (let i = 0; i < d4.length; i += 4) img.data[i + 3] = 255;     // alpha would premultiply the others; smears go in their own texture
+  o.putImageData(img, 0, 0);
+  return { grime: out, smear: c4 };
+}
+
+// Gold-leaf sign lettering on the glass, read from inside the shop, so mirrored.
+function paintLettering() {
+  const W = 2048, H = 1152, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.translate(W, 0); g.scale(-1, 1);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const word = 'CORNER BAKERY', cx = W / 2, cy = H * 0.7, R = 560;
+  g.font = '800 104px Georgia, "Times New Roman", serif';
+  const step = 0.15, total = word.length * step;
+  [...word].forEach((ch, i) => {
+    const a = -Math.PI / 2 - total / 2 + (i + 0.5) * step;
+    g.save(); g.translate(cx + Math.cos(a) * R, cy + Math.sin(a) * R); g.rotate(a + Math.PI / 2);
+    g.lineWidth = 12; g.strokeStyle = '#000'; g.strokeText(ch, 0, 0);
+    g.fillStyle = '#fff'; g.fillText(ch, 0, 0);
+    g.restore();
+  });
+  g.font = 'italic 600 54px Georgia, serif';
+  g.lineWidth = 8; g.strokeStyle = '#000'; g.strokeText('Est. 1962  ·  Fresh Daily', cx, H * 0.35); g.fillStyle = '#fff'; g.fillText('Est. 1962  ·  Fresh Daily', cx, H * 0.35);
+  // Red channel: the gold; green channel: its black outline.
+  const d = g.getImageData(0, 0, W, H), out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const o = out.getContext('2d'), img = o.createImageData(W, H);
+  for (let i = 0; i < d.data.length; i += 4) {
+    const a = d.data[i + 3] / 255, lum = d.data[i] / 255;
+    img.data[i] = 255 * a * lum; img.data[i + 1] = 255 * a * (1 - lum); img.data[i + 2] = 0; img.data[i + 3] = 255;
+  }
+  o.putImageData(img, 0, 0);
+  return out;
+}
+
+// ───────────────────────────── Glass state ─────────────────────────────
+// Per texel, top-down:  R dirt left on the glass, G soap suds, B water, A edge lines and
+// streaks the squeegee leaves behind. Dirt under suds has been loosened and goes with the water.
+
+let SW = 0, SH = 0, dirt, soap, wet, resid, buf, stateTex;
+function makeState(aspect) {
+  SW = Math.round(aspect >= 1 ? 640 : 640 * aspect); SH = Math.round(aspect >= 1 ? 640 / aspect : 640);
+  dirt = new Float32Array(SW * SH).fill(1); soap = new Float32Array(SW * SH); wet = new Float32Array(SW * SH); resid = new Float32Array(SW * SH);
+  buf = new Uint8Array(SW * SH * 4);
+  if (stateTex) stateTex.dispose();
+  stateTex = new THREE.DataTexture(buf, SW, SH);
+  stateTex.magFilter = stateTex.minFilter = THREE.LinearFilter;
+  if (U) U.tState.value = stateTex;
+  dirty = true;
+}
+let dirty = true, U = null;
+function upload() {
+  for (let i = 0, n = SW * SH; i < n; i++) {
+    const o = i * 4;
+    buf[o] = dirt[i] * 255; buf[o + 1] = soap[i] * 255; buf[o + 2] = wet[i] * 255; buf[o + 3] = resid[i] * 255;
+  }
+  stateTex.needsUpdate = true;
+  dirty = false;
+}
+
+// ───────────────────────────── Renderer ─────────────────────────────
+
+const canvas = document.getElementById('stage'), toolCanvas = document.getElementById('tools'), tg = toolCanvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, mobile ? 1.5 : 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const tex = (c, srgb = true, mip = true) => { const t = new THREE.CanvasTexture(c); if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = mip; t.minFilter = mip ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter; return t; };
+const street = tex(paintStreet());
+let grimeSet = paintGrime();
+const grimeTex = tex(grimeSet.grime, false), smearTex = tex(grimeSet.smear, false);
+grimeTex.wrapS = grimeTex.wrapT = smearTex.wrapS = smearTex.wrapT = THREE.MirroredRepeatWrapping;
+const letterTex = tex(paintLettering(), false);
+
+U = {
+  tState: { value: null }, tStreet: { value: street }, tGrime: { value: grimeTex }, tSmear: { value: smearTex }, tLetters: { value: letterTex },
+  uTime: { value: 0 }, uAspect: { value: 1 }, uTexel: { value: new THREE.Vector2() }, uParallax: { value: new THREE.Vector2() }, uFrame: { value: 0.025 },
+};
+const mat = new THREE.ShaderMaterial({
+  uniforms: U,
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D tState, tStreet, tGrime, tSmear, tLetters;
+    uniform float uTime, uAspect, uFrame;
+    uniform vec2 uTexel, uParallax;
+    varying vec2 vUv;
+    float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y); }
+    // Distance to the nearest bubble wall, and that bubble's size, for the suds.
+    vec2 bubbles(vec2 p) {
+      vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0; float rr = 0.0;
+      for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+        vec2 g = vec2(x, y), o = vec2(h21(i + g), h21(i + g + 7.3)) * 0.8 + 0.1;
+        float d = length(g + o - f) / (0.6 + 0.6 * h21(i + g + 3.1));
+        if (d < d1) { d2 = d1; d1 = d; rr = h21(i + g + 3.1); } else if (d < d2) d2 = d;
+      }
+      return vec2(d2 - d1, rr);
+    }
+    // The street, with car lights sliding past and the glass's refraction.
+    vec3 outside(vec2 uv) {
+      vec2 suv = (uv - 0.5) / vec2(max(1.0, 1.78 / uAspect), max(1.0, uAspect / 1.78)) + 0.5 + uParallax;
+      vec3 c = texture2D(tStreet, suv).rgb;
+      for (int k = 0; k < 6; k++) {
+        float fk = float(k), dir = mod(fk, 2.0) < 0.5 ? 1.0 : -1.0;
+        float x = fract(uTime * (0.035 + 0.012 * fk) * dir + fk * 0.37) * 1.6 - 0.3;
+        float y = dir > 0.0 ? 0.255 : 0.215;
+        vec3 lc = dir > 0.0 ? vec3(1.0, 0.95, 0.85) : vec3(1.0, 0.15, 0.08);
+        for (int l = 0; l < 2; l++) {
+          vec2 lp = vec2(x + float(l) * 0.035 * dir, y);
+          vec2 d = (suv - lp) * vec2(1.78, 1.0);
+          c += lc * smoothstep(0.024, 0.016, length(d)) * 0.55;
+          c += lc * 0.18 * smoothstep(0.03, 0.0, abs(d.x)) * smoothstep(0.0, 0.15, y - suv.y) * smoothstep(0.35, 0.0, y - suv.y);   // reflection on the wet road
+        }
+      }
+      return c;
+    }
+    void main() {
+      vec2 uv = vUv;
+      vec2 su = vec2(uv.x, 1.0 - uv.y);                     // state texture rows run top-down
+      vec4 st = texture2D(tState, su);
+      float dirt = st.r, soap = st.g, wet = st.b, line = st.a;
+      // Water as a surface: its slope bends the view through it like a lens.
+      float hC = wet + soap * 0.4;
+      float hX = texture2D(tState, su + vec2(uTexel.x, 0.0)).b - texture2D(tState, su - vec2(uTexel.x, 0.0)).b;
+      float hY = texture2D(tState, su + vec2(0.0, uTexel.y)).b - texture2D(tState, su - vec2(0.0, uTexel.y)).b;
+      vec2 slope = vec2(hX, -hY);
+      float ripple = (vn(uv * vec2(uAspect, 1.0) * 120.0) - 0.5) * wet;
+      vec2 refr = slope * 0.03 + vec2(ripple) * 0.004;
+      vec3 col = outside(uv + refr);
+      // Sign lettering: gilded where the street light falls on it, with a black outline.
+      // Lettering and grime keep their proportions on any screen shape.
+      vec2 luv = vec2(0.5 + (uv.x - 0.5) * max(1.0, uAspect / 1.78), 0.62 + (uv.y - 0.62) * max(1.0, 1.78 / uAspect));
+      vec2 lt = all(greaterThan(luv, vec2(0.0))) && all(lessThan(luv, vec2(1.0))) ? texture2D(tLetters, luv).rg : vec2(0.0);
+      vec2 guv = uv * vec2(max(1.0, uAspect / 1.78), max(1.0, 1.78 / uAspect));
+      vec3 glowAround = texture2D(tStreet, uv, 5.0).rgb;
+      vec3 gold = vec3(0.85, 0.62, 0.25) * (0.45 + 1.2 * dot(glowAround, vec3(0.33))) + vec3(1.0, 0.85, 0.5) * pow(1.0 - abs(uv.x - 0.5 + uParallax.x * 4.0) * 2.0, 6.0) * 0.4;
+      col = mix(col, vec3(0.02), lt.g * 0.95);
+      col = mix(col, gold, lt.r);
+      // Grime: a brown film lit up by the light behind it, water-spot rings, dust and smears.
+      vec4 gm = texture2D(tGrime, guv);
+      float smear = texture2D(tSmear, guv).r;
+      vec3 scatter = texture2D(tStreet, uv, 6.0).rgb;
+      float film = dirt * clamp(0.35 + 0.9 * gm.r, 0.0, 1.0);
+      vec3 haze = vec3(0.42, 0.36, 0.28) * 0.35 + scatter * 1.1;
+      col = mix(col, haze, film * 0.72);
+      col = mix(col, haze * 1.25 + 0.04, dirt * gm.g * 0.55);
+      col *= 1.0 - dirt * gm.b * 0.55;
+      col = mix(col, haze * 1.15, dirt * smear * 0.5);
+      // What the squeegee leaves at the ends of a stroke, and dried streaks.
+      col = mix(col, haze * 0.9 + 0.015, line * 0.28);
+      // Suds: white foam made of bubbles, greyed by the grime they lifted.
+      vec2 bp = uv * vec2(uAspect, 1.0) * 90.0;
+      vec2 b = bubbles(bp), b2 = bubbles(bp * 2.6 + 4.0);
+      float walls = (1.0 - smoothstep(0.0, 0.18, b.x)) * 0.16 + (1.0 - smoothstep(0.0, 0.14, b2.x)) * 0.1;
+      float lumps = vn(bp * 0.18) * 0.6 + vn(bp * 0.05) * 0.4;
+      float body = smoothstep(0.03, 0.4, soap + (lumps - 0.5) * 0.35) * (0.35 + 0.5 * smoothstep(0.35, 0.75, lumps));
+      vec3 foam = mix(vec3(0.95, 0.955, 0.96), vec3(0.74, 0.7, 0.64), 0.45 * dirt) - walls;
+      foam *= 0.8 + 0.3 * lumps;
+      foam += scatter * 0.18 + vec3(1.0) * pow(1.0 - smoothstep(0.0, 0.08, abs(b.x - 0.22)), 4.0) * 0.12 * b.y;
+      col = mix(col, foam, body);
+      // Wet glass: a sheen and bright edges on drips and water lines.
+      float edge = length(slope) * 6.0;
+      col += vec3(0.9, 0.88, 0.8) * clamp(edge - 0.15, 0.0, 1.0) * 0.12 + scatter * wet * 0.05;
+      // Faint reflection of the shop behind you: two warm pendant lamps and the room.
+      vec2 rp = uv - uParallax * 3.0;
+      float lamps = exp(-pow(length((rp - vec2(0.24, 0.86)) * vec2(uAspect, 1.0)) * 7.0, 2.0)) + exp(-pow(length((rp - vec2(0.78, 0.9)) * vec2(uAspect, 1.0)) * 7.0, 2.0));
+      col += vec3(1.0, 0.72, 0.4) * lamps * 0.14 + vec3(0.12, 0.08, 0.05) * (1.0 - uv.y) * 0.25;
+      // The aluminium frame and its rubber gasket.
+      vec2 fe = min(uv, 1.0 - uv) * vec2(uAspect, 1.0);
+      float fd = min(fe.x, fe.y);
+      if (fd < uFrame) {
+        float t = fd / uFrame;
+        vec3 metal = vec3(0.12, 0.125, 0.13) * (0.7 + 0.6 * smoothstep(0.2, 0.8, t)) + vec3(0.35) * smoothstep(0.86, 0.95, t) * (1.0 - smoothstep(0.95, 1.0, t));
+        metal += scatter * 0.12;
+        col = mix(metal, vec3(0.02), smoothstep(0.88, 0.97, t) * (1.0 - smoothstep(0.97, 1.0, t)));
+      }
+      col += (h21(uv * 1000.0 + uTime) - 0.5) * 0.02;
+      gl_FragColor = vec4(col, 1.0);
+      #include <colorspace_fragment>
+    }`,
+  depthTest: false,
+});
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+
+// ───────────────────────────── Layout ─────────────────────────────
+
+let W = 1, H = 1, dpr = 1;
+function resize() {
+  W = innerWidth; H = innerHeight; dpr = Math.min(devicePixelRatio || 1, 2);
+  renderer.setSize(W, H, false);
+  toolCanvas.width = W * dpr; toolCanvas.height = H * dpr;
+  const aspect = W / H;
+  if (!dirt || Math.abs(aspect - U.uAspect.value) > 0.15) makeState(aspect);
+  U.uAspect.value = aspect;
+  U.uTexel.value.set(1 / SW, 1 / SH);
+}
+addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, S = null;
+function ensureAudio() {
+  if (!audio) {
+    try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    const len = audio.sampleRate * 2, nb = audio.createBuffer(1, len, audio.sampleRate), d = nb.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const noise = () => { const s = audio.createBufferSource(); s.buffer = nb; s.loop = true; s.start(); return s; };
+    const chain = (src, type, f, q) => { const fl = audio.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; const g = audio.createGain(); g.gain.value = 0; src.connect(fl).connect(g).connect(audio.destination); return { g, fl }; };
+    const squeak = audio.createOscillator(); squeak.type = 'triangle'; squeak.frequency.value = 1300; squeak.start();
+    const sq = audio.createBiquadFilter(); sq.type = 'bandpass'; sq.Q.value = 6; sq.frequency.value = 1300;
+    const sqg = audio.createGain(); sqg.gain.value = 0; squeak.connect(sq).connect(sqg).connect(audio.destination);
+    S = { squeak, sq, sqg, drag: chain(noise(), 'bandpass', 2600, 1.4), scrub: chain(noise(), 'bandpass', 1100, 0.7), fizz: chain(noise(), 'highpass', 5000, 0.7), cloth: chain(noise(), 'lowpass', 900, 0.6), city: chain(noise(), 'lowpass', 220, 0.6) };
+    S.city.g.gain.value = 0.05;
+  }
+  if (audio.state === 'suspended') audio.resume();
+}
+const level = (node, v, k = 0.04) => { if (S) node.g.gain.setTargetAtTime(v, audio.currentTime, k); };
+function plink() {
+  if (!audio) return;
+  const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain(), f = rand(1400, 2400);
+  o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 0.5, t + 0.08);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.04, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 0.14);
+}
+
+// ──────────────────────────── Controls ────────────────────────────
+
+const TOOLS = ['scrub', 'squeegee', 'towel'];
+let tool = 'scrub', down = false, hasPointer = false;
+const P = { x: 0, y: 0 }, prev = { x: 0, y: 0 };
+let bladeAng = 0, speed = 0, bead = 0;
+function setTool(name) {
+  tool = name;
+  for (const b of document.querySelectorAll('.dock [data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name));
+}
+for (const b of document.querySelectorAll('.dock button')) b.addEventListener('click', () => b.dataset.tool ? setTool(b.dataset.tool) : newWindow());
+addEventListener('keydown', e => { const k = e.key.toLowerCase(); if (k >= '1' && k <= '3') setTool(TOOLS[+k - 1]); else if (k === 'n') newWindow(); });
+canvas.addEventListener('pointerdown', e => { ensureAudio(); down = true; try { canvas.setPointerCapture(e.pointerId); } catch { /* gone */ } move(e); prev.x = P.x; prev.y = P.y; lastSweep = null; });
+canvas.addEventListener('pointermove', move);
+const release = () => { if (down && tool === 'squeegee') dropBead(); down = false; lastSweep = null; };
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hasPointer = false; document.body.classList.remove('using'); });
+canvas.addEventListener('pointerenter', () => document.body.classList.add('using'));
+function move(e) { P.x = e.clientX; P.y = e.clientY; hasPointer = true; document.body.classList.add('using'); }
+function newWindow() { makeState(W / H); drips.length = 0; done = false; grimeSet = paintGrime(); grimeTex.image = grimeSet.grime; smearTex.image = grimeSet.smear; grimeTex.needsUpdate = smearTex.needsUpdate = true; }
+
+// ───────────────────────────── Tools on the glass ─────────────────────────────
+
+const toTex = (x, y) => [x / W * SW, y / H * SH];
+const texPerPx = () => SW / W;
+function disc(cx, cy, r, fn) {
+  for (let j = Math.max(0, Math.floor(cy - r)); j <= Math.min(SH - 1, Math.ceil(cy + r)); j++) {
+    for (let i = Math.max(0, Math.floor(cx - r)); i <= Math.min(SW - 1, Math.ceil(cx + r)); i++) {
+      const d = Math.hypot(i - cx, j - cy) / r;
+      if (d < 1) fn(j * SW + i, 1 - d * d);
+    }
+  }
+  dirty = true;
+}
+
+// The scrubber lays down suds and works the grime loose; more scrubbing, more loosened.
+function scrub(dt) {
+  const [cx, cy] = toTex(P.x, P.y), r = Math.min(W, H) * 0.11 * texPerPx(), work = 0.4 + Math.min(1, speed / 900) * 1.6;
+  disc(cx, cy, r, (i, f) => {
+    soap[i] = clamp01(soap[i] + f * dt * 4);
+    wet[i] = clamp01(wet[i] + f * dt * 3);
+    resid[i] = clamp01(resid[i] - f * dt * 3);
+    dirt[i] = clamp01(dirt[i] - f * dt * 0.35 * work * soap[i]);
+  });
+}
+
+// The squeegee sweeps the band between where the blade was and where it is now. What it
+// collects rides along as a bead on the blade; the blade ends leave a thin line of water.
+let lastSweep = null;
+function squeegee(dt) {
+  const half = Math.min(W, H) * 0.17, c = Math.cos(bladeAng), s = Math.sin(bladeAng);
+  const a = { x: P.x - c * half, y: P.y - s * half }, b = { x: P.x + c * half, y: P.y + s * half };
+  if (!lastSweep) { lastSweep = { a, b }; return; }
+  const pa = lastSweep.a, pb = lastSweep.b;
+  lastSweep = { a, b };
+  const quad = [pa, pb, b, a].map(p => toTex(p.x, p.y));
+  let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+  for (const [x, y] of quad) { minx = Math.min(minx, x); maxx = Math.max(maxx, x); miny = Math.min(miny, y); maxy = Math.max(maxy, y); }
+  const pad = 1.5;
+  minx = Math.max(0, Math.floor(minx - pad)); maxx = Math.min(SW - 1, Math.ceil(maxx + pad));
+  miny = Math.max(0, Math.floor(miny - pad)); maxy = Math.min(SH - 1, Math.ceil(maxy + pad));
+  const [ax, ay] = toTex(a.x, a.y), [bx, by] = toTex(b.x, b.y), [pax, pay] = toTex(pa.x, pa.y), [pbx, pby] = toTex(pb.x, pb.y);
+  const inside = (x, y) => {
+    let sign = 0;
+    for (let k = 0; k < 4; k++) {
+      const [x1, y1] = quad[k], [x2, y2] = quad[(k + 1) % 4];
+      const cr = (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1);
+      if (Math.abs(cr) < 1e-6) continue;
+      const sg = Math.sign(cr);
+      if (!sign) sign = sg; else if (sg !== sign) return false;
+    }
+    return true;
+  };
+  const segDist = (x, y, x1, y1, x2, y2) => { const dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy || 1; let t = ((x - x1) * dx + (y - y1) * dy) / l2; t = t < 0 ? 0 : t > 1 ? 1 : t; return Math.hypot(x - x1 - dx * t, y - y1 - dy * t); };
+  let picked = 0, dryDrag = 0;
+  for (let j = miny; j <= maxy; j++) for (let i = minx; i <= maxx; i++) {
+    const k = j * SW + i;
+    // The blade ends trace a thin line of water unless a later stroke overlaps it.
+    const endLine = Math.min(segDist(i, j, ax, ay, pax, pay), segDist(i, j, bx, by, pbx, pby));
+    if (inside(i + 0.5, j + 0.5)) {
+      picked += wet[k] + soap[k];
+      if (soap[k] > 0.15 || wet[k] > 0.3) dirt[k] = Math.min(dirt[k], 1 - Math.min(1, (soap[k] + wet[k]) * 1.4)) * 0.3;
+      else { dryDrag += dirt[k]; dirt[k] *= 0.96; }
+      soap[k] = 0; wet[k] = 0; resid[k] *= 0.15;
+      if (endLine < 1.0 && picked > 0) { resid[k] = Math.max(resid[k], 0.5); wet[k] = 0.3; }
+    }
+  }
+  bead += picked * 0.0005;
+  // A heavy bead runs off the low end of the blade as a drip.
+  if (bead > 1.2) { spawnDrip((a.y > b.y ? a : b), 0.6); bead -= 0.6; }
+  dirty = true;
+  return { picked, dryDrag };
+}
+
+// Wiping with the towel takes up lines, drips and the last of the water.
+function towel(dt) {
+  const [cx, cy] = toTex(P.x, P.y), r = Math.min(W, H) * 0.06 * texPerPx(), work = 0.5 + Math.min(1, speed / 700);
+  disc(cx, cy, r, (i, f) => {
+    resid[i] = clamp01(resid[i] - f * dt * 3 * work);
+    wet[i] = clamp01(wet[i] - f * dt * 4 * work);
+    soap[i] = clamp01(soap[i] - f * dt * 2 * work);
+    if (dirt[i] < 0.4) dirt[i] = clamp01(dirt[i] - f * dt * 0.8 * work);
+  });
+}
+
+// Drips run down the glass, leaving a wet track that slowly dries.
+const drips = [];
+function spawnDrip(p, vol) { drips.push({ x: p.x, y: p.y, vol, wob: rand(0, 6) }); plink(); }
+function dropBead() {
+  if (bead < 0.08) { bead = 0; return; }
+  const n = Math.min(5, 1 + Math.floor(bead * 3)), half = Math.min(W, H) * 0.17, c = Math.cos(bladeAng), s = Math.sin(bladeAng);
+  for (let k = 0; k < n; k++) { const t = rand(-0.9, 0.9); spawnDrip({ x: P.x + c * half * t, y: P.y + s * half * t + 4 }, bead / n); }
+  bead = 0;
+}
+function stepDrips(dt) {
+  for (let k = drips.length - 1; k >= 0; k--) {
+    const d = drips[k];
+    const v = 40 + d.vol * 260;
+    d.y += v * dt; d.x += Math.sin(d.y * 0.05 + d.wob) * 6 * dt;
+    d.vol -= dt * 0.05;
+    const [cx, cy] = toTex(d.x, d.y), r = 0.9 + d.vol * 2.4;
+    disc(cx, cy, r, (i, f) => { wet[i] = Math.max(wet[i], 0.35 + f * 0.65); if (dirt[i] > 0.3) resid[i] = Math.max(resid[i], 0.2 * f); });
+    if (d.vol < 0.02 || d.y > H) drips.splice(k, 1);
+  }
+}
+
+// Water dries off slowly; suds slowly collapse into water.
+let dryClock = 0;
+function dry(dt) {
+  dryClock += dt;
+  if (dryClock < 0.25) return;
+  const step = dryClock; dryClock = 0;
+  for (let i = 0, n = SW * SH; i < n; i++) {
+    if (soap[i] > 0) { soap[i] = Math.max(0, soap[i] - step * 0.004); }
+    if (wet[i] > 0 && soap[i] < 0.05) wet[i] = Math.max(0, wet[i] - step * (wet[i] < 0.5 ? 0.03 : 0.012));
+  }
+  dirty = true;
+}
+
+// ───────────────────────────── Drawing the tools ─────────────────────────────
+
+function drawTools() {
+  tg.setTransform(dpr, 0, 0, dpr, 0, 0);
+  tg.clearRect(0, 0, W, H);
+  if (!hasPointer) return;
+  tg.save();
+  tg.translate(P.x, P.y);
+  tg.shadowColor = 'rgba(0,0,0,0.45)'; tg.shadowBlur = 18; tg.shadowOffsetY = 10;
+  const u = Math.min(W, H);
+  if (tool === 'squeegee') {
+    const half = u * 0.17;
+    tg.rotate(bladeAng);
+    // Handle, angled down and away, with a ribbed rubber grip.
+    tg.save(); tg.rotate(0.35);
+    const hg = tg.createLinearGradient(-u * 0.02, 0, u * 0.02, 0); hg.addColorStop(0, '#1c1d20'); hg.addColorStop(0.5, '#3a3c40'); hg.addColorStop(1, '#141517');
+    tg.fillStyle = hg; tg.beginPath(); tg.roundRect(-u * 0.018, u * 0.02, u * 0.036, u * 0.3, u * 0.018); tg.fill();
+    tg.shadowColor = 'transparent';
+    tg.strokeStyle = 'rgba(255,255,255,0.08)'; tg.lineWidth = 1;
+    for (let k = 0; k < 14; k++) { const y = u * 0.12 + k * u * 0.012; tg.beginPath(); tg.moveTo(-u * 0.016, y); tg.lineTo(u * 0.016, y); tg.stroke(); }
+    const brass = tg.createLinearGradient(-u * 0.02, 0, u * 0.02, 0); brass.addColorStop(0, '#6b5320'); brass.addColorStop(0.5, '#e6c46a'); brass.addColorStop(1, '#5e4718');
+    tg.fillStyle = brass; tg.fillRect(-u * 0.022, u * 0.012, u * 0.044, u * 0.03);
+    tg.restore();
+    tg.shadowColor = 'rgba(0,0,0,0.45)';
+    // Channel: brushed steel with a wing nut, and the rubber blade along its edge.
+    const ch = tg.createLinearGradient(0, -u * 0.03, 0, u * 0.006);
+    ch.addColorStop(0, '#5c6066'); ch.addColorStop(0.35, '#e1e4e8'); ch.addColorStop(0.6, '#9aa0a7'); ch.addColorStop(1, '#4b4f55');
+    tg.fillStyle = ch; tg.beginPath(); tg.roundRect(-half, -u * 0.03, half * 2, u * 0.032, 3); tg.fill();
+    tg.shadowColor = 'transparent';
+    tg.fillStyle = 'rgba(255,255,255,0.25)'; tg.fillRect(-half + 4, -u * 0.026, half * 2 - 8, 1.5);
+    const rub = tg.createLinearGradient(0, 0, 0, u * 0.012); rub.addColorStop(0, '#0d0d0e'); rub.addColorStop(0.6, '#26272a'); rub.addColorStop(1, '#0a0a0b');
+    tg.fillStyle = rub; tg.fillRect(-half - 2, u * 0.002, half * 2 + 4, u * 0.012);
+    // The water bead riding the blade.
+    if (down && bead > 0.02) {
+      const bh = Math.min(u * 0.012, 2 + bead * 8);
+      const bg = tg.createLinearGradient(0, u * 0.014, 0, u * 0.014 + bh);
+      bg.addColorStop(0, 'rgba(255,255,255,0.5)'); bg.addColorStop(0.4, 'rgba(200,220,240,0.18)'); bg.addColorStop(1, 'rgba(255,255,255,0.35)');
+      tg.fillStyle = bg; tg.beginPath(); tg.roundRect(-half + 6, u * 0.014, half * 2 - 12, bh, bh / 2); tg.fill();
+    }
+  } else if (tool === 'scrub') {
+    const half = u * 0.11;
+    tg.rotate(bladeAng * 0.3);
+    tg.save(); tg.rotate(0.3);
+    tg.fillStyle = '#2a2b2f'; tg.beginPath(); tg.roundRect(-u * 0.015, u * 0.02, u * 0.03, u * 0.28, u * 0.015); tg.fill();
+    tg.restore();
+    // Microfibre sleeve: a fat, fluffy, slightly wet roll on a T-bar.
+    const sl = tg.createLinearGradient(0, -u * 0.04, 0, u * 0.04);
+    const wetTint = down ? 0.75 : 1;
+    sl.addColorStop(0, `rgb(${210 * wetTint | 0},${214 * wetTint | 0},${220 * wetTint | 0})`); sl.addColorStop(0.5, `rgb(${245 * wetTint | 0},${246 * wetTint | 0},${248 * wetTint | 0})`); sl.addColorStop(1, `rgb(${170 * wetTint | 0},${176 * wetTint | 0},${186 * wetTint | 0})`);
+    tg.fillStyle = sl; tg.beginPath(); tg.roundRect(-half, -u * 0.04, half * 2, u * 0.08, u * 0.04); tg.fill();
+    tg.shadowColor = 'transparent';
+    tg.strokeStyle = 'rgba(120,130,145,0.35)'; tg.lineWidth = 1;
+    for (let k = 0; k < 220; k++) { const x = rand(-half, half), y = rand(-u * 0.038, u * 0.038), a = rand(0, 6); tg.beginPath(); tg.moveTo(x, y); tg.lineTo(x + Math.cos(a) * 4, y + Math.sin(a) * 4); tg.stroke(); }
+    tg.strokeStyle = 'rgba(40,90,170,0.7)'; tg.lineWidth = 3; tg.beginPath(); tg.moveTo(-half + u * 0.02, 0); tg.lineTo(half - u * 0.02, 0); tg.stroke();
+  } else {
+    // A folded terry towel.
+    const w = u * 0.12, h = u * 0.08;
+    tg.rotate(-0.15);
+    const tw = tg.createLinearGradient(-w, -h, w, h); tw.addColorStop(0, '#d9dfe6'); tw.addColorStop(1, '#a9b3bf');
+    tg.fillStyle = tw; tg.beginPath(); tg.roundRect(-w / 2, -h / 2, w, h, 10); tg.fill();
+    tg.shadowColor = 'transparent';
+    tg.fillStyle = 'rgba(255,255,255,0.35)'; tg.beginPath(); tg.roundRect(-w / 2, -h / 2, w, h * 0.35, [10, 10, 2, 2]); tg.fill();
+    tg.fillStyle = 'rgba(80,90,105,0.2)';
+    for (let k = 0; k < 160; k++) tg.fillRect(rand(-w / 2, w / 2), rand(-h / 2, h / 2), 1.5, 1.5);
+    tg.strokeStyle = 'rgba(60,70,85,0.35)'; tg.lineWidth = 2; tg.beginPath(); tg.moveTo(-w / 2 + 6, h * 0.18); tg.lineTo(w / 2 - 6, h * 0.18); tg.stroke();
+  }
+  tg.restore();
+}
+
+// ───────────────────────────── Frame ─────────────────────────────
+
+let done = false, statsClock = 0, lastStatus = '', squeakPhase = 0;
+const clock = new THREE.Clock();
+function stats() {
+  let clean = 0, n = 0;
+  for (let j = 4; j < SH - 4; j += 3) for (let i = 4; i < SW - 4; i += 3) {
+    const k = j * SW + i;
+    n++;
+    if (dirt[k] < 0.12 && soap[k] < 0.08 && resid[k] < 0.12 && wet[k] < 0.4) clean++;
+  }
+  const pct = Math.round(100 * clean / n);
+  if (!done && pct >= 98) done = true;
+  const text = done ? 'Spotless' : `Clean ${pct}%`;
+  if (text !== lastStatus) statusEl.textContent = lastStatus = text;
+}
+
+function frame() {
+  const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime;
+  const dx = P.x - prev.x, dy = P.y - prev.y, dist = Math.hypot(dx, dy);
+  speed += (dist / Math.max(dt, 1e-3) - speed) * 0.3;
+  // The blade turns to lie across the direction it is pulled.
+  if (dist > 1.5) {
+    let want = Math.atan2(dy, dx) + Math.PI / 2;
+    let diff = Math.atan2(Math.sin(want - bladeAng), Math.cos(want - bladeAng));
+    if (Math.abs(diff) > Math.PI / 2) { want += Math.PI; diff = Math.atan2(Math.sin(want - bladeAng), Math.cos(want - bladeAng)); }
+    bladeAng += diff * Math.min(1, dt * (tool === 'squeegee' ? 9 : 4));
+  }
+  prev.x = P.x; prev.y = P.y;
+
+  let sweep = null;
+  if (down && hasPointer) {
+    if (tool === 'scrub') scrub(dt);
+    else if (tool === 'squeegee') sweep = squeegee(dt);
+    else towel(dt);
+  }
+  stepDrips(dt);
+  dry(dt);
+  if (dirty) upload();
+
+  if (S) {
+    const sp = Math.min(1, speed / 900);
+    const onClean = sweep ? (sweep.picked > 0 ? 1 : 0.4) : 0;
+    squeakPhase += dt * (8 + sp * 20);
+    const chirp = 0.55 + 0.45 * Math.sin(squeakPhase) * Math.sin(squeakPhase * 0.37);
+    S.squeak.frequency.setTargetAtTime(1100 + sp * 700 + Math.sin(t * 13) * 80, audio.currentTime, 0.02);
+    S.sq.frequency.setTargetAtTime(1200 + sp * 800, audio.currentTime, 0.02);
+    S.sqg.gain.setTargetAtTime(down && tool === 'squeegee' ? 0.05 * sp * onClean * chirp : 0, audio.currentTime, 0.02);
+    level(S.drag, down && tool === 'squeegee' ? 0.05 * sp : 0, 0.03);
+    level(S.scrub, down && tool === 'scrub' ? 0.08 * (0.3 + sp) : 0, 0.04);
+    level(S.fizz, down && tool === 'scrub' ? 0.03 : 0, 0.1);
+    level(S.cloth, down && tool === 'towel' ? 0.08 * (0.3 + sp) : 0, 0.04);
+  }
+
+  U.uTime.value = t;
+  U.uParallax.value.set((P.x / W - 0.5) * 0.008, (P.y / H - 0.5) * 0.004);
+  renderer.render(scene, cam);
+  drawTools();
+  statsClock += dt;
+  if (statsClock > 0.5) { statsClock = 0; stats(); }
+  requestAnimationFrame(frame);
+}
+
+// Preview: a clean band pulled through the dirt, with suds either side.
+if (new URLSearchParams(location.search).has('demo')) {
+  for (let j = 0; j < SH; j++) for (let i = 0; i < SW; i++) {
+    const k = j * SW + i, x = i / SW;
+    if (x > 0.36 && x < 0.62) { dirt[k] = 0; if (Math.abs(x - 0.36) < 0.004 || Math.abs(x - 0.62) < 0.004) { resid[k] = 0.6; wet[k] = 0.4; } }
+    else if (x > 0.62 && x < 0.86) { soap[k] = 0.85; wet[k] = 1; dirt[k] = 0.5; }
+  }
+  P.x = W * 0.49; P.y = H * 0.55; hasPointer = true; setTool('squeegee'); bladeAng = 0;
+  for (let k = 0; k < 4; k++) drips.push({ x: W * rand(0.38, 0.6), y: H * rand(0.6, 0.75), vol: rand(0.1, 0.3), wob: rand(0, 6) });
+}
+requestAnimationFrame(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="squeegee"></script>
+</body>
+</html>
