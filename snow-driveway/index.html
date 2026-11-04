@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Snow Day // 41</title>
+<style>
+  :root { --bg: #c9d3de; --ink: #1d2733; --chip: rgba(245, 248, 252, 0.8); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .label {
+    position: fixed; bottom: 26px; pointer-events: none; user-select: none; -webkit-user-select: none;
+    font: 500 11px/1.7 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink); text-shadow: 0 1px 6px rgba(255, 255, 255, 0.6);
+  }
+  .label.left { left: 28px; }
+  .label.right { left: 28px; top: 24px; bottom: auto; font-variant-numeric: tabular-nums; }
+  .label.visits { top: 24px; bottom: auto; right: 28px; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  .label.visits[hidden] { display: none; }
+  .label.visits::before { content: ""; width: 6px; height: 6px; background: var(--ink); }
+  .label .hint { opacity: 0.7; }
+  .label .touch { display: none; }
+  @media (hover: none) { .label .mouse { display: none; } .label .touch { display: inline; } }
+  .dock {
+    position: fixed; right: 22px; bottom: 22px; display: flex; gap: 6px; padding: 6px; border-radius: 999px;
+    background: var(--chip); box-shadow: 0 6px 24px rgba(30, 45, 65, 0.25); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .dock button {
+    all: unset; cursor: pointer; display: flex; align-items: center; gap: 7px; padding: 8px 14px 8px 10px; border-radius: 999px; color: var(--ink);
+    font: 600 10px/1 "Helvetica Neue", Helvetica, Inter, system-ui, sans-serif; letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .dock button svg { width: 20px; height: 20px; flex: none; }
+  .dock button kbd { font: inherit; opacity: 0.45; }
+  .dock button[aria-pressed="true"] { background: var(--ink); color: #f4f7fb; }
+  .dock button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  @media (max-width: 860px) {
+    .dock { right: auto; left: 50%; transform: translateX(-50%); bottom: 74px; }
+    .dock button { padding: 9px; }
+    .dock button span, .dock button kbd { display: none; }
+  }
+  @media (max-width: 520px) {
+    .label { bottom: 18px; font-size: 10px; }
+    .label.left { left: 18px; right: 18px; }
+    .label.right { top: 16px; left: 18px; right: 120px; }
+    .label.visits { top: 16px; right: 18px; }
+    .dock { bottom: 96px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="label left">
+  <div>Snow Day // 41</div>
+  <div class="hint">
+    <span class="mouse">Hold and drag to walk the snowblower up the driveway / shovel the walk and the edges<br>Salt the last of it to bare wet asphalt / 1 · 2 · 3 tools / N fresh snow</span>
+    <span class="touch">Hold and drag to walk the snowblower<br>Shovel the walk, then salt</span>
+  </div>
+</div>
+<div class="label right" id="status"></div>
+<div class="label visits" id="visits" title="Total visits" hidden></div>
+<nav class="dock" aria-label="Tools">
+  <button type="button" data-tool="blower" aria-pressed="true" title="Snowblower (1)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17h10v-5H5a2 2 0 0 0-2 2z"/><path d="M8 12V8a3 3 0 0 1 3-3h2"/><path d="M13 13l6-8h2"/><circle cx="6" cy="19" r="1.5"/><circle cx="11" cy="19" r="1.5"/><path d="M15 3h.01M17 2h.01M16 6h.01"/></svg>
+    <span>Snowblower</span><kbd>1</kbd>
+  </button>
+  <button type="button" data-tool="shovel" aria-pressed="false" title="Shovel (2)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h9l1-5H5z"/><path d="M9.5 15 17 4"/><path d="M15.5 3.5l3 1.5"/></svg>
+    <span>Shovel</span><kbd>2</kbd>
+  </button>
+  <button type="button" data-tool="salt" aria-pressed="false" title="Salt spreader (3)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h10l-2 8H8z"/><path d="M11 12v5"/><path d="M5 20h.01M9 21h.01M13 20h.01M17 21h.01M8 18h.01M15 18h.01"/></svg>
+    <span>Salt</span><kbd>3</kbd>
+  </button>
+  <button type="button" data-action="new" title="Fresh snowfall (N)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M10 4.5 12 6l2-1.5M10 19.5l2-1.5 2 1.5"/></svg>
+    <span>Fresh snow</span><kbd>N</kbd>
+  </button>
+</nav>
+
+<script type="module">
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+const mobile = matchMedia('(hover: none)').matches || Math.min(innerWidth, innerHeight) < 600;
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+
+// ───────────────────────────── Layout ─────────────────────────────
+// A 12 × 12 m front yard. The house is at the back (−z), the street at the front (+z).
+// Units are metres; snow heights are stored as a fraction of HMAX.
+
+const AREA = 12, A0 = -AREA / 2;
+const HMAX = 0.75;                       // the state's full scale; fresh snow is ~0.3 m
+const DRIVE = { x0: -1.0, x1: 2.6, z0: -6, z1: 6 };
+const WALK = [{ x0: -3.8, x1: -2.6, z0: -6, z1: -2.6 }, { x0: -3.8, x1: -1.0, z0: -3.6, z1: -2.6 }];
+const HOUSE_Z = -6.15;
+const TREES = [{ x: -5.0, z: -4.4, s: 1.1 }, { x: 5.0, z: -4.0, s: 1.3 }, { x: 4.7, z: 3.3, s: 0.9 }, { x: -5.2, z: 2.8, s: 1.0 }];
+const inRect = (r, x, z) => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
+const paved = (x, z) => inRect(DRIVE, x, z) || WALK.some(w => inRect(w, x, z));
+const SUN = new THREE.Vector3(-6, 4.2, -3).normalize();
+
+// ───────────────────────────── Renderer ─────────────────────────────
+
+const canvas = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, mobile ? 1.5 : 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+const scene = new THREE.Scene();
+const HAZE = new THREE.Color(0xc9d6e4);
+scene.background = HAZE;
+scene.fog = new THREE.Fog(HAZE, 18, 46);
+const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 120);
+
+// Early morning: a low warm sun raking across from the left, a cold blue sky filling the shadows.
+const sun = new THREE.DirectionalLight(0xffd8a8, 3.0);
+sun.position.copy(SUN).multiplyScalar(16);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 40 });
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02; sun.shadow.radius = 3;
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xa9c4ec, 0xf2efe8, 0.9));
+{
+  // Sky for reflections on the wet asphalt and the machine's paint.
+  const env = new THREE.Scene();
+  env.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    vertexShader: 'varying vec3 vD; void main() { vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'varying vec3 vD; void main() { float h = vD.y; vec3 c = mix(vec3(0.95, 0.86, 0.76), vec3(0.42, 0.6, 0.86), smoothstep(-0.05, 0.6, h)); c = mix(c, vec3(0.9, 0.92, 0.96), smoothstep(0.0, -0.3, h)); gl_FragColor = vec4(c, 1.0); }',
+  })));
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(env, 0.02).texture;
+}
+
+// ───────────────────────────── Textures ─────────────────────────────
+
+function canvasTex(w, h, paint, srgb = true, repeat = null) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  paint(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = maxAniso;
+  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(...repeat); }
+  return t;
+}
+const speckle = (g, w, h, n, colors, size = [1, 3]) => { for (let i = 0; i < n; i++) { g.fillStyle = colors[(Math.random() * colors.length) | 0]; const s = rand(...size); g.fillRect(Math.random() * w, Math.random() * h, s, s); } };
+
+// What lies under the snow, painted in yard coordinates: asphalt drive with its cracks and
+// oil stain, concrete walk slabs, and dormant lawn.
+const groundTex = canvasTex(1024, 1024, (g, w, h) => {
+  const px = x => (x - A0) / AREA * w, pz = z => (z - A0) / AREA * h;
+  g.fillStyle = '#5a5236'; g.fillRect(0, 0, w, h);
+  speckle(g, w, h, 40000, ['#4f4a30', '#6b6040', '#5e5a3a', '#77703f'], [1, 3]);
+  g.fillStyle = '#2b2c2f'; g.fillRect(px(DRIVE.x0), pz(DRIVE.z0), px(DRIVE.x1) - px(DRIVE.x0), pz(DRIVE.z1) - pz(DRIVE.z0));
+  g.save(); g.beginPath(); g.rect(px(DRIVE.x0), pz(DRIVE.z0), px(DRIVE.x1) - px(DRIVE.x0), pz(DRIVE.z1) - pz(DRIVE.z0)); g.clip();
+  speckle(g, w, h, 60000, ['#232427', '#36383c', '#3e3f44', '#1d1e21', '#4a4b50'], [1, 2.5]);
+  g.strokeStyle = 'rgba(15,15,17,0.8)'; g.lineWidth = 1.5;
+  for (let i = 0; i < 6; i++) { g.beginPath(); let x = px(rand(DRIVE.x0, DRIVE.x1)), y = pz(rand(-5, 5)); g.moveTo(x, y); for (let k = 0; k < 8; k++) { x += rand(-10, 10); y += rand(4, 14); g.lineTo(x, y); } g.stroke(); }
+  const oil = g.createRadialGradient(px(0.8), pz(-4.2), 0, px(0.8), pz(-4.2), 40); oil.addColorStop(0, 'rgba(8,8,10,0.6)'); oil.addColorStop(1, 'rgba(8,8,10,0)'); g.fillStyle = oil; g.fillRect(0, 0, w, h);
+  g.restore();
+  for (const r of WALK) {
+    g.fillStyle = '#8b8780'; g.fillRect(px(r.x0), pz(r.z0), px(r.x1) - px(r.x0), pz(r.z1) - pz(r.z0));
+    g.save(); g.beginPath(); g.rect(px(r.x0), pz(r.z0), px(r.x1) - px(r.x0), pz(r.z1) - pz(r.z0)); g.clip();
+    speckle(g, w, h, 8000, ['#7d7972', '#9a968f', '#6f6b64'], [1, 2]);
+    g.strokeStyle = 'rgba(60,58,54,0.8)'; g.lineWidth = 2;
+    for (let z = r.z0; z < r.z1; z += 1.0) { g.beginPath(); g.moveTo(px(r.x0), pz(z)); g.lineTo(px(r.x1), pz(z)); g.stroke(); }
+    g.restore();
+  }
+});
+const barkTex = canvasTex(128, 256, (g, w, h) => { g.fillStyle = '#3c2e22'; g.fillRect(0, 0, w, h); for (let x = 0; x < w; x += 3) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '20,14,10' : '90,72,55'},0.5)`; g.fillRect(x, 0, 2, h); } });
+const sidingTex = canvasTex(512, 512, (g, w, h) => {
+  g.fillStyle = '#5d6b78'; g.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 16) { const gr = g.createLinearGradient(0, y, 0, y + 16); gr.addColorStop(0, '#6c7a88'); gr.addColorStop(0.85, '#56636f'); gr.addColorStop(1, '#3e4852'); g.fillStyle = gr; g.fillRect(0, y, w, 16); }
+}, true, [6, 3]);
+const garageTex = canvasTex(512, 384, (g, w, h) => {
+  g.fillStyle = '#e8e4dc'; g.fillRect(0, 0, w, h);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const x = 14 + c * (w - 28) / 4, y = 10 + r * (h - 20) / 4, pw = (w - 28) / 4 - 14, ph = (h - 20) / 4 - 16;
+    if (r === 0) { g.fillStyle = '#3a4a5a'; g.fillRect(x + 6, y + 6, pw - 12, ph - 12); g.fillStyle = 'rgba(255,220,160,0.5)'; g.fillRect(x + 6, y + 6, pw - 12, (ph - 12) * 0.5); continue; }
+    g.fillStyle = '#d8d3ca'; g.fillRect(x, y, pw, ph); g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 3; g.strokeRect(x, y, pw, ph);
+  }
+  g.fillStyle = 'rgba(0,0,0,0.25)'; for (let r = 1; r < 4; r++) g.fillRect(0, r * h / 4, w, 3);
+});
+
+// ───────────────────────────── Snowpack state ─────────────────────────────
+// One texel per ~3 cm.  R: snow depth (fraction of HMAX).  G: salt on the surface.
+// Rows run from the house (z = −6) to the street (z = +6).
+
+const N = mobile ? 256 : 384;
+const snow = new Float32Array(N * N), salt = new Float32Array(N * N);
+const buf = new Uint8Array(N * N * 4);
+const stateTex = new THREE.DataTexture(buf, N, N);
+stateTex.magFilter = stateTex.minFilter = THREE.LinearFilter;
+const toT = (x, z) => [(x - A0) / AREA * N, (z - A0) / AREA * N];
+const cellM = AREA / N;
+let dirty = true;
+
+function vn2(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const h = (a, b) => { let k = (a * 374761393 + b * 668265263) | 0; k = Math.imul(k ^ (k >>> 13), 1274126177); return ((k ^ (k >>> 16)) >>> 0) / 4294967295; };
+  const a = h(xi, yi), b = h(xi + 1, yi), c = h(xi, yi + 1), d = h(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function freshSnow() {
+  const seed = rand(0, 100);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = A0 + (i + 0.5) * cellM, z = A0 + (j + 0.5) * cellM;
+    let d = 0.3 + 0.04 * (vn2(x * 0.6 + seed, z * 0.6) - 0.5) + 0.015 * (vn2(x * 3 + seed, z * 3) - 0.5);
+    d += 0.18 * Math.exp(-(((z - HOUSE_Z) / 0.9) ** 2));                          // drifted against the house
+    for (const t of TREES) d -= 0.16 * Math.exp(-(((x - t.x) ** 2 + (z - t.z) ** 2) / (1.1 * t.s) ** 2));   // sheltered under the pines
+    if (z > 5.15 && z < 5.95 && x > DRIVE.x0 - 0.2 && x < DRIVE.x1 + 0.2) d += 0.32 * Math.sin((z - 5.15) / 0.8 * Math.PI);   // the plough's ridge
+    snow[j * N + i] = Math.max(0.03, d) / HMAX;
+    salt[j * N + i] = 0;
+  }
+  dirty = true;
+}
+function upload() {
+  for (let k = 0; k < N * N; k++) { buf[k * 4] = Math.min(255, snow[k] * 255); buf[k * 4 + 1] = salt[k] * 255; buf[k * 4 + 3] = 255; }
+  stateTex.needsUpdate = true;
+  dirty = false;
+}
+freshSnow();
+
+// ───────────────────────────── The snow surface ─────────────────────────────
+// A dense grid displaced by the snow depth. Normals come from the depth's slope, so cut walls
+// stand up crisp and catch the low sun; the shadow pass is displaced the same way so the walls
+// throw shadows across what has been cleared. Where the depth runs out the ground shows:
+// wet asphalt, concrete slabs or lawn, darker and glossier once salted.
+
+const GRID = mobile ? 240 : 384;
+const snowGeo = new THREE.PlaneGeometry(AREA, AREA, GRID, GRID);
+snowGeo.rotateX(-Math.PI / 2);
+const snowU = { tState: { value: stateTex }, tGround: { value: groundTex }, uTexel: { value: 1 / N }, uHmax: { value: HMAX }, uCell: { value: cellM }, uSunDir: { value: SUN } };
+const DISPLACE = `
+  vec2 suv = vec2(uv.x, 1.0 - uv.y);
+  float hC = texture2D(tState, suv).r * uHmax;
+  float hx = (texture2D(tState, suv + vec2(uTexel, 0.0)).r - texture2D(tState, suv - vec2(uTexel, 0.0)).r) * uHmax;
+  float hz = (texture2D(tState, suv + vec2(0.0, uTexel)).r - texture2D(tState, suv - vec2(0.0, uTexel)).r) * uHmax;`;
+const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0 });
+snowMat.onBeforeCompile = sh => {
+  Object.assign(sh.uniforms, snowU);
+  sh.vertexShader = 'uniform sampler2D tState; uniform float uTexel, uHmax, uCell;\nvarying float vH; varying vec3 vWorld; varying vec3 vWN; varying vec2 vSuv;\n' + sh.vertexShader
+    .replace('#include <beginnormal_vertex>', DISPLACE + `
+      vec3 objectNormal = normalize(vec3(-hx / (2.0 * uCell), 1.0, -hz / (2.0 * uCell)));
+      vWN = objectNormal; vH = hC; vSuv = suv;
+      #ifdef USE_TANGENT
+        vec3 objectTangent = vec3(tangent.xyz);
+      #endif`)
+    .replace('#include <begin_vertex>', 'vec3 transformed = position + vec3(0.0, hC, 0.0);\nvWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+  sh.fragmentShader = 'uniform sampler2D tState, tGround; uniform vec3 uSunDir;\nvarying float vH; varying vec3 vWorld; varying vec3 vWN; varying vec2 vSuv;\nfloat cR;\nfloat hh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n' + sh.fragmentShader
+    .replace('#include <map_fragment>', `
+      vec4 st = texture2D(tState, vSuv);
+      float depth = vH, saltA = st.g;
+      vec3 ground = texture2D(tGround, vec2(vSuv.x, 1.0 - vSuv.y)).rgb;
+      float cover = smoothstep(0.004, 0.03, depth);
+      // Under thin snow and salt the ground is wet: darker, and glossy.
+      float wetG = 1.0 - smoothstep(0.0, 0.02, depth) * 0.6;
+      vec3 gcol = ground * mix(1.0, 0.55, wetG);
+      gcol = mix(gcol, vec3(0.85, 0.86, 0.88), smoothstep(0.004, 0.012, depth) * 0.6);   // packed film the blade leaves
+      gcol += vec3(0.9) * step(0.985, hh(floor(vWorld.xz * 160.0))) * saltA;                    // salt grains
+      // Snow: fresh white on top; cut faces bluer, with the layers of separate snowfalls.
+      vec3 wn = normalize(vWN);
+      float wall = 1.0 - smoothstep(0.35, 0.75, wn.y);
+      float strata = 0.5 + 0.5 * sin(vWorld.y * 140.0 + hh(floor(vWorld.xz * 3.0)) * 3.0);
+      vec3 scol = mix(vec3(0.95, 0.965, 0.99), vec3(0.78, 0.86, 0.96) * (0.9 + 0.12 * strata), wall);
+      scol *= 0.97 + 0.06 * hh(floor(vWorld.xz * 60.0));
+      diffuseColor.rgb = mix(gcol, scol, cover);
+      cR = mix(mix(0.85, 0.22, wetG * (1.0 - smoothstep(0.004, 0.012, depth))), mix(0.7, 0.85, wall), cover);`)
+    .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = cR;')
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      // Sparkle: ice crystals that flash when they mirror the sun toward you.
+      vec3 vdir = normalize(cameraPosition - vWorld);
+      vec3 cell = floor(vWorld * 300.0);
+      float glint = step(0.993, hh(cell.xz + cell.y * 17.0));
+      vec3 facet = normalize(vec3(hh(cell.xz + 1.0) - 0.5, 1.0, hh(cell.xz + 2.0) - 0.5) * vec3(1.6, 1.0, 1.6));
+      float mirror = pow(max(dot(reflect(-uSunDir, facet), vdir), 0.0), 40.0);
+      totalEmissiveRadiance += vec3(1.0, 0.95, 0.85) * glint * mirror * cover * 6.0;`);
+};
+const snowDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+snowDepth.onBeforeCompile = sh => {
+  Object.assign(sh.uniforms, snowU);
+  sh.vertexShader = 'uniform sampler2D tState; uniform float uTexel, uHmax, uCell;\n' + sh.vertexShader
+    .replace('#include <begin_vertex>', DISPLACE.replace(/float hx.*\n.*;/s, '') + '\nvec3 transformed = position + vec3(0.0, hC, 0.0);');
+};
+const snowMesh = new THREE.Mesh(snowGeo, snowMat);
+snowMesh.customDepthMaterial = snowDepth;
+snowMesh.castShadow = true; snowMesh.receiveShadow = true;
+snowMesh.frustumCulled = false;
+scene.add(snowMesh);
+
+// ───────────────────────────── The house and the street ─────────────────────────────
+
+const house = new THREE.Group();
+const wallMat = new THREE.MeshStandardMaterial({ map: sidingTex, roughness: 0.8 });
+const trimMat = new THREE.MeshStandardMaterial({ color: 0xf1eee8, roughness: 0.6 });
+const snowCap = new THREE.MeshStandardMaterial({ color: 0xf6f8fc, roughness: 0.85 });
+{
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(16, 4.6, 0.3), wallMat);
+  wall.position.set(0, 2.3, HOUSE_Z - 0.15); wall.castShadow = wall.receiveShadow = true; house.add(wall);
+  const gdoor = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 2.25), new THREE.MeshStandardMaterial({ map: garageTex, roughness: 0.55 }));
+  gdoor.position.set(0.8, 1.125, HOUSE_Z + 0.02); gdoor.receiveShadow = true; house.add(gdoor);
+  const gtrim = new THREE.Mesh(new THREE.BoxGeometry(3.3, 0.14, 0.1), trimMat); gtrim.position.set(0.8, 2.3, HOUSE_Z + 0.04); house.add(gtrim);
+  const fdoor = new THREE.Mesh(new RoundedBoxGeometry(1.0, 2.1, 0.08, 3, 0.02), new THREE.MeshStandardMaterial({ color: 0x6e2a22, roughness: 0.45 }));
+  fdoor.position.set(-3.2, 1.05, HOUSE_Z + 0.03); fdoor.castShadow = true; house.add(fdoor);
+  const wreath = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.06, 10, 24), new THREE.MeshStandardMaterial({ color: 0x2e4a24, roughness: 0.9 }));
+  wreath.position.set(-3.2, 1.45, HOUSE_Z + 0.1); house.add(wreath);
+  const lamp = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.28, 0.16, 2, 0.03), new THREE.MeshStandardMaterial({ color: 0xffd28a, emissive: 0xffb050, emissiveIntensity: 3 }));
+  lamp.position.set(-2.45, 1.9, HOUSE_Z + 0.12); house.add(lamp);
+  const porch = new THREE.PointLight(0xffb060, 3, 4, 2); porch.position.set(-2.45, 1.8, HOUSE_Z + 0.5); house.add(porch);
+  for (const wx of [-6, 4.6, 6.6]) {
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.1), new THREE.MeshStandardMaterial({ color: 0x223040, emissive: 0xffc070, emissiveIntensity: wx < 0 ? 0.9 : 0.25, roughness: 0.15 }));
+    win.position.set(wx, 1.9, HOUSE_Z + 0.02); house.add(win);
+    const sill = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 0.2), trimMat); sill.position.set(wx, 1.3, HOUSE_Z + 0.08); house.add(sill);
+    const sillSnow = new THREE.Mesh(new RoundedBoxGeometry(1.5, 0.07, 0.2, 2, 0.03), snowCap); sillSnow.position.set(wx, 1.37, HOUSE_Z + 0.08); house.add(sillSnow);
+  }
+  // Eaves with a heavy snow load and a row of icicles.
+  const eave = new THREE.Mesh(new THREE.BoxGeometry(16.4, 0.18, 0.7), trimMat); eave.position.set(0, 4.65, HOUSE_Z + 0.2); eave.castShadow = true; house.add(eave);
+  const load = new THREE.Mesh(new RoundedBoxGeometry(16.6, 0.42, 1.0, 4, 0.18), snowCap); load.position.set(0, 4.95, HOUSE_Z + 0.25); load.castShadow = true; house.add(load);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(16.6, 0.4, 5), snowCap); roof.position.set(0, 6.0, HOUSE_Z - 2); roof.rotation.x = 0.55; roof.castShadow = true; house.add(roof);
+  const iceMat = new THREE.MeshPhysicalMaterial({ color: 0xdfefff, roughness: 0.05, transmission: 0.85, thickness: 0.05, ior: 1.31 });
+  for (let x = -7.8; x < 7.8; x += rand(0.18, 0.5)) {
+    const l = rand(0.08, 0.55), ic = new THREE.Mesh(new THREE.ConeGeometry(rand(0.02, 0.045), l, 8), iceMat);
+    ic.rotation.x = Math.PI; ic.position.set(x, 4.56 - l / 2, HOUSE_Z + 0.5); house.add(ic);
+  }
+}
+scene.add(house);
+
+// The street: ploughed asphalt beyond the kerb, with a bank of grey plough spoil along it.
+{
+  const roadTex = canvasTex(512, 512, (g, w, h) => { g.fillStyle = '#2a2b2e'; g.fillRect(0, 0, w, h); speckle(g, w, h, 20000, ['#202124', '#36373b', '#44454a'], [1, 2]); }, true, [10, 2]);
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(60, 9), new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.35, metalness: 0.0, color: 0x9a9a9a }));
+  road.rotation.x = -Math.PI / 2; road.position.set(0, -0.005, A0 + AREA + 4.5); road.receiveShadow = true; scene.add(road);
+  const kerb = new THREE.Mesh(new THREE.BoxGeometry(60, 0.14, 0.3), new THREE.MeshStandardMaterial({ color: 0x8c8a86, roughness: 0.9 }));
+  kerb.position.set(0, 0.0, -A0 + 0.1); scene.add(kerb);
+  for (const [x0, x1] of [[-30, DRIVE.x0 - 0.3], [DRIVE.x1 + 0.3, 30]]) {
+    const bank = new THREE.Mesh(new RoundedBoxGeometry(x1 - x0, 0.6, 1.1, 4, 0.28), new THREE.MeshStandardMaterial({ color: 0xd6dbe2, roughness: 0.95 }));
+    bank.position.set((x0 + x1) / 2, 0.18, -A0 + 0.75); bank.castShadow = bank.receiveShadow = true; scene.add(bank);
+  }
+  // Untouched snow beyond the yard: behind the house and past either side.
+  const deepMat = new THREE.MeshStandardMaterial({ color: 0xeef2f7, roughness: 0.9 });
+  for (const [w, d, x, z] of [[80, 30, 0, HOUSE_Z - 15], [30, AREA, -A0 + 15, 0], [30, AREA, A0 - 15, 0]]) {
+    const deep = new THREE.Mesh(new THREE.PlaneGeometry(w, d), deepMat);
+    deep.rotation.x = -Math.PI / 2; deep.position.set(x, 0.3, z); deep.receiveShadow = true; scene.add(deep);
+  }
+  // Mailbox on its post, wearing a cap of snow.
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.1, 0.1), new THREE.MeshStandardMaterial({ color: 0x4a3a2c, roughness: 0.9 }));
+  post.position.set(-1.6, 0.55, 5.6); post.castShadow = true; scene.add(post);
+  const box = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.24, 0.5, 3, 0.1), new THREE.MeshStandardMaterial({ color: 0x1d2a3a, roughness: 0.4, metalness: 0.5 }));
+  box.position.set(-1.6, 1.2, 5.6); box.castShadow = true; scene.add(box);
+  const boxCap = new THREE.Mesh(new RoundedBoxGeometry(0.28, 0.12, 0.54, 3, 0.05), snowCap); boxCap.position.set(-1.6, 1.37, 5.6); boxCap.castShadow = true; scene.add(boxCap);
+}
+
+// Spruce trees: layered skirts of dark needles, each holding a ledge of snow.
+{
+  const needle = new THREE.MeshStandardMaterial({ color: 0x1f3322, roughness: 0.9 });
+  for (const t of TREES) {
+    const tree = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08 * t.s, 0.14 * t.s, 1.2 * t.s, 10), new THREE.MeshStandardMaterial({ map: barkTex, roughness: 0.95 }));
+    trunk.position.y = 0.6 * t.s; trunk.castShadow = true; tree.add(trunk);
+    for (let k = 0; k < 7; k++) {
+      const r = (1.25 - k * 0.15) * t.s, y = (0.7 + k * 0.62) * t.s, h = 1.1 * t.s;
+      const geo = new THREE.ConeGeometry(r, h, 18, 3, true);
+      const p = geo.attributes.position;
+      for (let i = 0; i < p.count; i++) { const a = Math.atan2(p.getZ(i), p.getX(i)); const k2 = 1 + 0.12 * Math.sin(a * 9 + k) * (p.getY(i) < 0 ? 1 : 0.2); p.setX(i, p.getX(i) * k2); p.setZ(i, p.getZ(i) * k2); }
+      geo.computeVertexNormals();
+      const skirt = new THREE.Mesh(geo, needle); skirt.position.y = y; skirt.castShadow = true; skirt.receiveShadow = true; tree.add(skirt);
+      const capGeo = new THREE.ConeGeometry(r * 0.92, h * 0.55, 18, 1, true);
+      const cap = new THREE.Mesh(capGeo, snowCap); cap.position.y = y + h * 0.18; cap.castShadow = true; tree.add(cap);
+    }
+    tree.position.set(t.x, 0, t.z); tree.rotation.y = rand(0, 6);
+    scene.add(tree);
+  }
+}
+
+// ───────────────────────────── The snowblower ─────────────────────────────
+
+const red = new THREE.MeshPhysicalMaterial({ color: 0xb3261c, roughness: 0.35, metalness: 0.2, clearcoat: 0.6, clearcoatRoughness: 0.25 });
+const black = new THREE.MeshStandardMaterial({ color: 0x1a1b1d, roughness: 0.6 });
+const rubber = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.95 });
+const steel = new THREE.MeshStandardMaterial({ color: 0xc4c8cc, metalness: 1, roughness: 0.3 });
+const engMat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.6, roughness: 0.45 });
+
+function tire(r, w) {
+  const geo = new THREE.CylinderGeometry(r, r, w, 36, 1);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) { const a = Math.atan2(p.getZ(i), p.getX(i)), rr = Math.hypot(p.getX(i), p.getZ(i)); if (rr > r * 0.9) { const k = 1 + (Math.sin(a * 14) > 0.2 ? 0.08 : 0); p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); } }
+  geo.computeVertexNormals();
+  const g = new THREE.Group();
+  const t = new THREE.Mesh(geo, rubber); t.rotation.z = Math.PI / 2;
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 0.55, w + 0.01, 24), steel); hub.rotation.z = Math.PI / 2;
+  g.add(t, hub);
+  return g;
+}
+function makeBlower() {
+  const g = new THREE.Group(), body = new THREE.Group();
+  // Auger housing: a half drum across the front with the spiral auger inside and a scraper bar under it.
+  const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.64, 32, 1, true, Math.PI, Math.PI), red);
+  housing.material.side = THREE.DoubleSide;
+  housing.rotation.z = Math.PI / 2; housing.position.set(0, 0.27, 0.32);
+  const ends = [-0.32, 0.32].map(x => { const e = new THREE.Mesh(new THREE.CircleGeometry(0.26, 32, Math.PI / 2, Math.PI), red); e.rotation.y = Math.PI / 2 * Math.sign(x); e.position.set(x, 0.27, 0.32); return e; });
+  const auger = new THREE.Group();
+  const helix = (dir) => new THREE.TubeGeometry(new THREE.CatmullRomCurve3(Array.from({ length: 40 }, (_, i) => { const t = i / 39, a = t * Math.PI * 4 * dir; return new THREE.Vector3((t - 0.5) * 0.6, Math.cos(a) * 0.17, Math.sin(a) * 0.17); })), 80, 0.022, 6);
+  auger.add(new THREE.Mesh(helix(1), steel));
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.62, 12), steel); shaft.rotation.z = Math.PI / 2; auger.add(shaft);
+  auger.position.set(0, 0.24, 0.36);
+  const scraper = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.03, 0.05), steel); scraper.position.set(0, 0.015, 0.5);
+  const skids = [-0.34, 0.34].map(x => { const s = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.08, 0.22, 2, 0.01), engMat); s.position.set(x, 0.05, 0.36); return s; });
+  // Engine deck behind: engine with cooling fins, recoil starter, fuel cap and the chute.
+  const deck = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.18, 0.42, 4, 0.05), red); deck.position.set(0, 0.32, 0.02);
+  const block = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.14, 0.22, 28, 5), engMat); block.position.set(0, 0.5, -0.02);
+  const shroud = new THREE.Mesh(new RoundedBoxGeometry(0.34, 0.2, 0.3, 4, 0.06), black); shroud.position.set(0, 0.66, -0.04);
+  const starter = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 0.03, 28), engMat); starter.rotation.z = Math.PI / 2; starter.position.set(0.19, 0.6, -0.04);
+  const fuel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 16), new THREE.MeshStandardMaterial({ color: 0xd8b21a, roughness: 0.5 })); fuel.position.set(-0.08, 0.78, -0.02);
+  const chute = new THREE.Group();
+  const chuteTube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.25, 0.02), new THREE.Vector3(0.06, 0.42, 0.04), new THREE.Vector3(0.18, 0.5, 0.05)]), 20, 0.06, 14, false), red);
+  chute.add(chuteTube); chute.position.set(-0.12, 0.42, 0.2);
+  // Wheels and the handle with its controls.
+  const wl = tire(0.17, 0.09), wr = tire(0.17, 0.09);
+  wl.position.set(-0.3, 0.17, -0.12); wr.position.set(0.3, 0.17, -0.12);
+  const tubeMat = new THREE.MeshStandardMaterial({ color: 0x2b2d30, metalness: 0.6, roughness: 0.4 });
+  for (const s of [-1, 1]) {
+    const c = new THREE.CatmullRomCurve3([new THREE.Vector3(s * 0.22, 0.4, -0.12), new THREE.Vector3(s * 0.24, 0.65, -0.45), new THREE.Vector3(s * 0.25, 0.95, -0.78), new THREE.Vector3(s * 0.25, 1.02, -0.86)]);
+    body.add(new THREE.Mesh(new THREE.TubeGeometry(c, 20, 0.014, 10), tubeMat));
+  }
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.52, 14), rubber); grip.rotation.z = Math.PI / 2; grip.position.set(0, 1.02, -0.86);
+  const bail = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.008, 8, 24, Math.PI), new THREE.MeshStandardMaterial({ color: 0xe0c020, roughness: 0.5 })); bail.position.set(0, 0.98, -0.8); bail.rotation.x = -0.5;
+  const dash = new THREE.Mesh(new RoundedBoxGeometry(0.36, 0.06, 0.12, 3, 0.02), black); dash.position.set(0, 0.92, -0.7); dash.rotation.x = -0.6;
+  body.add(housing, ...ends, scraper, ...skids, deck, block, shroud, starter, fuel, chute, grip, bail, dash);
+  g.add(body, auger, wl, wr);
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.userData = { auger, chute, wheels: [wl, wr], body };
+  return g;
+}
+const blower = makeBlower();
+blower.position.set(0.8, 0, 5.4);
+blower.rotation.y = Math.PI;
+scene.add(blower);
+let heading = Math.PI;
+
+function makeShovel() {
+  const g = new THREE.Group();
+  const bladeGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.6, 24, 1, true, -0.55, 1.1);
+  bladeGeo.rotateZ(Math.PI / 2); bladeGeo.translate(0, 0.33, -0.08);
+  const blade = new THREE.Mesh(bladeGeo, new THREE.MeshStandardMaterial({ color: 0x1e3a6e, roughness: 0.45, side: THREE.DoubleSide }));
+  const wear = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.025, 0.012), steel); wear.position.set(0, 0.012, 0.0);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 1.2, 12), steel); handle.position.set(0, 0.62, -0.5); handle.rotation.x = -0.9;
+  const dgrip = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.014, 8, 20), black); dgrip.position.set(0, 1.0, -0.98); dgrip.rotation.x = -0.9;
+  const load = new THREE.Mesh(new THREE.SphereGeometry(0.28, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), snowCap);
+  load.scale.set(1, 0.6, 0.7); load.position.set(0, 0.0, 0.12);
+  g.add(blade, wear, handle, dgrip, load);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g.userData = { load };
+  return g;
+}
+function makeSpreader() {
+  const g = new THREE.Group();
+  const hopper = new THREE.Mesh(new THREE.LatheGeometry([[0.03, 0], [0.16, 0.18], [0.17, 0.32], [0.0, 0.32]].map(([r, y]) => new THREE.Vector2(r, y)), 32), new THREE.MeshStandardMaterial({ color: 0x23262a, roughness: 0.45 }));
+  hopper.position.y = 0.55;
+  const saltTop = new THREE.Mesh(new THREE.CircleGeometry(0.16, 32), new THREE.MeshStandardMaterial({ color: 0xf2efe8, roughness: 0.9 })); saltTop.rotation.x = -Math.PI / 2; saltTop.position.y = 0.84;
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.01, 24), new THREE.MeshStandardMaterial({ color: 0xd06a1c, roughness: 0.5 })); disc.position.y = 0.52;
+  const crank = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.01, 8, 16), steel); crank.position.set(0.18, 0.7, 0); crank.rotation.y = Math.PI / 2;
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.5, 10), black); handle.position.set(0, 0.95, -0.22); handle.rotation.x = 0.8;
+  g.add(hopper, saltTop, disc, crank, handle);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g.userData = { disc };
+  return g;
+}
+const shovel = makeShovel(), spreader = makeSpreader();
+shovel.visible = spreader.visible = false;
+scene.add(shovel, spreader);
+
+// ───────────────────────────── Particles ─────────────────────────────
+// Thrown snow, falling snow and salt grains, drawn as soft points.
+
+const MAXP = 6000;
+function points(color, size) {
+  const pos = new Float32Array(MAXP * 3), g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  const m = new THREE.PointsMaterial({ color, size, transparent: true, opacity: 0.95, depthWrite: false, map: canvasTex(32, 32, (c, w, h) => { const r = c.createRadialGradient(16, 16, 0, 16, 16, 16); r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.5, 'rgba(255,255,255,0.8)'); r.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = r; c.fillRect(0, 0, w, h); }) });
+  const p = new THREE.Points(g, m); p.frustumCulled = false; scene.add(p);
+  return { pos, g, list: [] };
+}
+const plume = points(0xffffff, 0.07), flakes = points(0xffffff, 0.035), grains = points(0xf4f2ee, 0.025);
+const FLAKES = mobile ? 900 : 2200;
+for (let i = 0; i < FLAKES; i++) flakes.list.push({ x: rand(-9, 9), y: rand(0, 9), z: rand(-8, 10), vx: 0, vy: -rand(0.4, 0.8), vz: 0, w: rand(0, 6) });
+
+// ───────────────────────────── Layout ─────────────────────────────
+
+const camBase = new THREE.Vector3(), lookAt = new THREE.Vector3(0.6, 0, -0.4);
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  const vfov = THREE.MathUtils.degToRad(camera.fov), hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+  // From the street end, looking up the drive to the garage.
+  const needW = camera.aspect < 1 ? 3.2 : 6.6, needH = 5.4;
+  const dist = Math.max(needW / Math.tan(hfov / 2), needH / Math.tan(vfov / 2));
+  camBase.set(camera.aspect < 1 ? 1.2 : 2.2, dist * 0.5, 2 + dist * 0.85);
+  lookAt.set(0.8, 0.2, camera.aspect < 1 ? -0.6 : -1.6);
+  scene.fog.near = dist * 1.4; scene.fog.far = dist * 3.4;
+}
+addEventListener('resize', resize);
+resize();
+
+// ───────────────────────────── Sound ─────────────────────────────
+
+let audio = null, S = null;
+function ensureAudio() {
+  if (!audio) {
+    try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    const len = audio.sampleRate * 2, nb = audio.createBuffer(1, len, audio.sampleRate), d = nb.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const noise = () => { const s = audio.createBufferSource(); s.buffer = nb; s.loop = true; s.start(); return s; };
+    const chain = (src, type, f, q) => { const fl = audio.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q; const g = audio.createGain(); g.gain.value = 0; src.connect(fl).connect(g).connect(audio.destination); return g; };
+    const fire = audio.createOscillator(); fire.type = 'sawtooth'; fire.frequency.value = 52; fire.start();
+    const rock = audio.createOscillator(); rock.frequency.value = 2.8; const ra = audio.createGain(); ra.gain.value = 2; rock.connect(ra).connect(fire.frequency); rock.start();
+    S = {
+      fire, engine: chain(fire, 'lowpass', 420, 1.1), exhaust: chain(noise(), 'bandpass', 240, 0.8),
+      whoosh: chain(noise(), 'bandpass', 900, 0.5), scrape: chain(noise(), 'bandpass', 2400, 2.5), crunch: chain(noise(), 'bandpass', 700, 0.9),
+      patter: chain(noise(), 'highpass', 5500, 1.0), wind: chain(noise(), 'lowpass', 400, 0.5),
+    };
+    S.wind.gain.value = 0.035;
+  }
+  if (audio.state === 'suspended') audio.resume();
+}
+const level = (k, v, tc = 0.06) => { if (S) S[k].gain.setTargetAtTime(v, audio.currentTime, tc); };
+
+// ──────────────────────────── Controls ────────────────────────────
+
+const TOOLS = ['blower', 'shovel', 'salt'];
+let tool = 'blower', down = false, hasPointer = false;
+const pointer = new THREE.Vector2(), ray = new THREE.Raycaster(), groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const target = new THREE.Vector3(), tmp = new THREE.Vector3();
+function setTool(name) { tool = name; for (const b of document.querySelectorAll('.dock [data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === name)); }
+for (const b of document.querySelectorAll('.dock button')) b.addEventListener('click', () => b.dataset.tool ? setTool(b.dataset.tool) : (freshSnow(), done = false));
+addEventListener('keydown', e => { const k = e.key.toLowerCase(); if (k >= '1' && k <= '3') setTool(TOOLS[+k - 1]); else if (k === 'n') { freshSnow(); done = false; } });
+canvas.addEventListener('pointerdown', e => { ensureAudio(); down = true; try { canvas.setPointerCapture(e.pointerId); } catch { /* gone */ } setPointer(e); });
+canvas.addEventListener('pointermove', setPointer);
+const release = () => { if (down && tool === 'shovel') dumpShovel(); down = false; };
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hasPointer = false; });
+function setPointer(e) { pointer.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); hasPointer = true; }
+
+// ───────────────────────────── Moving snow ─────────────────────────────
+
+function eachIn(cx, cz, halfW, halfL, ang, fn) {
+  const [ti, tj] = toT(cx, cz), r = Math.hypot(halfW, halfL) / cellM + 1;
+  const c = Math.cos(ang), s = Math.sin(ang);
+  for (let j = Math.max(0, Math.floor(tj - r)); j <= Math.min(N - 1, Math.ceil(tj + r)); j++) {
+    for (let i = Math.max(0, Math.floor(ti - r)); i <= Math.min(N - 1, Math.ceil(ti + r)); i++) {
+      const x = A0 + (i + 0.5) * cellM - cx, z = A0 + (j + 0.5) * cellM - cz;
+      const lx = x * c - z * s, lz = x * s + z * c;
+      if (Math.abs(lx) <= halfW && Math.abs(lz) <= halfL) fn(j * N + i, lx, lz);
+    }
+  }
+  dirty = true;
+}
+function deposit(x, z, vol) {
+  const [ti, tj] = toT(x, z), r = 0.16 / cellM;
+  if (ti < 0 || tj < 0 || ti >= N || tj >= N) return;
+  let wsum = 0;
+  const cells = [];
+  for (let j = Math.max(0, Math.floor(tj - r)); j <= Math.min(N - 1, Math.ceil(tj + r)); j++) for (let i = Math.max(0, Math.floor(ti - r)); i <= Math.min(N - 1, Math.ceil(ti + r)); i++) {
+    const d = Math.hypot(i - ti, j - tj) / r;
+    if (d < 1) { const w = 1 - d * d; cells.push([j * N + i, w]); wsum += w; }
+  }
+  const h = vol / (cellM * cellM) / HMAX;
+  for (const [k, w] of cells) snow[k] = Math.min(1.6, snow[k] + h * w / wsum);
+  dirty = true;
+}
+const FILM = 0.007 / HMAX;
+
+// The snowblower's intake takes everything in front of it down to a thin packed film and
+// throws it, as a plume out of the chute, onto the nearest lawn.
+let thrown = 0;
+function blow(dt) {
+  let removed = 0;
+  eachIn(blower.position.x + Math.sin(heading) * 0.34, blower.position.z + Math.cos(heading) * 0.34, 0.33, 0.14, heading, k => {
+    if (snow[k] > FILM) { removed += snow[k] - FILM; snow[k] = FILM; }
+  });
+  const vol = removed * HMAX * cellM * cellM;
+  thrown += vol;
+  const side = blower.position.x < (DRIVE.x0 + DRIVE.x1) / 2 ? -1 : 1;
+  const n = Math.min(60, Math.round(vol * 900));
+  for (let i = 0; i < n; i++) {
+    const sp = rand(4.6, 6.2), out = rand(0.8, 1.0);
+    emit(plume, { x: blower.position.x - 0.12, y: 0.95, z: blower.position.z, vx: side * sp * out + rand(-0.3, 0.3), vy: rand(3.0, 4.2), vz: rand(-0.6, 0.6) + Math.cos(heading) * 0.4, vol: vol / n, life: 3 });
+  }
+  return vol;
+}
+function emit(L, p) { if (L.list.length < MAXP) L.list.push(p); }
+
+// The shovel scrapes cleaner than the blower but only carries so much; it drops its load where you let go.
+let shovelLoad = 0;
+const SHOVEL_CAP = 0.045;
+function shovelPush(x, z, ang) {
+  let got = 0;
+  eachIn(x, z, 0.3, 0.06, ang, k => {
+    if (shovelLoad >= SHOVEL_CAP) return;
+    const floor = 0.002 / HMAX;
+    if (snow[k] > floor) { const take = snow[k] - floor; got += take; snow[k] = floor; shovelLoad += take * HMAX * cellM * cellM; }
+  });
+  return got;
+}
+function dumpShovel() {
+  if (shovelLoad <= 0) return;
+  const fx = Math.sin(shovelAng), fz = Math.cos(shovelAng);
+  for (let k = 0; k < 6; k++) deposit(shovel.position.x + fx * 0.2 + rand(-0.15, 0.15), shovel.position.z + fz * 0.2 + rand(-0.15, 0.15), shovelLoad / 6);
+  shovelLoad = 0;
+}
+
+// Salt melts the thin stuff; it barely dents deep snow.
+function stepSalt(dt) {
+  for (let k = 0; k < N * N; k++) {
+    if (salt[k] <= 0) continue;
+    if (snow[k] < 0.08) snow[k] = Math.max(0, snow[k] - salt[k] * dt * 0.012);
+    salt[k] = Math.max(0, salt[k] - dt * 0.004);
+  }
+  dirty = true;
+}
+
+// ───────────────────────────── Frame ─────────────────────────────
+
+let done = false, statsClock = 0, lastStatus = '', saltClock = 0, shovelAng = 0, rolled = 0, load = 0;
+const clock = new THREE.Clock();
+const shovelPrev = new THREE.Vector3();
+let pavedCells = null;
+function stats() {
+  if (!pavedCells) { pavedCells = []; for (let j = 0; j < N; j += 2) for (let i = 0; i < N; i += 2) if (paved(A0 + (i + 0.5) * cellM, A0 + (j + 0.5) * cellM)) pavedCells.push(j * N + i); }
+  let clear = 0, bare = 0;
+  for (const k of pavedCells) { if (snow[k] * HMAX < 0.02) clear++; if (snow[k] * HMAX < 0.003) bare++; }
+  const pct = Math.round(100 * clear / pavedCells.length), barePct = Math.round(100 * bare / pavedCells.length);
+  if (!done && pct >= 97 && barePct >= 85) done = true;
+  const text = done ? 'Driveway done' : `Cleared ${pct}%${barePct > 5 ? ` / Bare ${barePct}%` : ''}`;
+  if (text !== lastStatus) statusEl.textContent = lastStatus = text;
+}
+
+function frame() {
+  const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime;
+  camera.position.copy(camBase).add(tmp.set(pointer.x * 0.3, 0, 0));
+  camera.lookAt(lookAt);
+
+  let ground = null;
+  if (hasPointer) { ray.setFromCamera(pointer, camera); ground = ray.ray.intersectPlane(groundPlane, new THREE.Vector3()); }
+
+  // ── Snowblower: walked toward the pointer while held; it ploughs and throws.
+  const running = tool === 'blower' && down && ground;
+  let thrownNow = 0;
+  if (running) {
+    const dx = ground.x - blower.position.x, dz = ground.z - blower.position.z, d = Math.hypot(dx, dz);
+    let diff = Math.atan2(dx, dz) - heading;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    heading += Math.max(-dt * 2.4, Math.min(dt * 2.4, diff));
+    // Deep snow slows it down.
+    const speed = d > 0.15 ? Math.min(1.4, d * 3) * (1 - Math.min(0.3, load * 0.8)) : 0;
+    const fwd = Math.max(0.25, Math.cos(diff));
+    blower.position.x += Math.sin(heading) * speed * fwd * dt;
+    blower.position.z += Math.cos(heading) * speed * fwd * dt;
+    rolled += speed * fwd * dt;
+    thrownNow = blow(dt);
+  }
+  load += (Math.min(1, thrownNow / Math.max(dt, 1e-3) * 25) - load) * 0.1;
+  blower.position.x = Math.max(A0 + 0.4, Math.min(-A0 - 0.4, blower.position.x));
+  blower.position.z = Math.max(HOUSE_Z + 0.55, Math.min(-A0 - 0.1, blower.position.z));
+  for (const tr of TREES) { const dx = blower.position.x - tr.x, dz = blower.position.z - tr.z, d = Math.hypot(dx, dz), m = 0.9 * tr.s; if (d < m) { blower.position.x = tr.x + dx / d * m; blower.position.z = tr.z + dz / d * m; } }
+  blower.rotation.y = heading;
+  blower.userData.auger.rotation.x += dt * (running ? 26 : 0);
+  for (const w of blower.userData.wheels) w.rotation.x = rolled / 0.17;
+  blower.userData.body.position.y = running ? Math.sin(t * 70) * 0.002 : 0;
+  // The chute turns to throw toward the nearest lawn.
+  const side = blower.position.x < (DRIVE.x0 + DRIVE.x1) / 2 ? -1 : 1;
+  blower.userData.chute.rotation.y += (((side > 0 ? 0 : Math.PI) - heading + Math.PI * 1.5) - blower.userData.chute.rotation.y) * 0.08;
+
+  // ── Shovel.
+  shovel.visible = tool === 'shovel' && !!ground;
+  if (shovel.visible) {
+    const mv = tmp.copy(ground).sub(shovelPrev);
+    if (mv.lengthSq() > 1e-5) { const want = Math.atan2(mv.x, mv.z); let diff = Math.atan2(Math.sin(want - shovelAng), Math.cos(want - shovelAng)); shovelAng += diff * Math.min(1, dt * 6); }
+    shovel.position.set(ground.x, down ? 0 : 0.08, ground.z);
+    shovel.rotation.set(0, shovelAng, 0);
+    if (down) {
+      const steps = Math.max(1, Math.ceil(shovelPrev.distanceTo(ground) / 0.04));
+      for (let s = 1; s <= steps; s++) shovelPush(shovelPrev.x + (ground.x - shovelPrev.x) * s / steps, shovelPrev.z + (ground.z - shovelPrev.z) * s / steps, shovelAng);
+    }
+    const ld = shovel.userData.load, f = Math.min(1, shovelLoad / SHOVEL_CAP);
+    ld.visible = f > 0.02; ld.scale.set(0.3 + 0.7 * f, 0.2 + 0.6 * f, 0.3 + 0.5 * f);
+    shovelPrev.copy(ground);
+  }
+
+  // ── Salt spreader: flings grains in a fan ahead; they land and start to melt the film.
+  spreader.visible = tool === 'salt' && !!ground;
+  if (spreader.visible) {
+    spreader.position.set(ground.x, 0, ground.z + 0.15);
+    spreader.userData.disc.rotation.y += dt * (down ? 30 : 0);
+    if (down) for (let i = 0; i < 12; i++) { const a = rand(0, Math.PI * 2), sp = rand(1.2, 3.4); emit(grains, { x: ground.x, y: 0.52, z: ground.z + 0.15, vx: Math.cos(a) * sp, vy: rand(0.4, 1.2), vz: Math.sin(a) * sp, life: 2 }); }
+  }
+
+  // ── Particles.
+  stepPoints(plume, dt, (p) => { deposit(p.x, p.z, p.vol); });
+  stepPoints(grains, dt, (p) => {
+    const [ti, tj] = toT(p.x, p.z);
+    if (ti >= 0 && tj >= 0 && ti < N && tj < N) { const k = (tj | 0) * N + (ti | 0); salt[k] = Math.min(1, salt[k] + 0.35); }
+  });
+  for (const f of flakes.list) {
+    f.y += f.vy * dt; f.x += Math.sin(t * 0.7 + f.w) * 0.25 * dt + 0.15 * dt; f.z += Math.cos(t * 0.5 + f.w) * 0.15 * dt;
+    if (f.y < 0) { f.y = 9; f.x = rand(-9, 9); f.z = rand(-8, 10); }
+  }
+  writePoints(flakes);
+  saltClock += dt;
+  if (saltClock > 0.2) { stepSalt(saltClock); saltClock = 0; }
+
+  if (dirty) upload();
+
+  // ── Sound.
+  if (S) {
+    S.fire.frequency.setTargetAtTime(52 - load * 10, audio.currentTime, 0.15);
+    level('engine', running ? 0.13 : 0, 0.2); level('exhaust', running ? 0.1 + load * 0.08 : 0, 0.2); level('whoosh', running ? 0.04 + load * 0.2 : 0, 0.08);
+    const shoving = tool === 'shovel' && down;
+    level('scrape', shoving ? 0.06 : 0, 0.04); level('crunch', shoving ? 0.05 + Math.min(0.15, shovelLoad * 4) : 0, 0.05);
+    level('patter', tool === 'salt' && down ? 0.05 : 0, 0.05);
+  }
+
+  statsClock += dt;
+  if (statsClock > 0.5) { statsClock = 0; stats(); }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+function stepPoints(L, dt, land) {
+  const list = L.list;
+  let w = 0;
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    p.vy -= 9.8 * dt; p.vx *= 0.995; p.vz *= 0.995;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    p.life -= dt;
+    const [ti, tj] = toT(p.x, p.z);
+    const h = ti >= 0 && tj >= 0 && ti < N && tj < N ? snow[(tj | 0) * N + (ti | 0)] * HMAX : 0;
+    if (p.y <= h) { land(p); continue; }
+    if (p.life > 0) list[w++] = p;
+  }
+  list.length = w;
+  writePoints(L);
+}
+function writePoints(L) {
+  const n = Math.min(L.list.length, MAXP);
+  for (let i = 0; i < n; i++) { const p = L.list[i]; L.pos[i * 3] = p.x; L.pos[i * 3 + 1] = p.y; L.pos[i * 3 + 2] = p.z; }
+  L.g.setDrawRange(0, n);
+  L.g.attributes.position.needsUpdate = true;
+}
+
+// Preview: the drive half blown, the walk shovelled, the throw piled on the lawns.
+if (new URLSearchParams(location.search).has('demo')) {
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = A0 + (i + 0.5) * cellM, z = A0 + (j + 0.5) * cellM, k = j * N + i;
+    if (x > 0.3 && x < DRIVE.x1 && z > -5.4 && z < 5.0) snow[k] = x < 0.95 ? (z > 1.4 ? FILM : snow[k]) : FILM;
+    if (WALK.some(w => inRect(w, x, z))) snow[k] = 0.002 / HMAX;
+    if (x > DRIVE.x1 + 0.6 && x < DRIVE.x1 + 2.6 && z > -5 && z < 4.5) snow[k] += 0.22 * Math.max(0, Math.sin((x - DRIVE.x1 - 0.6) / 2 * Math.PI)) / HMAX * (0.8 + 0.4 * vn2(x * 2, z * 2));
+  }
+  blower.position.set(0.62, 0, 1.1); heading = Math.PI;
+  dirty = true;
+}
+requestAnimationFrame(frame);
+</script>
+<script defer src="/visit-counter.js" data-project="snow-driveway"></script>
+</body>
+</html>
