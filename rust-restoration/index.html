@@ -194,8 +194,21 @@ scene.fog = new THREE.Fog(0x171512, 5.5, 12);
   glow(new THREE.Color(4.2, 4.2, 4.4), 5.5, 3, 0.4, 7, -3.2);              // overhead softbox, ahead of the camera
   // Key softbox where a flat face lying on the bench mirrors it, as a product photographer would place it:
   // a bright core in a dimmer diffuser, so polished faces show a gradient rather than a flat white card.
-  glow(new THREE.Color(0.75, 0.75, 0.8), 8, 4.2, 0, 5.4, -5.6);
-  glow(new THREE.Color(1.3, 1.3, 1.38), 4, 1.4, 0.6, 5.45, -5.5);
+  {
+    const box = new THREE.Mesh(new THREE.PlaneGeometry(9, 4.6), new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `varying vec2 vUv;
+        void main() {
+          vec2 c = vUv * 2.0 - 1.0;
+          float core = exp(-dot(c * vec2(1.6, 2.2), c * vec2(1.6, 2.2)));
+          float frame = smoothstep(1.0, 0.9, max(abs(c.x), abs(c.y)));
+          float seam = 1.0 - 0.55 * exp(-pow(c.x / 0.025, 2.0)) - 0.35 * exp(-pow((c.y - 0.35) / 0.02, 2.0));
+          gl_FragColor = vec4(vec3(1.0, 1.0, 1.04) * (0.12 + 2.3 * core) * frame * seam, 1.0);
+        }`,
+    }));
+    box.position.set(0.3, 5.4, -5.6); box.lookAt(0, 0, 0); env.add(box);
+  }
   glow(new THREE.Color(5, 4.9, 4.7), 1.1, 6, -6.5, 3.5, 1.5);           // strip lights either side
   glow(new THREE.Color(5, 4.9, 4.7), 1.1, 6, 6.5, 3.5, -1);
   glow(new THREE.Color(9, 9.4, 10.2), 4, 3, -4, 3, -7.5);               // window
@@ -696,8 +709,9 @@ float tri(sampler2D t, vec3 p, vec3 w, float s) {
       float forge = fbm3(q * 1.6, 3);
       vec3 steel = vec3(0.56, 0.57, 0.59) * (0.9 + 0.2 * forge);
       // Steel nobody has worked yet carries dull grey-black mill scale; the abrasives cut through to bright metal.
-      float worked = clamp(max(max(wheel, sanded), shine) * 1.4, 0.0, 1.0);
-      steel *= mix(0.42, 1.0, worked);
+      // The wire wheel leaves a satin grey; sanding and polishing bring it up to bright metal.
+      float wheeled = clamp(wheel * 1.4, 0.0, 1.0), refined = clamp(max(sanded, shine) * 1.4, 0.0, 1.0);
+      steel *= max(0.42 + 0.3 * wheeled, 0.42 + 0.58 * refined);
       steel *= 1.0 - 0.62 * pit;
       steel *= 1.0 - 0.4 * stamp * (1.0 - 0.6 * shine);
       float rough = 0.52 + 0.12 * forge;
@@ -739,7 +753,12 @@ float tri(sampler2D t, vec3 p, vec3 w, float s) {
     .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = cMetal;')
     .replace('#include <normal_fragment_maps>', `
       vec2 dHdxy = vec2(dFdx(cH), dFdy(cH)) * 0.05;
-      normal = perturbNormalArb(-vViewPosition, normal, dHdxy, faceDirection);`);
+      normal = perturbNormalArb(-vViewPosition, normal, dHdxy, faceDirection);`)
+    // A mirror catching the sun can exceed what a half-float target holds; the resulting Inf/NaN pixels
+    // would then be smeared by the bloom into black squares. Keep the HDR value finite and bounded.
+    .replace('#include <opaque_fragment>', `#include <opaque_fragment>
+      if (any(notEqual(gl_FragColor.rgb, gl_FragColor.rgb))) gl_FragColor.rgb = vec3(0.0);
+      gl_FragColor.rgb = min(gl_FragColor.rgb, vec3(48.0));`);
 };
 
 // ───────────────────────────── Piece in the scene ─────────────────────────────
@@ -1278,10 +1297,10 @@ function work(dt, speed) {
     });
   } else if (tool === 'wheel') {
     brush(RADIUS.wheel, (o, f) => {
-      A[o] = clamp255(A[o] + f * dt * (330 + 900 * A[o + 2] / 255));
+      A[o] = clamp255(A[o] + f * dt * (600 + 1600 * A[o + 2] / 255));
       if (A[o] < 230) rust += f;
       else {
-        B[o] = clamp255(B[o] + f * dt * 800);
+        B[o] = clamp255(B[o] + f * dt * 1300);
         B[o + 1] = clamp255(B[o + 1] - f * dt * 420);
         B[o + 2] = clamp255(B[o + 2] - f * dt * 560);
         A[o + 3] = clamp255(A[o + 3] - f * dt * 600);
@@ -1292,10 +1311,10 @@ function work(dt, speed) {
   } else if (tool === 'sand') {
     brush(RADIUS.sand, (o, f) => {
       const g = f * dt * motion;
-      A[o] = clamp255(A[o] + g * (A[o] < 160 ? 70 : 140));
+      A[o] = clamp255(A[o] + g * (A[o] < 160 ? 120 : 250));
       if (A[o] < 200) { rust += f; return; }
-      B[o + 1] = clamp255(B[o + 1] + g * 230);
-      B[o] = clamp255(B[o] - g * 190);
+      B[o + 1] = clamp255(B[o + 1] + g * 760);
+      B[o] = clamp255(B[o] - g * 340);
       B[o + 2] = clamp255(B[o + 2] - g * 230);
       A[o + 3] = clamp255(A[o + 3] - g * 300);
       A[o + 1] = clamp255(A[o + 1] - g * 300);
@@ -1305,8 +1324,8 @@ function work(dt, speed) {
     brush(RADIUS.polish, (o, f) => {
       if (A[o] < 225) return;
       const g = f * dt * motion, cap = 80 + 175 * B[o + 1] / 255;      // without sanding first, the pits and swirls stay
-      if (B[o + 2] < cap) B[o + 2] = Math.min(cap, B[o + 2] + g * (70 + 160 * B[o + 1] / 255));
-      A[o + 3] = clamp255(A[o + 3] + g * 260);
+      if (B[o + 2] < cap) B[o + 2] = Math.min(cap, B[o + 2] + g * (200 + 480 * B[o + 1] / 255));
+      A[o + 3] = clamp255(A[o + 3] + g * 400);
       A[o + 1] = clamp255(A[o + 1] - g * 400);
       metal += f;
     });
