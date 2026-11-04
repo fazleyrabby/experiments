@@ -138,6 +138,11 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const mobile = matchMedia('(hover: none)').matches || Math.min(innerWidth, innerHeight) < 600;
@@ -157,29 +162,71 @@ const maxAniso = renderer.capabilities.getMaxAnisotropy();
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x171512);
+// The lamp's pool of light: the bench falls away into the dark of the workshop.
+scene.fog = new THREE.Fog(0x171512, 5.5, 12);
 
-// A small workshop to reflect: dark walls, a tall window, two tube lights and a warm lamp.
-// Polished steel shows these as recognisable highlights rather than a blank white room.
+// A workshop to reflect. Polished steel is only as bright as what it mirrors, so the room is
+// graded like a real one (dark bench below, lit walls at the horizon, a pale ceiling) and carries
+// big softboxes, tube lights, a window and a warm lamp that slide across the steel as it turns.
 {
   const env = new THREE.Scene();
-  const room = new THREE.Mesh(new THREE.BoxGeometry(14, 7, 14), new THREE.MeshBasicMaterial({ color: 0x2a2520, side: THREE.BackSide }));
-  room.position.y = 2.5;
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: 0x14110e }));
-  floor.rotation.x = -Math.PI / 2; floor.position.y = -1;
-  const glow = (c, w, h, x, y, z, ry = 0, rx = 0) => {
+  const room = new THREE.Mesh(new THREE.SphereGeometry(12, 64, 32), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    vertexShader: 'varying vec3 vD; void main() { vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `varying vec3 vD;
+      float h(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
+      void main() {
+        float y = vD.y;
+        vec3 floorC = vec3(0.045, 0.028, 0.016), wall = vec3(0.2, 0.18, 0.16), ceil = vec3(0.1, 0.1, 0.11);
+        vec3 c = mix(floorC, wall, smoothstep(-0.18, 0.02, y));
+        c = mix(c, ceil, smoothstep(0.25, 0.75, y));
+        // Shelving and clutter along the walls: darker bands so the horizon reads as a room.
+        float a = atan(vD.z, vD.x);
+        float shelf = step(0.5, h(vec2(floor(a * 7.0), 1.0))) * smoothstep(0.02, 0.06, y) * (1.0 - smoothstep(0.2, 0.26, y));
+        c *= 1.0 - 0.55 * shelf;
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  }));
+  const glow = (c, w, h, x, y, z) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide }));
-    m.position.set(x, y, z); m.rotation.set(rx, ry, 0); env.add(m);
+    m.position.set(x, y, z); m.lookAt(0, 0, 0); env.add(m);
   };
-  glow(new THREE.Color(5.5, 6, 6.6), 3.2, 2.6, -6.9, 2.4, -1.5, Math.PI / 2);          // window
-  glow(new THREE.Color(9, 8.6, 8), 5, 0.25, 0, 5.9, -0.8, 0, Math.PI / 2);             // tube lights
-  glow(new THREE.Color(9, 8.6, 8), 5, 0.25, 0, 5.9, 1.4, 0, Math.PI / 2);
-  glow(new THREE.Color(7, 4.6, 2.4), 0.9, 0.9, 5.5, 3.2, 3.5, -Math.PI / 3);            // lamp
-  glow(new THREE.Color(0.55, 0.5, 0.42), 6, 2, 0, 1.5, -6.9);                           // pale back wall
-  env.add(room, floor);
-  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(env, 0.02).texture;
+  glow(new THREE.Color(4.2, 4.2, 4.4), 5.5, 3, 0.4, 7, -3.2);              // overhead softbox, ahead of the camera
+  // Key softbox where a flat face lying on the bench mirrors it, as a product photographer would place it:
+  // a bright core in a dimmer diffuser, so polished faces show a gradient rather than a flat white card.
+  glow(new THREE.Color(0.75, 0.75, 0.8), 8, 4.2, 0, 5.4, -5.6);
+  glow(new THREE.Color(1.3, 1.3, 1.38), 4, 1.4, 0.6, 5.45, -5.5);
+  glow(new THREE.Color(5, 4.9, 4.7), 1.1, 6, -6.5, 3.5, 1.5);           // strip lights either side
+  glow(new THREE.Color(5, 4.9, 4.7), 1.1, 6, 6.5, 3.5, -1);
+  glow(new THREE.Color(9, 9.4, 10.2), 4, 3, -4, 3, -7.5);               // window
+  glow(new THREE.Color(10, 6.4, 3.2), 1.2, 1.2, 6, 2.2, 5);             // warm lamp
+  glow(new THREE.Color(0.5, 0.48, 0.45), 7, 2.5, 0, 1.5, 9);            // lit wall behind the camera
+  for (const z of [-2, 0.5, 3]) glow(new THREE.Color(12, 11.6, 11), 6, 0.22, 0, 8, z);   // tube lights
+  env.add(room);
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(env, 0.015).texture;
 }
 
 const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
+
+// Post: multisampled HDR, a soft bloom so sparks and specular glints glow like they do through a
+// lens, then tone mapping and a whisper of film grain.
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: mobile ? 2 : 4 }));
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.22, 0.5, 1.1);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+const grain = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uTime; varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      float n = fract(sin(dot(gl_FragCoord.xy + uTime * 61.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+      c.rgb += n * 0.022 * (1.0 - c.rgb * 0.6);
+      gl_FragColor = c;
+    }`,
+});
+composer.addPass(grain);
 RectAreaLightUniformsLib.init();
 const tube = new THREE.RectAreaLight(0xfff4e6, 2.4, 4.2, 0.3);
 tube.position.set(0.3, 3.4, -0.4);
@@ -213,49 +260,108 @@ function fbm(x, y, s = 0, oct = 4) {
   return t / (1 - Math.pow(0.5, oct));
 }
 
-const BW = 9, BD = 6;
+const BW = 10, BD = 10, BZ = -2;    // bench size and how far it runs back from the piece
 const benchCanvas = document.createElement('canvas');
-benchCanvas.width = 2048; benchCanvas.height = 1366;
+benchCanvas.width = mobile ? 1536 : 2048; benchCanvas.height = Math.round(benchCanvas.width * BD / BW);
 const bench2d = benchCanvas.getContext('2d');
+// A second canvas carries height and wear for the bump and roughness maps.
+const benchHCanvas = document.createElement('canvas');
+benchHCanvas.width = benchCanvas.width; benchHCanvas.height = benchCanvas.height;
 function paintBench() {
-  const g = bench2d, W = benchCanvas.width, H = benchCanvas.height;
+  const g = bench2d, W = benchCanvas.width, H = benchCanvas.height, px = W / BW;   // pixels per unit
   const img = g.createImageData(W, H), d = img.data;
-  const planks = 7, ph = H / planks;
-  for (let p = 0; p < planks; p++) {
-    const tone = 0.82 + hash2(p, 3, 9) * 0.32, s = p * 17;
-    for (let y = 0; y < ph; y++) {
+  const himg = benchHCanvas.getContext('2d').createImageData(W, H), hd = himg.data;
+  // Planks of slightly different widths, each sawn from its own log: its own pith line, colour and ring spacing.
+  const edges = [0];
+  while (edges[edges.length - 1] < H) edges.push(edges[edges.length - 1] + px * (0.85 + Math.random() * 0.4));
+  edges[edges.length - 1] = H;
+  for (let p = 0; p + 1 < edges.length; p++) {
+    const y0 = Math.round(edges[p]), y1 = Math.round(edges[p + 1]), s = p * 17 + 3;
+    const tone = 0.86 + Math.random() * 0.26, warm = Math.random() * 0.08;
+    const pith = (y0 + y1) / 2 + (Math.random() - 0.5) * (y1 - y0) * 1.4;
+    const peak = Math.random() * W, arch = 1.4 + Math.random() * 2.2, rings = 3.5 + Math.random() * 3;
+    for (let y = y0; y < y1; y++) {
       for (let x = 0; x < W; x++) {
-        // Flat-sawn oak: long wavy grain lines with fine pores.
-        const yy = y + fbm(x * 0.0016, y * 0.01, s, 3) * 26;
-        const ring = 0.5 + 0.5 * Math.sin(yy * 0.34 + fbm(x * 0.0009, yy * 0.02, s + 3, 2) * 9);
-        const pores = vnoise(x * 0.9, yy * 0.18, s + 5) > 0.83 ? 0.82 : 1;
-        const v = (0.62 + 0.38 * ring) * pores * tone;
-        const k = ((p * ph + y) | 0) * W + x;
-        d[k * 4] = 112 * v; d[k * 4 + 1] = 76 * v; d[k * 4 + 2] = 46 * v; d[k * 4 + 3] = 255;
+        const ux = x / px, uy = (y - pith) / px;
+        // Flat-sawn grain: growth rings cut at a shallow angle make long arches ("cathedrals").
+        const warp = (fbm(ux * 0.35, uy * 2.2, s, 3) - 0.5) * 0.5;
+        const along = (x - peak) / W;
+        const rc = Math.abs(uy + warp * 0.6) + along * along * arch + warp * 0.15;
+        const ring = (rc * rings) % 1;
+        const late = smooth(0.62, 0.9, ring) * (1 - smooth(0.93, 1, ring));
+        // Open pores in the latewood and fine streaks running with the grain.
+        const streak = vnoise(ux * 2.2, uy * 70, s + 5);
+        const pore = late * (streak > 0.7 ? 0.25 : 0) + (vnoise(ux * 40, uy * 160, s + 9) > 0.86 ? 0.12 : 0);
+        const broad = fbm(ux * 0.4, uy * 0.8, s + 11, 3);
+        const v = tone * (0.74 + 0.36 * broad) * (1 - 0.2 * late - pore * 0.7) * (0.93 + 0.1 * streak);
+        const k = (y * W + x) * 4;
+        d[k] = 128 * v * (1 + warm); d[k + 1] = 86 * v; d[k + 2] = 50 * v * (1 - warm); d[k + 3] = 255;
+        const hgt = 150 - 50 * late - 120 * pore + 20 * streak;
+        hd[k] = hd[k + 1] = hd[k + 2] = hgt; hd[k + 3] = 255;
       }
     }
   }
   g.putImageData(img, 0, 0);
-  for (let p = 1; p < planks; p++) { g.fillStyle = 'rgba(12,8,4,0.85)'; g.fillRect(0, p * ph - 2, W, 4); }
-  for (let i = 0; i < 18; i++) {
-    const x = Math.random() * W, y = Math.random() * H, r = 30 + Math.random() * 150;
-    const rg = g.createRadialGradient(x, y, 0, x, y, r);
-    rg.addColorStop(0, `rgba(18,11,5,${0.15 + Math.random() * 0.25})`); rg.addColorStop(1, 'rgba(18,11,5,0)');
-    g.fillStyle = rg; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  const h2 = benchHCanvas.getContext('2d');
+  h2.putImageData(himg, 0, 0);
+  // Joints between planks: a dark gap with a softened arris either side.
+  for (let p = 1; p + 1 < edges.length; p++) {
+    const y = edges[p];
+    for (const [c, ctx] of [['rgba(10,6,3,0.92)', g], ['rgba(0,0,0,1)', h2]]) { ctx.fillStyle = c; ctx.fillRect(0, y - 2.5, W, 5); }
+    g.fillStyle = 'rgba(255,230,190,0.08)'; g.fillRect(0, y + 2.5, W, 2);
+    h2.fillStyle = 'rgba(40,40,40,0.6)'; h2.fillRect(0, y - 6, W, 3); h2.fillRect(0, y + 3, W, 3);
+  }
+  // Years of use: grime and oil soaked in, rings left by cans, scratches and the odd dent.
+  g.globalCompositeOperation = 'multiply';
+  for (let i = 0; i < 30; i++) {
+    const x = Math.random() * W, y = Math.random() * H, r = px * (0.2 + Math.random() * 1.4);
+    const rg = g.createRadialGradient(x, y, 0, x, y, r), a = 0.12 + Math.random() * 0.3;
+    rg.addColorStop(0, `rgba(70,48,30,${a})`); rg.addColorStop(1, 'rgba(70,48,30,0)');
+    g.fillStyle = rg; g.beginPath(); g.ellipse(x, y, r * (1 + Math.random()), r, Math.random() * 3, 0, Math.PI * 2); g.fill();
+  }
+  for (let i = 0; i < 3; i++) {
+    const x = Math.random() * W, y = Math.random() * H, r = px * (0.3 + Math.random() * 0.25);
+    g.strokeStyle = 'rgba(60,40,24,0.14)'; g.lineWidth = 2 + Math.random() * 3; g.filter = 'blur(2px)';
+    g.beginPath(); g.arc(x, y, r, Math.random() * 6, Math.random() * 6 + 4.5); g.stroke();
+  }
+  g.filter = 'none';
+  g.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < 260; i++) {
+    const x = Math.random() * W, y = Math.random() * H, l = px * (0.05 + Math.random() * 0.6), a = Math.random() * Math.PI;
+    const light = Math.random() < 0.6;
+    g.strokeStyle = light ? `rgba(230,190,140,${0.05 + Math.random() * 0.12})` : `rgba(30,18,8,${0.08 + Math.random() * 0.15})`;
+    g.lineWidth = 0.6 + Math.random() * 1.2;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + Math.cos(a) * l * 0.5 + (Math.random() - 0.5) * 10, y + Math.sin(a) * l * 0.5, x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+    h2.strokeStyle = 'rgba(60,60,60,0.5)'; h2.lineWidth = 1.2;
+    h2.beginPath(); h2.moveTo(x, y); h2.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); h2.stroke();
+  }
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * W, y = Math.random() * H, r = 2 + Math.random() * 7;
+    const rg = h2.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, 'rgba(40,40,40,0.8)'); rg.addColorStop(1, 'rgba(40,40,40,0)');
+    h2.fillStyle = rg; h2.beginPath(); h2.arc(x, y, r, 0, Math.PI * 2); h2.fill();
   }
 }
 paintBench();
 const benchTex = new THREE.CanvasTexture(benchCanvas);
 benchTex.colorSpace = THREE.SRGBColorSpace;
 benchTex.anisotropy = maxAniso;
-const bench = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD),
-  new THREE.MeshStandardMaterial({ map: benchTex, roughness: 0.74, metalness: 0, bumpMap: benchTex, bumpScale: 0.5, envMapIntensity: 0.35 }));
+const benchHTex = new THREE.CanvasTexture(benchHCanvas);
+benchHTex.anisotropy = maxAniso;
+// Rougher where the grain is open and in the scratches, a dull oiled sheen on the rest.
+const benchMat = new THREE.MeshStandardMaterial({ map: benchTex, roughness: 0.6, metalness: 0, bumpMap: benchHTex, bumpScale: 1.2, envMapIntensity: 0.3 });
+benchMat.onBeforeCompile = sh => {
+  sh.fragmentShader = sh.fragmentShader.replace('#include <roughnessmap_fragment>',
+    '#include <roughnessmap_fragment>\nroughnessFactor = clamp(0.92 - 0.42 * texture2D(bumpMap, vBumpMapUv).r, 0.3, 1.0);');
+};
+const bench = new THREE.Mesh(new THREE.PlaneGeometry(BW, BD), benchMat);
 bench.rotation.x = -Math.PI / 2;
+bench.position.z = BZ;
 bench.receiveShadow = true;
 scene.add(bench);
 let benchDirty = false;
 function dustOnBench(x, z, a) {
-  const u = (x + BW / 2) / BW, v = (z + BD / 2) / BD;
+  const u = (x + BW / 2) / BW, v = (z - BZ + BD / 2) / BD;
   if (u < 0 || u > 1 || v < 0 || v > 1) return;
   const r = 0.8 + Math.random() * 2;
   bench2d.fillStyle = `rgba(${105 + Math.random() * 50 | 0},${42 + Math.random() * 25 | 0},${15 + Math.random() * 10 | 0},${a})`;
@@ -348,15 +454,27 @@ function hatchet() {
   let geo = new THREE.ExtrudeGeometry(s, { depth: T, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.018, bevelSegments: 5, curveSegments: 28 });
   // Taper the cheeks from the full thickness at the eye down to a fine cutting edge.
   const pos = geo.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i) - T / 2;
+  const taper = x => {
     const t = smooth(-0.12, 0.84, x);
-    const k = (1 - t) * (1 - t * 0.35) * (1 + 0.08 * Math.sin(Math.min(1, t * 1.4) * Math.PI)) + 0.035;
-    pos.setZ(i, z * k);
-  }
+    return (1 - t) * (1 - t * 0.35) * (1 + 0.08 * Math.sin(Math.min(1, t * 1.4) * Math.PI)) + 0.035;
+  };
+  for (let i = 0; i < pos.count; i++) pos.setZ(i, (pos.getZ(i) - T / 2) * taper(pos.getX(i)));
   geo.deleteAttribute('normal'); geo.deleteAttribute('uv');
   geo = mergeVertices(geo, 1e-4);
   geo.computeVertexNormals();
+  // The cheeks are a few huge triangles fanned across the shape, so averaged normals show the fan as
+  // creases in a mirror finish. Give the flat faces the true normal of the tapered surface instead.
+  {
+    const p = geo.attributes.position, n = geo.attributes.normal;
+    for (let i = 0; i < p.count; i++) {
+      if (Math.abs(n.getZ(i)) < 0.8) continue;
+      const x = p.getX(i), z = p.getZ(i), k = taper(x);
+      if (k < 1e-3) continue;
+      const slope = (z / k) * (taper(x + 1e-3) - taper(x - 1e-3)) / 2e-3;     // dz/dx at this height on the cheek
+      const s = Math.sign(n.getZ(i)), len = Math.hypot(slope, 1);
+      n.setXYZ(i, -slope * s / len, 0, s / len);
+    }
+  }
   geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
   geo.rotateX(-Math.PI / 2);
   return finish(geo, {
@@ -577,6 +695,9 @@ float tri(sampler2D t, vec3 p, vec3 w, float s) {
       // Bare steel.
       float forge = fbm3(q * 1.6, 3);
       vec3 steel = vec3(0.56, 0.57, 0.59) * (0.9 + 0.2 * forge);
+      // Steel nobody has worked yet carries dull grey-black mill scale; the abrasives cut through to bright metal.
+      float worked = clamp(max(max(wheel, sanded), shine) * 1.4, 0.0, 1.0);
+      steel *= mix(0.42, 1.0, worked);
       steel *= 1.0 - 0.62 * pit;
       steel *= 1.0 - 0.4 * stamp * (1.0 - 0.6 * shine);
       float rough = 0.52 + 0.12 * forge;
@@ -589,17 +710,19 @@ float tri(sampler2D t, vec3 p, vec3 w, float s) {
       steel = mix(steel, vec3(0.05, 0.05, 0.055), haze * smear * 0.85);
       rough = mix(rough, 0.6, haze * 0.85);
       // Rust colour: near-black pits and scale, deep browns, bright orange bloom on the crust.
-      float tone = fbm3(q * 6.0 + 7.0, 4), flake = fbm3(q * 42.0, 3);
+      float tone = fbm3(q * 6.0 + 7.0, 4), flake = fbm3(q * 42.0, 3), grit = n3(q * 150.0) * 0.6 + n3(q * 310.0) * 0.4;
       vec3 rBlack = vec3(0.04, 0.022, 0.016), rDark = vec3(0.15, 0.055, 0.024), rMid = vec3(0.38, 0.14, 0.04), rHi = vec3(0.6, 0.29, 0.08);
       vec3 rustCol = mix(rDark, rMid, smoothstep(0.28, 0.72, tone * 0.7 + flake * 0.3));
       rustCol = mix(rustCol, rHi, smoothstep(0.7, 0.95, flake) * 0.8 * heavy);
-      rustCol = mix(rustCol, rBlack, smoothstep(0.55, 0.9, pitN + (1.0 - tone) * 0.35) * 0.7);
-      rustCol *= 0.6 + 0.6 * rust * (0.7 + 0.6 * flake);
+      rustCol = mix(rustCol, rBlack, smoothstep(0.62, 0.95, pitN + (1.0 - tone) * 0.3) * 0.55);
+      rustCol *= (0.55 + 0.55 * rust * (0.7 + 0.6 * flake)) * (0.78 + 0.44 * grit);
       float cover = smoothstep(0.05, 0.42, rust);
       float stain = smoothstep(0.0, 0.1, rust) * (1.0 - cover);
-      vec3 col = mix(steel, steel * vec3(0.7, 0.48, 0.32), stain * 0.85);
+      // Thin oxide between the crusts: a dark brown-grey film, not bright metal.
+      vec3 film = vec3(0.13, 0.085, 0.055) * (0.8 + 0.4 * tone);
+      vec3 col = mix(steel, film, stain * 0.9);
       col = mix(col, rustCol, cover);
-      cMetal = mix(1.0, 0.0, cover);
+      cMetal = (1.0 - cover) * (1.0 - 0.65 * stain);
       rough = mix(rough, 0.95, cover);
       rough = min(1.0, rough + 0.3 * stain);
       // The remover: wet rust darkens and shines, softened rust goes sludgy orange.
@@ -607,7 +730,7 @@ float tri(sampler2D t, vec3 p, vec3 w, float s) {
       col *= 1.0 - 0.45 * wetness * cover - 0.12 * wetness * (1.0 - cover);
       rough = mix(rough, 0.14, wetness * 0.85);
       cRough = rough;
-      cH = rust * (0.5 + 0.5 * flake) * (1.0 - 0.5 * softened) * 1.3
+      cH = rust * (0.4 + 0.4 * flake + 0.35 * grit) * (1.0 - 0.5 * softened) * 1.3
          - pit * 0.9 * (1.0 - cover)
          - stamp * 0.9
          + (swirl * wheel * (1.0 - sanded) + lin * sanded) * (1.0 - shine) * 0.2;
@@ -761,14 +884,33 @@ function makeDrill() {
   const g = new THREE.Group(), drill = new THREE.Group(), spinner = new THREE.Group();
   // Crimped steel wire wheel: wavy strands between two hub washers.
   const R = 0.13, verts = [], cols = [];
-  for (let i = 0; i < 1400; i++) {
+  // At speed the wires blur into a translucent steel disc: dense at the hub, thinning to a fuzzy rim.
+  const blurTex = (() => {
+    const N = 512, c = document.createElement('canvas'); c.width = c.height = N;
+    const x = c.getContext('2d'), img = x.createImageData(N, N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const r = Math.hypot(i - N / 2, j - N / 2) / (N / 2), k = (j * N + i) * 4;
+      const band = 0.85 + 0.15 * Math.sin(r * 90 + Math.sin(r * 23) * 2);
+      const a = r < 0.3 || r > 1 ? 0 : (0.95 - 0.55 * smooth(0.3, 0.92, r)) * (1 - smooth(0.9, 1, r)) * band;
+      const v = 150 + 70 * band * (1 - r);
+      img.data[k] = v; img.data[k + 1] = v; img.data[k + 2] = v * 1.04; img.data[k + 3] = 255 * a;
+    }
+    x.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const blurMat = new THREE.MeshStandardMaterial({ map: blurTex, transparent: true, depthWrite: false, metalness: 0.85, roughness: 0.42, side: THREE.DoubleSide });
+  for (const z of [-0.012, 0, 0.012]) {
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(R, 64), blurMat);
+    disc.position.z = z; spinner.add(disc);
+  }
+  for (let i = 0; i < 260; i++) {
     const a = Math.random() * Math.PI * 2, z = (Math.random() - 0.5) * 0.04, r1 = R * (0.92 + Math.random() * 0.08);
     let px = Math.cos(a) * 0.04, py = Math.sin(a) * 0.04, pz = z * 0.4;
     for (let s = 1; s <= 5; s++) {
       const r = 0.04 + (r1 - 0.04) * s / 5, wob = (s % 2 ? 1 : -1) * 0.012;
       const nx = Math.cos(a + wob) * r, ny = Math.sin(a + wob) * r, nz = z * (0.4 + 0.12 * s) + (s % 2 ? 0.003 : -0.003);
       verts.push(px, py, pz, nx, ny, nz);
-      const c = 0.5 + Math.random() * 0.35;
+      const c = 0.28 + Math.random() * 0.3;
       cols.push(c, c, c * 1.03, c * 1.1, c * 1.1, c * 1.13);
       px = nx; py = ny; pz = nz;
     }
@@ -776,7 +918,7 @@ function makeDrill() {
   const wg = new THREE.BufferGeometry();
   wg.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   wg.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-  spinner.add(new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })));
+  spinner.add(new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45 })));
   for (const z of [-0.026, 0.026]) {
     const washer = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.006, 40), M.steel);
     washer.rotation.x = Math.PI / 2; washer.position.z = z; spinner.add(washer);
@@ -891,27 +1033,42 @@ function makePolisher() {
 
 function makeCloth() {
   const g = new THREE.Group();
-  // A folded microfibre cloth: a soft pad of folds with a dense, slightly fuzzy weave.
-  const geo = new THREE.PlaneGeometry(0.34, 0.26, 48, 36);
+  // A microfibre cloth folded into a pad under the fingertips: rounded plateau of stacked layers,
+  // creases pulled toward the pressure point, a fold seam, a loose corner lifting off, a stitched hem.
+  const A = 0.17, Bz = 0.14;
+  const geo = new THREE.PlaneGeometry(A * 2.3, Bz * 2.3, 96, 80);
   geo.rotateX(-Math.PI / 2);
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), z = p.getZ(i), r = Math.hypot(x / 0.17, z / 0.13);
-    p.setY(i, 0.006 + 0.05 * Math.max(0, 1 - r * r) + 0.012 * Math.sin(x * 38 + z * 9) * Math.max(0, 1 - r) + (r > 0.85 ? -(r - 0.85) * 0.12 : 0));
+    const x = p.getX(i), z = p.getZ(i);
+    const ang = Math.atan2(z, x);
+    const d = Math.pow(Math.pow(Math.abs(x) / A, 2.6) + Math.pow(Math.abs(z) / Bz, 2.6), 1 / 2.6) * (1 + 0.08 * Math.sin(ang * 3 + 1) + 0.05 * Math.sin(ang * 5 + 2));
+    const body = 1 - smooth(0.68, 1.04, d);
+    let y = 0.034 * body;
+    y += 0.011 * Math.sin(ang * 7 + d * 7) * smooth(0.25, 0.85, d) * body;                // creases
+    y -= 0.008 * Math.exp(-Math.pow((x + 0.035) / 0.012, 2)) * body;                       // fold seam
+    y += 0.012 * Math.exp(-(x * x + z * z) / 0.004);                                        // bunched under the fingers
+    const flap = smooth(0.35, 1.0, x / A) * smooth(0.2, 1.0, -z / Bz);                      // a corner peeling up
+    y += 0.05 * flap * flap;
+    p.setY(i, Math.max(0.002, y));
   }
   geo.computeVertexNormals();
   const weave = (() => {
-    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const N = 512, c = document.createElement('canvas'); c.width = c.height = N;
     const x = c.getContext('2d');
-    x.fillStyle = '#3d6f9e'; x.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 9000; i++) { x.fillStyle = `rgba(${Math.random() > 0.5 ? '120,170,215' : '20,45,70'},0.35)`; x.fillRect(Math.random() * 256, Math.random() * 256, 1.5, 1.5); }
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 3); return t;
+    x.fillStyle = '#3c70a4'; x.fillRect(0, 0, N, N);
+    for (let i = 0; i < 40000; i++) { x.fillStyle = `rgba(${Math.random() > 0.5 ? '125,170,214' : '18,40,66'},${0.12 + Math.random() * 0.2})`; x.fillRect(Math.random() * N, Math.random() * N, 1 + Math.random() * 1.5, 1 + Math.random() * 1.5); }
+    // Hem: a denser band all round with a running stitch, and the care tag in one corner.
+    const hem = 18;
+    x.strokeStyle = 'rgba(38,80,124,0.7)'; x.lineWidth = hem * 2; x.strokeRect(0, 0, N, N);
+    x.strokeStyle = 'rgba(200,220,240,0.3)'; x.lineWidth = 1.5; x.setLineDash([6, 5]);
+    x.strokeRect(hem + 4, hem + 4, N - 2 * hem - 8, N - 2 * hem - 8); x.setLineDash([]);
+    x.fillStyle = '#ece8dd'; x.fillRect(N - 70, N - 50, 46, 30);
+    x.fillStyle = '#7a7a7a'; for (let k = 0; k < 3; k++) x.fillRect(N - 64, N - 44 + k * 8, 34, 3);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = maxAniso; return t;
   })();
-  const mat = new THREE.MeshPhysicalMaterial({ map: weave, roughness: 0.95, sheen: 1, sheenColor: new THREE.Color(0x9ec4e8), sheenRoughness: 0.6, side: THREE.DoubleSide });
-  const cloth = new THREE.Mesh(geo, mat);
-  const fold = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.03, 12, 24, Math.PI), mat);
-  fold.rotation.set(0, Math.PI / 2, 0); fold.position.set(0, 0.05, -0.1); fold.scale.set(1, 0.7, 1.6);
-  g.add(cloth, fold);
+  const mat = new THREE.MeshPhysicalMaterial({ map: weave, roughness: 0.96, sheen: 1, sheenColor: new THREE.Color(0xa8cdf0), sheenRoughness: 0.5, side: THREE.DoubleSide, bumpMap: grainTex, bumpScale: 0.6 });
+  g.add(new THREE.Mesh(geo, mat));
   return g;
 }
 
@@ -957,11 +1114,15 @@ const camBase = new THREE.Vector3();
 function frameCamera() {
   const vfov = THREE.MathUtils.degToRad(camera.fov);
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
-  const dist = Math.max(radius * 1.12 / Math.sin(Math.min(vfov, hfov) / 2), 2.2);
-  camBase.set(0, holder.position.y + dist * 0.82, dist * 0.57);
+  const dist = Math.max(radius * (camera.aspect < 1 ? 1.12 : 1.02) / Math.sin(Math.min(vfov, hfov) / 2), 2.0);
+  camBase.set(0, holder.position.y + dist * 0.76, dist * 0.65);
+  // Light falls off past the piece whatever the framing, so a tall phone screen still sees a lit bench.
+  scene.fog.near = dist * 1.25; scene.fog.far = dist * 3.4;
 }
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   frameCamera();
@@ -1289,7 +1450,7 @@ function frame() {
       for (let i = 0; i < spark; i++) {
         const sp = 2.6 + Math.random() * 3.4;
         emit(sparks, { x: p.x, y: p.y, z: p.z, vx: bz.x * sp + (Math.random() - 0.5) * 2, vy: bz.y * sp + 0.6 + Math.random() * 1.4, vz: bz.z * sp + (Math.random() - 0.5) * 2,
-          life: 0.25 + Math.random() * 0.35, s: 0.012 + Math.random() * 0.01, r: 1, g: 0.6, b: 0.2, a: 1, type: 'spark' });
+          life: 0.25 + Math.random() * 0.35, s: 0.01 + Math.random() * 0.008, r: 5, g: 2.4, b: 0.7, a: 1, type: 'spark' });
       }
     } else if (tool === 'sand' && Math.random() < 0.7 && (contact.rust || contact.metal)) {
       for (let i = 0; i < 4; i++) {
@@ -1332,7 +1493,8 @@ function frame() {
   if (benchDirty) { benchTex.needsUpdate = true; benchDirty = false; }
   statsClock += dt;
   if (statsClock > 0.4) { statsClock = 0; stats(); }
-  renderer.render(scene, camera);
+  grain.uniforms.uTime.value = t % 100;
+  composer.render();
   requestAnimationFrame(frame);
 }
 
