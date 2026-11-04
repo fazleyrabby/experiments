@@ -1,5 +1,11 @@
 [
   {
+    "slug": "moto-island",
+    "title": "Moto Island",
+    "category": "Play",
+    "description": "A twelve-rider motocross race on a floating island. Let autopilot drive or take the wheel, and pit for mud tires when the rain rolls in."
+  },
+  {
     "slug": "snow-driveway",
     "title": "Snow Day",
     "category": "Play",
