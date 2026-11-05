@@ -155,8 +155,54 @@ vec3 headlights(vec3 p, vec3 n) {
 }
 `;
 
+// Land palette and cover (see scenes.js).
+export const BIOME = /* glsl */ `
+uniform vec3 uGrassA, uGrassB, uScrub, uBare, uMeadowC, uRedC, uAlkC;
+uniform vec3 uTuftA, uTuftB, uTuftM, uNeedle, uLeafA, uLeafB;
+uniform vec3 uPlainA, uPlainB;
+uniform vec4 uCover; // tufts, tuft height, flowers, stones
+uniform vec4 uTrees; // conifers, broadleaf, distant canopy, how much of the land is forested regardless of patches
+uniform float uSnowCover;
+uniform float uSnowLine;
+`;
+
+// Open water: level, on, time. Shading for a sea surface seen from the cliff road.
+export const WATER = /* glsl */ `
+uniform vec4 uWater;
+vec3 waterShade(vec3 pos, vec3 vd, float dist, float depth, float shadow) {
+  vec2 p = pos.xz;
+  float t = uWater.z;
+  float fade = 1.0 - smoothstep(150.0, 2500.0, dist);
+  vec3 a = noised(p * 0.045 + vec2(t * 0.020, t * 0.011));
+  vec3 b = noised(p * 0.19 + vec2(-t * 0.045, t * 0.03));
+  vec3 c = noised(p * 0.9 + vec2(t * 0.16, -t * 0.12));
+  vec2 g = a.yz * 0.045 * 1.6 + b.yz * 0.19 * 0.45 + c.yz * 0.9 * 0.06 * (1.0 - smoothstep(20.0, 160.0, dist));
+  vec3 n = normalize(vec3(-g.x * fade, 1.0, -g.y * fade));
+  float ndv = max(dot(n, -vd), 0.0);
+  float F = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+  vec3 r = reflect(vd, n);
+  r.y = max(r.y, 0.02);
+  vec3 refl = skyLUT(r);
+  float shallow = 1.0 - smoothstep(0.0, 9.0, depth);
+  vec3 body = mix(vec3(0.004, 0.018, 0.03), vec3(0.02, 0.10, 0.10), shallow);
+  body *= uSunColor * max(uSunDir.y, 0.0) * 0.6 * shadow + uSkyAmbient * 0.9;
+  vec3 h = normalize(uSunDir - vd);
+  float spec = pow(max(dot(n, h), 0.0), 600.0) * 90.0 + pow(max(dot(n, h), 0.0), 60.0) * 0.6;
+  vec3 col = mix(body, refl, F) + uSunColor * spec * shadow * F * 4.0;
+  // surf where it breaks on the rocks
+  float foam = (1.0 - smoothstep(0.0, 1.1, depth)) * (0.55 + 0.45 * sin(t * 0.9 + p.x * 0.05 + p.y * 0.03));
+  col = mix(col, vec3(0.85) * (uSunColor * max(uSunDir.y, 0.0) + uSkyAmbient), foam * 0.75);
+  return col;
+}
+`;
+
 // Patches across the plain, shared by the ground shader and the scatter (flowers, stones).
 export const FIELD = /* glsl */ `
+float forest(vec2 p) {
+  vec2 q = p / PERIOD;
+  float m = noiseP(q * 30.0 + 0.53, 30) * 0.65 + noiseP(q * 140.0 + 0.2, 140) * 0.35;
+  return smoothstep(-0.25, 0.35, m);
+}
 float meadow(vec2 p) {
   vec2 q = p / PERIOD;
   float m = noiseP(q * 40.0 + 0.21, 40) * 0.6 + noiseP(q * 170.0 + 0.6, 170) * 0.4;

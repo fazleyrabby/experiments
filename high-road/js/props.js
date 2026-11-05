@@ -4,10 +4,12 @@ import { HASH, NOISE2, ATMOS, CLOUD_SHADOW, HEADLIGHT } from './glsl.js';
 
 // One lit material for every hard-surface prop (guardrail, posts, vehicles).
 // Per-vertex attributes carry albedo (color) and pbr = (roughness, metalness, emissive).
-export function createPropMaterial(shared) {
+// interior: the cabin of our own car, mostly shaded by its roof and lit through the glass.
+export function createPropMaterial(shared, { interior = false } = {}) {
   return new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
     side: THREE.DoubleSide,
+    defines: interior ? { INTERIOR: 1 } : {},
     uniforms: { ...shared },
     vertexShader: /* glsl */ `
       in vec3 color;
@@ -50,6 +52,9 @@ export function createPropMaterial(shared) {
         float g = noise(vW.xz * 3.1 + vW.y * 2.3) * 0.5 + 0.5;
         alb *= 0.9 + 0.1 * g;
         float shadow = cloudShadow(vec3(vW.x - uCamW.x, vW.y, vW.z - uCamW.z));
+        #ifdef INTERIOR
+        shadow *= 0.1 + 0.3 * smoothstep(0.2, 0.9, n.y);
+        #endif
         vec3 l = uSunDir;
         vec3 v = -vd;
         vec3 h = normalize(l + v);
@@ -68,7 +73,11 @@ export function createPropMaterial(shared) {
         vec3 diff = alb * (1.0 - metal);
         vec3 L = uSunColor * shadow;
         vec3 col = (diff + spec * PI) * L * ndl;
+        #ifdef INTERIOR
+        col += diff * (uSkyAmbient * 0.6 + uGroundBounce * 0.4);
+        #else
         col += diff * (uSkyAmbient * (0.6 + 0.4 * n.y) + uGroundBounce * (0.5 - 0.5 * n.y));
+        #endif
         // environment: sky above the horizon, warm plain below
         vec3 r = reflect(vd, n);
         vec3 env = r.y > 0.0 ? skyLUT(r) : uGroundBounce * 1.4;

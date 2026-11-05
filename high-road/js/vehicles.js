@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { box, cyl, merge, paint } from './props.js';
-import { frameAt, LANE, PERIOD } from './roadpath.js';
+import { frameAt, LANE, routeLen } from './roadpath.js';
 
 // Vehicles are modelled facing -z with the rear at z = 0, x to the right.
 // Bodies are side profiles (u = metres from the rear, y = height) extruded across the
@@ -12,7 +12,7 @@ const CHROME = 0xb9bdc0;
 
 // Fillet every corner of a polygon with a short quadratic arc (radius r, or a per-point
 // third value), so bodies read as pressed metal rather than boxes.
-function roundPoly(pts, r) {
+export function roundPoly(pts, r) {
   const out = [];
   const n = pts.length;
   for (let i = 0; i < n; i++) {
@@ -31,7 +31,7 @@ function roundPoly(pts, r) {
   return out;
 }
 
-function profile(pts, width, color, rough = 0.3, metal = 0.5, bevel = 0.05, emissive = 0, radius = 0.14) {
+export function profile(pts, width, color, rough = 0.3, metal = 0.5, bevel = 0.05, emissive = 0, radius = 0.14) {
   const shape = new THREE.Shape(roundPoly(pts, radius));
   const depth = Math.max(0.01, width - bevel * 2);
   const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 3, curveSegments: 1 });
@@ -42,9 +42,9 @@ function profile(pts, width, color, rough = 0.3, metal = 0.5, bevel = 0.05, emis
 }
 
 // a box placed by its rear position u along the body
-const at = (w, h, d, x, y, u, color, rough, metal, emissive) => box(w, h, d, x, y, -u, color, rough, metal, emissive);
+export const at = (w, h, d, x, y, u, color, rough, metal, emissive) => box(w, h, d, x, y, -u, color, rough, metal, emissive);
 
-function wheel(parts, x, u, r, w = 0.24, rim = 0x9ea2a5) {
+export function wheel(parts, x, u, r, w = 0.24, rim = 0x9ea2a5) {
   parts.push(cyl(r, w, x, r, -u, 0x141414, 0.92, 0, 'x', 24));
   parts.push(cyl(r * 0.94, w + 0.01, x, r, -u, 0x1c1c1c, 0.85, 0, 'x', 24));
   parts.push(cyl(r * 0.6, w + 0.02, x, r, -u, rim, 0.35, 0.8, 'x', 18));
@@ -58,7 +58,7 @@ function wheel(parts, x, u, r, w = 0.24, rim = 0x9ea2a5) {
 }
 
 // dark wheel-arch disc across the body so wheels sit in wells
-function arch(parts, u, r, width) { parts.push(cyl(r + 0.07, width, 0, r, -u, 0x0b0b0b, 0.9, 0, 'x', 24)); }
+export function arch(parts, u, r, width) { parts.push(cyl(r + 0.07, width, 0, r, -u, 0x0b0b0b, 0.9, 0, 'x', 24)); }
 
 function lamp(lights, kind, x, y, u, size) {
   lights.push({ kind, p: new THREE.Vector3(x, y, -u), size });
@@ -297,7 +297,7 @@ function hull(points) {
   return lower.concat(upper);
 }
 
-class Shadow {
+export class Shadow {
   constructor(material) {
     this.max = 24;
     const g = new THREE.BufferGeometry();
@@ -314,9 +314,12 @@ class Shadow {
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 2;
   }
-  update(corners, sun, y0) {
+  // y0: road height under the vehicle; slope (optional): {x, z, tx, tz, grade} so the
+  // shadow lies on a climbing road instead of a level plane
+  update(corners, sun, y0, slope) {
     _pts.length = 0;
     const k = 1 / Math.max(sun.y, 0.05);
+    const yAt = (x, z) => (slope ? y0 + ((x - slope.x) * slope.tx + (z - slope.z) * slope.tz) * slope.grade : y0);
     for (const c of corners) {
       const t = (c.y - y0) * k;
       _pts.push([c.x - sun.x * t, c.z - sun.z * t]);
@@ -326,13 +329,14 @@ class Shadow {
     let cx = 0, cz = 0;
     for (const p of h) { cx += p[0]; cz += p[1]; }
     cx /= h.length; cz /= h.length;
-    pos[0] = cx; pos[1] = y0; pos[2] = cz; al[0] = 1;
+    pos[0] = cx; pos[1] = yAt(cx, cz); pos[2] = cz; al[0] = 1;
     for (let i = 0; i < this.max; i++) {
       const p = h[Math.min(i, h.length - 1)];
       const dx = p[0] - cx, dz = p[1] - cz, l = Math.hypot(dx, dz) || 1;
       const j = 1 + i, o = 1 + this.max + i;
-      pos[j * 3] = p[0] - (dx / l) * 0.15; pos[j * 3 + 1] = y0; pos[j * 3 + 2] = p[1] - (dz / l) * 0.15; al[j] = 1;
-      pos[o * 3] = p[0] + (dx / l) * 0.35; pos[o * 3 + 1] = y0; pos[o * 3 + 2] = p[1] + (dz / l) * 0.35; al[o] = 0;
+      const jx = p[0] - (dx / l) * 0.15, jz = p[1] - (dz / l) * 0.15, ox = p[0] + (dx / l) * 0.35, oz = p[1] + (dz / l) * 0.35;
+      pos[j * 3] = jx; pos[j * 3 + 1] = yAt(jx, jz); pos[j * 3 + 2] = jz; al[j] = 1;
+      pos[o * 3] = ox; pos[o * 3 + 1] = yAt(ox, oz); pos[o * 3 + 2] = oz; al[o] = 0;
     }
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.alpha.needsUpdate = true;
@@ -361,12 +365,12 @@ export function createShadowMaterial() {
 // Additive halos for every lamp: headlights, tail lights and amber markers. Only visible
 // at night; headlamps and tail lamps fade out when seen from the side or behind.
 const GLOW_MAX = 600;
-const LAMP = {
+export const LAMP = {
   head: { c: [9, 8.2, 7], dir: -1 },
   tail: { c: [5, 0.25, 0.12], dir: 1 },
   marker: { c: [4, 1.6, 0.25], dir: 0 },
 };
-class Glows {
+export class Glows {
   constructor() {
     const g = new THREE.BufferGeometry();
     this.pos = new Float32Array(GLOW_MAX * 3);
@@ -471,6 +475,7 @@ export class Traffic {
     this.spawnTimer = 6;
     this.rand = mulberry(7);
     this.glows = new Glows();
+    this.extra = []; // our own car's lamps: { mesh, root, model, brake() }
     scene.add(this.glows.points);
   }
   add(kind, s, lat, speed, dir, model) {
@@ -489,13 +494,14 @@ export class Traffic {
     v.shadow.geo.dispose();
     this.list.splice(this.list.indexOf(v), 1);
   }
-  init(sCam, speed) {
-    this.lead = this.add('truck', sCam + 72, LANE, speed, 1, this.models.truck[2]);
+  init(sCam, speed, lead = true) {
+    this.lead = lead ? this.add('truck', sCam + 72, LANE, speed, 1, this.models.truck[2]) : null;
     this.add('truck', sCam + 640, LANE, speed * 0.97, 1);
     this.add('car', sCam + 1500, LANE, speed * 1.05, 1);
     this.add('car', sCam + 900, -LANE, speed * 1.1, -1);
   }
-  wrap() { for (const v of this.list) v.s -= PERIOD; }
+  clear() { for (const v of [...this.list]) this.remove(v); this.lead = null; }
+  wrap(len = routeLen()) { for (const v of this.list) v.s -= len; }
   update(dt, t, sCam, camSpeed, sun, glow) {
     for (const v of [...this.list]) {
       const before = v.speed;
@@ -506,7 +512,9 @@ export class Traffic {
         v.speed += (camSpeed - err * 0.04 - v.speed) * Math.min(1, dt * 0.5);
       } else if (v.dir > 0) {
         v.speed = v.base * (1 + 0.03 * Math.sin(t * 0.05 + v.phase));
-        if (v.s - sCam > 4000 || v.s - sCam < 150) { this.remove(v); continue; }
+        // never let us catch traffic in our lane: once we close in, it pulls away
+        if (v.s - sCam < 500) { v.pull = Math.min(1, (v.pull || 0) + dt * 0.15); v.speed = Math.max(v.speed, camSpeed * (1 + 0.06 * v.pull)); }
+        if (v.s - sCam > 4000 || v.s - sCam < 40) { this.remove(v); continue; }
       } else if (v.s < sCam - 60) { this.remove(v); continue; }
       const decel = dt > 0 ? (before - v.speed) / dt : 0;
       v.brake += ((decel > 0.12 ? 1 : 0) - v.brake) * Math.min(1, dt * 4);
@@ -525,6 +533,7 @@ export class Traffic {
     if (glow > 0) {
       this.glows.begin();
       for (const v of this.list) this.glows.push(v.mesh, v.model, v.brake);
+      for (const e of this.extra) if (e.mesh.visible && e.root.visible) this.glows.push(e.mesh, e.model, e.brake());
       this.glows.end();
     } else this.glows.geo.setDrawRange(0, 0);
   }
@@ -532,8 +541,8 @@ export class Traffic {
   place(v, sun) {
     const f = frameAt(v.s, this.f);
     const x = f.x + f.rx * v.lat, z = f.z + f.rz * v.lat;
-    v.mesh.position.set(x, 0.1, z);
-    v.mesh.rotation.y = f.heading + (v.dir < 0 ? Math.PI : 0);
+    v.mesh.position.set(x, f.y + 0.1, z);
+    v.mesh.rotation.set(Math.atan(f.grade) * (v.dir < 0 ? -1 : 1), f.heading + (v.dir < 0 ? Math.PI : 0), 0, 'YXZ');
     v.mesh.updateMatrixWorld();
     const m = v.model;
     const corners = [];
@@ -542,7 +551,7 @@ export class Traffic {
       c.set(xx, yy, zz).applyMatrix4(v.mesh.matrixWorld);
       corners.push(c.clone());
     }
-    v.shadow.update(corners, sun, 0.13);
+    v.shadow.update(corners, sun, f.y + 0.13, { x, z, tx: f.tx, tz: f.tz, grade: f.grade });
   }
 }
 

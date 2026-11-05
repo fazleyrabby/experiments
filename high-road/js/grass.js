@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { HASH, NOISE2, ATMOS, CLOUD_SHADOW, HEADLIGHT, FIELD } from './glsl.js';
+import { HASH, NOISE2, ATMOS, CLOUD_SHADOW, HEADLIGHT, FIELD, BIOME, WATER } from './glsl.js';
 import { NEAR_H_GLSL } from './ground.js';
 
-// Ground cover near the road: dry tufts, wild flowers and stones. Each kind is a fixed
+// Ground cover near the road: tufts, wild flowers, stones and trees. Each kind is a fixed
 // grid of instances snapped to world cells around the camera; every cell hashes its own
 // position, size and colour, so the cover stays put as the grid slides forward.
+// The active land (scenes.js) sets colours and how much of each kind grows.
 
 function gridGeometry(base, nx, nz, behind) {
   const g = new THREE.InstancedBufferGeometry();
@@ -32,6 +33,8 @@ function scatterMaterial(shared, cellSize, salt, body) {
       ${CLOUD_SHADOW}
       ${NEAR_H_GLSL}
       ${FIELD}
+      ${BIOME}
+      ${WATER}
       ${HEADLIGHT}
       in vec2 cell;
       in float tip;
@@ -51,12 +54,17 @@ function scatterMaterial(shared, cellSize, salt, body) {
         ivec2 ic = ivec2(floor(c / ${C} + 0.5)) + ivec2(${salt}, ${salt * 7});
         vec2 r = hash22(ic);
         vec2 p = c + (r - 0.5) * ${C};
-        float rd = abs(p.x - roadX(p.y));
+        float rd = abs(roadU(p));
         vec2 q = p / PERIOD;
         float dist = length(p - uCamW.xz);
         vec3 w;
         float s;
         ${body.split('// -- placed')[0]}
+        float gy = 0.0;
+        if (s >= 0.01) {
+          gy = nearH(p);
+          if (uWater.y > 0.5 && gy < uWater.x + 0.6) s = 0.0;
+        }
         if (s < 0.01) { vCol = vec3(0.0); gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
         ${body.split('// -- placed')[1]}
         gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
@@ -120,22 +128,76 @@ function stoneBase() {
   return withTip(g, new Array(p.count).fill(0));
 }
 
+// Merge parts that each carry a tip value: 0 for trunk, >0 for crown (its height fraction).
+function treeParts(parts) {
+  const pos = [], nor = [], tip = [];
+  for (const [geo, tipFn] of parts) {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    const P = g.attributes.position, N = g.attributes.normal;
+    for (let i = 0; i < P.count; i++) {
+      pos.push(P.getX(i), P.getY(i), P.getZ(i));
+      nor.push(N.getX(i), N.getY(i), N.getZ(i));
+      tip.push(tipFn(P.getY(i)));
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  return withTip(g, tip);
+}
+
+// A spruce: a short trunk under three stacked, slightly drooping cones. ~6.4 m at scale 1.
+function coniferBase() {
+  const trunk = new THREE.CylinderGeometry(0.09, 0.15, 1.6, 5, 1, true).translate(0, 0.8, 0);
+  const parts = [[trunk, () => 0]];
+  const tiers = [[0.7, 1.55, 3.5], [2.1, 1.15, 3.0], [3.5, 0.78, 2.9]];
+  for (const [y0, r, h] of tiers) {
+    const c = new THREE.ConeGeometry(r, h, 8, 1, true);
+    // droop the skirt so tiers read as boughs, not lampshades
+    const P = c.attributes.position;
+    for (let i = 0; i < P.count; i++) if (P.getY(i) < 0) P.setY(i, P.getY(i) - 0.25 * Math.sin(i * 2.3) ** 2);
+    c.computeVertexNormals();
+    c.translate(0, y0 + h / 2, 0);
+    parts.push([c, (y) => 0.15 + 0.85 * Math.min(1, Math.max(0, (y - 0.5) / 6))]);
+  }
+  return treeParts(parts);
+}
+
+// A round-crowned broadleaf tree: trunk and two lumpy crowns. ~6.5 m at scale 1.
+function broadleafBase() {
+  const trunk = new THREE.CylinderGeometry(0.13, 0.22, 3.0, 6, 1, true).translate(0, 1.5, 0);
+  const lump = (r, x, y, z, seed) => {
+    const g = new THREE.IcosahedronGeometry(r, 1);
+    const P = g.attributes.position;
+    for (let i = 0; i < P.count; i++) {
+      const vx = P.getX(i), vy = P.getY(i), vz = P.getZ(i);
+      const k = 0.82 + 0.22 * Math.sin(vx * 3.1 + seed) * Math.cos(vz * 2.7 + vy * 1.9 + seed);
+      P.setXYZ(i, vx * k, vy * k * 0.82, vz * k);
+    }
+    g.computeVertexNormals();
+    return g.translate(x, y, z);
+  };
+  const tipFn = (y) => 0.2 + 0.8 * Math.min(1, Math.max(0, (y - 2.2) / 4.3));
+  return treeParts([[trunk, () => 0], [lump(2.1, 0, 4.4, 0, 1.3), tipFn], [lump(1.5, 0.9, 3.5, 0.6, 4.1), tipFn], [lump(1.3, -0.8, 3.7, -0.5, 2.2), tipFn]]);
+}
+
 export function createGrass(shared) {
   const CELL = 0.85;
   const mat = scatterMaterial(shared, CELL, 0, /* glsl */ `
     float mdw = meadow(p);
-    float dens = 0.62 + 0.35 * noiseP(q * 160.0, 160) + 0.25 * noiseP(q * 900.0, 900) - alkali(p) * 0.5;
-    float keep = step(hash12(ic + ivec2(7, 3)), dens) * step(6.9, rd);
+    float dens = (0.62 + 0.35 * noiseP(q * 160.0, 160) + 0.25 * noiseP(q * 900.0, 900) - alkali(p) * 0.5) * uCover.x;
+    float keep = step(hash12(ic + ivec2(7, 3)), dens) * step(uTerr2.w + 0.9, rd);
     s = (0.28 + 0.55 * r.x * r.y) * (1.0 + 0.4 * mdw) * keep * (1.0 - smoothstep(150.0, 235.0, dist));
     // -- placed
     float ang = r.y * 6.2831;
-    vec3 lp = position * vec3(s * 1.3, s * (0.7 + 0.4 * r.x), s * 1.3);
+    float tall = uCover.y * (1.0 - 0.6 * uSnowCover);
+    vec3 lp = position * vec3(s * 1.3, s * (0.7 + 0.4 * r.x) * tall, s * 1.3);
     lp.xz = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * lp.xz;
     float sway = noise(p * 0.15 + vec2(uTime * 0.6, uTime * 0.2)) * 0.06 + sin(uTime * 2.3 + p.x * 0.7) * 0.015;
     lp.x += sway * tip * s;
-    w = vec3(p.x, nearH(p), p.y) + lp;
-    vec3 alb = mix(vec3(0.42, 0.27, 0.12), vec3(0.62, 0.45, 0.24), r.x);
-    alb = mix(alb, mix(vec3(0.24, 0.27, 0.10), vec3(0.38, 0.38, 0.16), r.x), mdw * 0.8);
+    w = vec3(p.x, gy - 0.12 * uSnowCover, p.y) + lp;
+    vec3 alb = mix(uTuftA, uTuftB, r.x);
+    alb = mix(alb, mix(uTuftM * 0.85, uTuftM * 1.25, r.x), mdw * 0.8);
     alb = mix(alb * 0.45, alb, tip);
     vCol = shade(alb, w, vec3(0.0, 1.0, 0.0), (0.55 + 0.45 * tip) * 0.55);
   `);
@@ -150,19 +212,19 @@ export function createFlowers(shared) {
     ivec2 pc = ivec2(floor(p / 7.0));
     float pick = hash12(pc + ivec2(41, 9));
     float colony = smoothstep(0.25, 0.65, noiseP(q * 1100.0 + 0.3, 1100) * 0.5 + 0.5);
-    float dens = mdw * 0.95 * colony + 0.08 * colony + 0.2 * colony * (1.0 - smoothstep(9.0, 18.0, rd));
-    float keep = step(hash12(ic + ivec2(5, 11)), dens) * step(7.2, rd);
+    float dens = (mdw * 0.95 * colony + 0.08 * colony + 0.2 * colony * (1.0 - smoothstep(9.0, 18.0, rd))) * uCover.z;
+    float keep = step(hash12(ic + ivec2(5, 11)), dens) * step(uTerr2.w + 1.2, rd);
     s = (0.8 + 0.6 * r.x) * keep * (1.0 - smoothstep(70.0, 110.0, dist));
     // -- placed
     float ang = r.y * 6.2831;
     vec3 lp = position * s;
     lp.xz = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * lp.xz;
     lp.x += (sin(uTime * 2.1 + p.y * 1.3) * 0.012 + noise(p * 0.2 + uTime * 0.5) * 0.02) * min(tip, 1.0) * s;
-    w = vec3(p.x, nearH(p), p.y) + lp;
+    w = vec3(p.x, gy, p.y) + lp;
     vec3 petal = pick < 0.3 ? vec3(0.42, 0.17, 0.62) : pick < 0.55 ? vec3(0.90, 0.70, 0.10)
                : pick < 0.75 ? vec3(0.92, 0.90, 0.84) : pick < 0.9 ? vec3(0.86, 0.30, 0.52) : vec3(0.26, 0.36, 0.86);
     petal *= 0.85 + 0.3 * r.y;
-    vec3 alb = tip > 1.5 ? petal : vec3(0.22, 0.28, 0.10);
+    vec3 alb = tip > 1.5 ? petal : uTuftM * 0.9;
     vCol = shade(alb, w, vec3(0.0, 1.0, 0.0), tip > 1.5 ? 0.85 : 0.5);
   `);
   return gridMesh(gridGeometry(flowerBase(), 120, 230, 20), mat, CELL);
@@ -172,8 +234,8 @@ export function createStones(shared) {
   const CELL = 2.6;
   const mat = scatterMaterial(shared, CELL, 5, /* glsl */ `
     float alk = alkali(p);
-    float dens = 0.12 + 0.35 * alk + 0.25 * smoothstep(6.0, 8.0, rd) * (1.0 - smoothstep(9.0, 14.0, rd));
-    float keep = step(hash12(ic + ivec2(13, 2)), dens) * step(5.9, rd);
+    float dens = (0.12 + 0.35 * alk + 0.25 * smoothstep(6.0, 8.0, rd) * (1.0 - smoothstep(9.0, 14.0, rd))) * uCover.w;
+    float keep = step(hash12(ic + ivec2(13, 2)), dens) * step(uTerr2.w - 0.1, rd);
     s = (0.12 + 0.55 * pow(r.x, 3.0)) * keep * (1.0 - smoothstep(220.0, 320.0, dist));
     // -- placed
     float ang = r.y * 6.2831;
@@ -181,12 +243,57 @@ export function createStones(shared) {
     vec3 lp = position * s;
     lp.xz = R * lp.xz;
     vec3 nn = normal; nn.xz = R * nn.xz;
-    w = vec3(p.x, nearH(p) - 0.04 * s, p.y) + lp;
+    w = vec3(p.x, gy - 0.04 * s, p.y) + lp;
     vec3 alb = mix(vec3(0.20, 0.19, 0.18), vec3(0.42, 0.38, 0.33), hash12(ic + ivec2(3, 3)));
-    alb = mix(alb, vec3(0.45, 0.28, 0.18), step(0.8, r.y) * 0.6);
+    alb = mix(alb, uRedC * 0.75, step(0.8, r.y) * 0.6);
+    alb = mix(alb, vec3(0.8, 0.83, 0.88), uSnowCover * smoothstep(0.2, 0.7, normalize(nn).y) * 0.85);
     vCol = shade(alb, w, nn, max(dot(normalize(nn), uSunDir), 0.0));
   `);
   return gridMesh(gridGeometry(stoneBase(), 70, 130, 8), mat, CELL);
+}
+
+// Trees shared body: place, scale, sway gently and shade crown vs trunk.
+function treeBody(densExpr, salt, leaf) {
+  return /* glsl */ `
+    float fo = forest(p);
+    float dens = ${densExpr};
+    float clear = uTerr2.w + 3.0 + 5.0 * r.y;
+    float keep = step(hash12(ic + ivec2(${salt}, 17)), dens) * step(clear, rd);
+    s = (0.75 + 0.75 * r.x * r.x + 0.35 * fo) * keep * (1.0 - smoothstep(470.0, 600.0, dist));
+    // -- placed
+    float ang = r.y * 6.2831;
+    mat2 R = mat2(cos(ang), -sin(ang), sin(ang), cos(ang));
+    vec3 lp = position * s * vec3(1.0, 0.9 + 0.3 * hash12(ic + ivec2(3, ${salt})), 1.0);
+    lp.xz = R * lp.xz;
+    vec3 nn = normal; nn.xz = R * nn.xz;
+    float sway = (noise(p * 0.05 + uTime * 0.25) * 0.5 + 0.5) * 0.05 * tip * tip;
+    lp.x += sway * lp.y * 0.1;
+    w = vec3(p.x, gy - 0.2, p.y) + lp;
+    nn = normalize(nn);
+    vec3 crown = ${leaf};
+    vec3 alb = tip > 0.01 ? crown * (0.55 + 0.6 * tip) : vec3(0.13, 0.09, 0.06);
+    alb = mix(alb, vec3(0.78, 0.82, 0.88), uSnowCover * smoothstep(0.15, 0.7, nn.y) * step(0.01, tip) * 0.8);
+    float wrap = max(dot(nn, uSunDir) * 0.6 + 0.4, 0.0) * (0.45 + 0.55 * tip);
+    vCol = shade(alb, w, nn, wrap * (tip > 0.01 ? 1.0 : 0.6));
+  `;
+}
+
+export function createConifers(shared) {
+  const CELL = 6.2;
+  const mat = scatterMaterial(shared, CELL, 9, treeBody('uTrees.x * mix(smoothstep(0.2, 0.75, fo), 1.0, uTrees.w)', 21,
+    'uNeedle * (0.8 + 0.4 * r.x) * vec3(1.0, 1.0 + 0.2 * r.y, 1.0)'));
+  const mesh = gridMesh(gridGeometry(coniferBase(), 92, 112, 10), mat, CELL);
+  mesh.userData.kind = 'conifer';
+  return mesh;
+}
+
+export function createBroadleaf(shared) {
+  const CELL = 11;
+  const mat = scatterMaterial(shared, CELL, 11, treeBody('uTrees.y * (fo * 0.7 + 0.08)', 29,
+    'mix(uLeafA, uLeafB, r.x)'));
+  const mesh = gridMesh(gridGeometry(broadleafBase(), 52, 64, 6), mat, CELL);
+  mesh.userData.kind = 'broadleaf';
+  return mesh;
 }
 
 function gridMesh(geo, material, cell) {

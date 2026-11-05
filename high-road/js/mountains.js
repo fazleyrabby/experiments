@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HASH, NOISE2, ATMOS, CLOUD_SHADOW } from './glsl.js';
+import { HASH, NOISE2, ATMOS, CLOUD_SHADOW, BIOME, WATER } from './glsl.js';
 import { fullscreenQuad } from './sky.js';
 
 // The mountains live in the "backdrop" frame: they travel with the camera's xz position
@@ -278,13 +278,20 @@ export class Mountains {
       },
       vertexShader: /* glsl */ `
         ${SAMPLE}
+        uniform vec4 uWater;
         out vec3 vB;
         out vec3 vW;
+        out float vDepth;
         void main() {
           vec2 p = position.xz;
           float h = heightAt(p);
           float r = length(p);
           h = mix(-40.0, h, smoothstep(7000.0, 7900.0, r));
+          // beside a coast road the land to the right falls away under the sea
+          float wl = uWater.y > 0.5 ? uWater.x : -1e5;
+          if (uWater.y > 0.5) h -= 700.0 * smoothstep(3500.0, 15000.0, p.x + 0.15 * abs(p.y));
+          vDepth = wl - h;
+          h = max(h, wl);
           vB = vec3(p.x, h, p.y);
           vec4 w = modelMatrix * vec4(vB, 1.0);
           vW = w.xyz;
@@ -297,10 +304,13 @@ export class Mountains {
         ${ATMOS}
         ${CLOUD_SHADOW}
         ${SAMPLE}
+        ${BIOME}
+        ${WATER}
         uniform vec3 uCamB;
         uniform float uPixAngle;
         in vec3 vB;
         in vec3 vW;
+        in float vDepth;
         out vec4 outColor;
         float fbm(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * noise(p); p = p * 2.07 + 5.3; a *= 0.5; } return s; }
         void main() {
@@ -330,9 +340,14 @@ export class Mountains {
           float n1 = fbm(p / 260.0);
           float n2 = fbm(p / 2400.0);
           float slope = 1.0 - n.y;
+          if (vDepth > 0.0) {
+            vec3 wc = waterShade(vW, vd, dist, vDepth + 20.0, cloudShadow(vB));
+            outColor = vec4(aerial(wc, dist, vd, uCamB.y, hr), 1.0);
+            return;
+          }
 
           // materials
-          vec3 plain = mix(vec3(0.46, 0.27, 0.13), vec3(0.52, 0.33, 0.17), 0.5 + 0.5 * n2);
+          vec3 plain = mix(uPlainA, uPlainB, 0.5 + 0.5 * n2);
           plain = mix(plain, vec3(0.42, 0.30, 0.20), smoothstep(0.1, 0.5, n1) * 0.4);
           vec3 scree = mix(vec3(0.34, 0.28, 0.23), vec3(0.42, 0.35, 0.28), 0.5 + 0.5 * n1);
           float strata = 0.5 + 0.5 * sin(hr / 38.0 + n1 * 4.0 + d2.x * 1.5);
@@ -349,7 +364,7 @@ export class Mountains {
           vec3 glC = mix(iceC, vec3(0.80, 0.84, 0.88), 0.5 + 0.5 * fbm(p / 90.0));
           alb = mix(alb, glC, glacier);
           // snow: above a ragged snow line, missing from steep rock ribs
-          float snowLine = 1000.0 + 320.0 * n2 + 200.0 * n1;
+          float snowLine = uSnowLine + 320.0 * n2 + 200.0 * n1;
           float snow = smoothstep(snowLine - 200.0, snowLine + 260.0, hr - conc * 4.0);
           snow *= 1.0 - smoothstep(0.5, 0.72, slope + conc * 0.006 + 0.12 * n1);
           snow *= 1.0 - 0.8 * smoothstep(18.0, 55.0, conc + n1 * 15.0) * smoothstep(0.3, 0.5, slope);

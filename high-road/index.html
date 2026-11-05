@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>The High Road</title>
-<meta name="description" content="A slow, endless drive across a high desert plateau beneath a snow massif and its cap cloud. Fully procedural.">
+<meta name="description" content="An endless, fully procedural drive: high plateau, mountain pass, coast road, forest, farm hills, desert and snow, seen from the windscreen, the cockpit or chasing the car.">
 <style>
   :root { --bg: #0b1016; --ink: #eef1f4; --chip: rgba(12, 16, 22, 0.5); --line: rgba(238, 241, 244, 0.16); }
   * { box-sizing: border-box; }
@@ -19,8 +19,21 @@
   #title p { margin: 2px 0 0; opacity: .72; }
   #controls { right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); display: flex; gap: 6px; }
   #controls button { font: inherit; color: var(--ink); background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 7px 13px; cursor: pointer; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); min-width: 44px; }
-  #controls button:hover { background: rgba(20, 26, 34, 0.7); }
-  #controls button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  #controls button:hover, #panel button:hover { background: rgba(20, 26, 34, 0.7); }
+  #controls button:focus-visible, #panel button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  #panel { right: max(16px, env(safe-area-inset-right)); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 44px); width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 110px); overflow: auto; padding: 14px 14px 10px; border-radius: 16px; background: rgba(10, 14, 20, 0.62); border: 1px solid var(--line); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); }
+  #panel[hidden] { display: none; }
+  body.idle #panel { opacity: 1; }
+  #panel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  #panel h2 { margin: 0; font-size: 13px; font-weight: 600; }
+  #panel section { margin: 10px 0 0; }
+  #panel h3 { margin: 0 0 6px; font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; opacity: .6; }
+  #panel .row { display: flex; flex-wrap: wrap; gap: 5px; }
+  #panel button { font: inherit; color: var(--ink); background: rgba(255,255,255,0.04); border: 1px solid var(--line); border-radius: 999px; padding: 6px 11px; cursor: pointer; }
+  #panel button[aria-pressed="true"] { background: var(--ink); color: #0b1016; border-color: var(--ink); }
+  #panel .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 8px; }
+  #panel .keys { opacity: .55; font-size: 11px; }
+  #closePanel { padding: 4px 10px !important; }
   #back { left: max(16px, env(safe-area-inset-left)); top: max(14px, env(safe-area-inset-top)); color: var(--ink); text-decoration: none; padding: 6px 10px; border-radius: 999px; background: var(--chip); border: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
   #back:hover { background: rgba(20, 26, 34, 0.7); }
   #loader { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; background: var(--bg); transition: opacity 1.2s ease; }
@@ -28,22 +41,39 @@
   #loader div { text-align: center; }
   #loader h2 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
   #loadStatus { opacity: .6; }
-  @media (max-width: 560px) {
+  @media (max-width: 640px) {
     #title p { display: none; }
     #title { bottom: max(64px, calc(env(safe-area-inset-bottom) + 52px)); }
+    #controls { left: max(16px, env(safe-area-inset-left)); flex-wrap: wrap; justify-content: flex-end; }
     #controls button { padding: 7px 10px; }
+    #soundBtn, #hideBtn { display: none; }
+    #panel { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 48px); }
+    #panel .keys { display: none; }
   }
   @media (prefers-reduced-motion: reduce) { .hud, #loader { transition: none; } }
 </style>
 </head>
 <body>
-<canvas id="stage" aria-label="A car's-eye view of a road crossing a golden plateau toward a snow-capped massif under a cap cloud"></canvas>
+<canvas id="stage" aria-label="An endless procedural drive along a road through changing landscapes"></canvas>
 <a id="back" class="hud" href="/">← Experiments</a>
 <div id="title" class="hud">
   <h1>The High Road</h1>
-  <p>Mountains, clouds, road and traffic are all generated in code.</p>
+  <p><span id="sceneName">High plateau</span> · <span id="sceneDesc">Mountains, clouds, road and traffic are all generated in code.</span></p>
+</div>
+<div id="panel" class="hud" role="dialog" aria-label="Drive settings" hidden>
+  <header><h2>Where to?</h2><button id="closePanel" type="button" aria-label="Close settings">Close</button></header>
+  <section><h3>Scene</h3><div class="row" id="pScene"></div></section>
+  <section><h3>Road</h3><div class="row" id="pRoute"></div></section>
+  <section><h3>Land</h3><div class="row" id="pLand"></div></section>
+  <section><h3>Light</h3><div class="row" id="pLight"></div></section>
+  <section><h3>Camera</h3><div class="row" id="pView"></div></section>
+  <section><h3>Pace</h3><div class="row" id="pPace"></div></section>
+  <section><h3>Paint</h3><div class="row" id="pPaint"></div></section>
+  <div class="foot"><button id="tourBtn" type="button" aria-pressed="false" title="Change scene and camera on its own (T)">Auto tour off</button><span class="keys">1–7 camera · N scene · L light · P pace</span></div>
 </div>
 <div id="controls" class="hud" role="group" aria-label="Scene controls">
+  <button id="sceneBtn" type="button" aria-expanded="false" aria-controls="panel" title="Scene, road, land, camera (S)">High plateau</button>
+  <button id="viewBtn" type="button" title="Change the camera (V, or 1–7)">Windscreen</button>
   <button id="lightBtn" type="button" title="Change the light (L)">Day</button>
   <button id="soundBtn" type="button" aria-pressed="false" title="Sound (M)">Sound off</button>
   <button id="pauseBtn" type="button" aria-pressed="false" title="Pause (Space)">Pause</button>

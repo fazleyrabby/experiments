@@ -1,22 +1,37 @@
 import * as THREE from 'three';
-import { HASH, NOISE2, ATMOS, CLOUD_SHADOW, HEADLIGHT, FIELD } from './glsl.js';
-import { ROAD_GLSL, PERIOD } from './roadpath.js';
+import { HASH, NOISE2, ATMOS, CLOUD_SHADOW, HEADLIGHT, FIELD, BIOME, WATER } from './glsl.js';
+import { ROAD_GLSL } from './roadpath.js';
 
 export const NEAR_RADIUS = 8000;
 
-// Height of the plain near the road, in world space. Periodic in both axes so the
-// camera can wrap without a seam.
+// Height of the land near the road, in world space. Periodic in both axes so the camera
+// can wrap without a seam. The route shapes it: small relief, big hills away from the road,
+// valley walls on both sides, or a hillside that climbs on the left and drops on the right.
+// The road itself sits on a flat verge (uTerr2.w) at its own height.
 export const NEAR_H_GLSL = /* glsl */ `
 ${ROAD_GLSL}
 float nearH(vec2 p) {
   vec2 q = p / PERIOD;
-  float rd = abs(p.x - roadX(p.y));
-  float h = 4.0 * noiseP(q * 9.0, 9) + 1.4 * noiseP(q * 33.0 + 0.5, 33) + 0.35 * noiseP(q * 140.0, 140) + 0.08 * noiseP(q * 700.0, 700);
+  float u = roadU(p);
+  float rd = abs(u);
+  float ry = roadY(p.y);
+  float h = uTerr.x * (4.0 * noiseP(q * 9.0, 9) + 1.4 * noiseP(q * 33.0 + 0.5, 33) + 0.35 * noiseP(q * 140.0, 140) + 0.08 * noiseP(q * 700.0, 700));
   float hn = noiseP(q * 3.0 + vec2(0.37, 0.11), 3) * 0.5 + 0.5;
   float hn2 = noiseP(q * 7.0 + vec2(0.2, 0.7), 7) * 0.5 + 0.5;
   float hills = pow(max(hn - 0.42, 0.0) / 0.58, 2.0) * 300.0 + pow(max(hn2 - 0.55, 0.0) / 0.45, 2.0) * 90.0;
-  h += hills * smoothstep(150.0, 900.0, rd);
-  return mix(-0.3, h, smoothstep(6.0, 34.0, rd));
+  h += uTerr.y * hills * smoothstep(150.0, 900.0, rd);
+  if (uTerr.z > 0.0) {
+    // valley walls, ragged along their length, with spurs reaching toward the road
+    float vn = noiseP(q * 22.0 + 0.61, 22) * 0.5 + 0.5;
+    float vn2 = noiseP(q * 90.0 + 0.17, 90) * 0.5 + 0.5;
+    float wall = smoothstep(uTerr2.x * 0.04, uTerr2.x, rd * (0.8 + 0.5 * vn2));
+    h += uTerr.z * wall * (0.45 + 0.55 * vn) + 22.0 * vn2 * smoothstep(20.0, 120.0, rd) * uTerr.z / 260.0;
+  }
+  if (uTerr.w != 0.0) {
+    float sn = noiseP(q * 40.0 + 0.33, 40);
+    h += uTerr.w * tanh(-u / uTerr2.y) * (0.85 + 0.25 * sn);
+  }
+  return ry + mix(-0.3, h, smoothstep(uTerr2.w, uTerr2.w + 28.0, rd));
 }
 `;
 
@@ -49,18 +64,25 @@ export function createGround(shared) {
       ${NOISE2}
       ${NEAR_H_GLSL}
       uniform vec3 uCamW;
+      uniform vec4 uWater;
       out vec3 vW;
       out vec3 vN;
+      out float vDepth;
       void main() {
         vec4 w = modelMatrix * vec4(position, 1.0);
         float d = length(w.xz - uCamW.xz);
         float fade = 1.0 - smoothstep(6500.0, 7800.0, d);
-        float h = nearH(w.xz) * fade;
+        // far off the land settles to the backdrop's plain (or the sea, to the right of a coast road)
+        float far = uTerr2.z * smoothstep(-500.0, 3000.0, w.x - uCamW.x);
+        float h0 = nearH(w.xz);
+        float h = mix(far, h0, fade);
         float e = 0.8 + d * 0.004;
-        float hx = (nearH(w.xz + vec2(e, 0.0)) - h / max(fade, 1e-3)) * fade;
-        float hz = (nearH(w.xz + vec2(0.0, e)) - h / max(fade, 1e-3)) * fade;
+        float hx = (nearH(w.xz + vec2(e, 0.0)) - h0) * fade;
+        float hz = (nearH(w.xz + vec2(0.0, e)) - h0) * fade;
         vN = normalize(vec3(-hx, e, -hz));
-        w.y = h;
+        float wl = uWater.y > 0.5 ? uWater.x : -1e5;
+        vDepth = wl - h;
+        w.y = max(h, wl);
         vW = w.xyz;
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
@@ -72,11 +94,14 @@ export function createGround(shared) {
       ${CLOUD_SHADOW}
       ${NEAR_H_GLSL}
       ${FIELD}
+      ${BIOME}
+      ${WATER}
       ${HEADLIGHT}
       uniform vec3 uCamW;
       uniform vec3 uShadowStrip; // guardrail shadow: lateral offset, half-width, enabled
       in vec3 vW;
       in vec3 vN;
+      in float vDepth;
       out vec4 outColor;
       float fbmP(vec2 q, int per) { float s = 0.0, a = 0.5; int f = per; for (int i = 0; i < 3; i++) { s += a * noiseP(q * float(f), f); f *= 2; a *= 0.5; } return s; }
       void main() {
@@ -84,10 +109,16 @@ export function createGround(shared) {
         vec3 V = vW - cameraPosition;
         float dist = length(V);
         vec3 vd = V / dist;
-        vec3 n = normalize(vN);
+        float shadow = cloudShadow(vec3(p.x - uCamW.x, vW.y, p.y - uCamW.z));
 
-        float rx = roadX(p.y);
-        float u = p.x - rx;
+        if (vDepth > 0.0) {
+          vec3 col = waterShade(vW, vd, dist, vDepth, shadow);
+          outColor = vec4(aerial(col, dist, vd, cameraPosition.y, vW.y), 1.0);
+          return;
+        }
+
+        vec3 n = normalize(vN);
+        float u = roadU(p);
         float rd = abs(u);
         vec2 q = p / PERIOD;
         float fw = dist * 0.0015; // rough metres per pixel
@@ -98,32 +129,53 @@ export function createGround(shared) {
         float m4 = fbmP(q + 0.3, 48);
         float patchy = fbmP(q * 1.0 + 0.71, 160);
 
-        // golden steppe grass with darker scrub and pale bare ground
-        vec3 grass = mix(vec3(0.46, 0.27, 0.12), vec3(0.55, 0.34, 0.17), 0.5 + 0.5 * m4);
-        grass = mix(grass, vec3(0.34, 0.22, 0.12), smoothstep(0.05, 0.45, patchy) * 0.55);
-        grass = mix(grass, vec3(0.50, 0.40, 0.30), smoothstep(0.25, 0.6, -patchy) * 0.35);
+        // base grass with darker scrub and pale bare ground
+        vec3 grass = mix(uGrassA, uGrassB, 0.5 + 0.5 * m4);
+        grass = mix(grass, uScrub, smoothstep(0.05, 0.45, patchy) * 0.55);
+        grass = mix(grass, uBare, smoothstep(0.25, 0.6, -patchy) * 0.35);
         grass *= 0.86 + 0.14 * m3 + 0.12 * m2 + 0.10 * m1;
         // short stubble between the tufts
         float stub = noiseP(q * 16384.0 + 0.5, 16384) * (1.0 - smoothstep(0.02, 0.08, fw));
         grass *= 0.92 + 0.14 * stub;
-        // patches: olive meadow in the hollows, pale alkali crust, rust-red soil, stony ground
+        // patches: meadow in the hollows, pale crust, red soil, stony ground
         float mdw = meadow(p), alk = alkali(p), red = redSoil(p);
-        vec3 olive = mix(vec3(0.27, 0.27, 0.11), vec3(0.36, 0.33, 0.14), 0.5 + 0.5 * m3);
-        grass = mix(grass, olive * (0.85 + 0.15 * m2), mdw * 0.85);
-        grass = mix(grass, vec3(0.60, 0.42, 0.26) * (0.9 + 0.1 * m2), red * 0.45 * (1.0 - mdw));
-        grass = mix(grass, vec3(0.66, 0.62, 0.54) * (0.92 + 0.08 * m1), alk * 0.8 * (1.0 - mdw));
+        grass = mix(grass, uMeadowC * (0.85 + 0.15 * m2) * (0.9 + 0.2 * m3), mdw * 0.85);
+        grass = mix(grass, uRedC * (0.9 + 0.1 * m2), red * 0.45 * (1.0 - mdw));
+        grass = mix(grass, uAlkC * (0.92 + 0.08 * m1), alk * 0.8 * (1.0 - mdw));
         float stones = smoothstep(0.62, 0.8, noiseP(q * 8192.0 + 0.37, 8192)) * (1.0 - smoothstep(0.08, 0.3, fw));
-        grass = mix(grass, vec3(0.2, 0.19, 0.18), stones * (0.4 + 0.5 * alk));
-        // dark scrub tufts
+        grass = mix(grass, vec3(0.2, 0.19, 0.18), stones * (0.4 + 0.5 * alk) * min(uCover.w, 1.5));
+        // dark tufts
         float tuft = smoothstep(0.55, 0.8, noiseP(q * 2048.0 + 0.13, 2048)) * (1.0 - smoothstep(0.3, 1.2, fw));
-        grass = mix(grass, grass * 0.55, tuft);
+        grass = mix(grass, grass * 0.55, tuft * min(uCover.x, 1.0));
+        // steep ground shows rock
+        float steep = smoothstep(0.35, 0.65, 1.0 - n.y);
+        vec3 rock = mix(vec3(0.16, 0.15, 0.14), vec3(0.30, 0.27, 0.24), 0.5 + 0.5 * m3) * (0.85 + 0.3 * m2);
+        grass = mix(grass, rock, steep);
+        // forest floor and, far off, the canopy the trees no longer draw
+        float fo = forest(p);
+        float canopy = mix(fo, 1.0, uTrees.w) * uTrees.z;
+        vec3 floorC = mix(vec3(0.07, 0.05, 0.03), uNeedle * 1.6, 0.5 + 0.5 * m2);
+        grass = mix(grass, floorC, canopy * 0.55 * smoothstep(8.0, 20.0, rd));
+        vec3 crowns = mix(uNeedle * 0.8, uLeafA, uTrees.y / max(uTrees.x + uTrees.y, 1e-3)) * (0.8 + 0.25 * m4);
+        grass = mix(grass, crowns, canopy * smoothstep(380.0, 620.0, dist) * smoothstep(20.0, 60.0, rd));
         // gravel shoulder and embankment
         vec3 gravel = mix(vec3(0.24, 0.21, 0.18), vec3(0.32, 0.28, 0.24), 0.5 + 0.5 * m1);
         gravel *= 0.8 + 0.15 * m2 + 0.25 * noiseP(q * 16384.0, 16384) * (1.0 - smoothstep(0.03, 0.12, fw));
-        float sh = smoothstep(5.7, 6.9, rd + m2 * 0.5 + m3 * 0.4);
+        float sh = smoothstep(uTerr2.w - 0.3, uTerr2.w + 0.9, rd + m2 * 0.5 + m3 * 0.4);
         vec3 alb = mix(gravel, grass, sh);
+        // a little beach at the waterline
+        if (uWater.y > 0.5) {
+          float beach = 1.0 - smoothstep(0.4, 3.5, -vDepth + m2 * 0.8);
+          alb = mix(alb, mix(vec3(0.55, 0.49, 0.38), vec3(0.32, 0.28, 0.22), smoothstep(-0.6, 0.0, vDepth)), beach);
+        }
+        // snow lying everywhere except steep faces, thinning on the verge
+        if (uSnowCover > 0.0) {
+          float lie = uSnowCover * (1.0 - smoothstep(0.45, 0.75, 1.0 - n.y + m3 * 0.1));
+          lie *= mix(0.55 + 0.35 * m2, 1.0, smoothstep(uTerr2.w + 0.5, uTerr2.w + 3.0, rd));
+          vec3 snowC = vec3(0.80, 0.83, 0.88) * (0.94 + 0.06 * m1);
+          alb = mix(alb, snowC, clamp(lie, 0.0, 1.0));
+        }
 
-        float shadow = cloudShadow(vec3(p.x - uCamW.x, vW.y, p.y - uCamW.z));
         // guardrail shadow strip
         if (uShadowStrip.z > 0.5 && railAt(-p.y)) {
           float gd = abs(u - uShadowStrip.x);

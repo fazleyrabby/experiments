@@ -1,27 +1,28 @@
 import * as THREE from 'three';
-import { HASH, NOISE2, ATMOS, CLOUD_SHADOW, HEADLIGHT } from './glsl.js';
-import { PERIOD, HALF_WIDTH, frameAt, railAt } from './roadpath.js';
+import { HASH, NOISE2, ATMOS, CLOUD_SHADOW, HEADLIGHT, BIOME } from './glsl.js';
+import { PERIOD, HALF_WIDTH, frameAt, railAtZ, routeLen } from './roadpath.js';
 import { box, paint, merge } from './props.js';
 
 const STEP = 2;
 const RAIL_OFFSET = 5.0; // post centreline, metres right of the road centre
-const curbAt = (s) => ((((s * 11) / PERIOD + 0.3) % 1) + 1) % 1 < 0.45;
+const curbAtZ = (z) => (((((-z) * 11) / PERIOD + 0.3) % 1) + 1) % 1 < 0.45;
 
 // Lateral cross-section: asphalt with a slight crown, then a gravel batter down to the plain.
 const LATS = [-5.8, -HALF_WIDTH, -2, 0, 2, HALF_WIDTH, 5.8];
 const crown = (u) => (Math.abs(u) <= HALF_WIDTH ? 0.06 + 0.05 * (1 - (u / HALF_WIDTH) ** 2) : -0.34);
 
 function roadGeometry() {
-  const rows = PERIOD / STEP + 1;
+  const len = routeLen();
+  const rows = Math.ceil(len / STEP) + 1;
   const n = LATS.length;
   const pos = new Float32Array(rows * n * 3), uv = new Float32Array(rows * n * 2), nor = new Float32Array(rows * n * 3);
   const f = {};
   let k = 0, t = 0;
   for (let r = 0; r < rows; r++) {
-    const s = r * STEP;
+    const s = Math.min(r * STEP, len);
     frameAt(s, f);
     for (const u of LATS) {
-      pos[k] = f.x + f.rx * u; pos[k + 1] = crown(u); pos[k + 2] = f.z + f.rz * u;
+      pos[k] = f.x + f.rx * u; pos[k + 1] = f.y + crown(u); pos[k + 2] = f.z + f.rz * u;
       nor[k] = 0; nor[k + 1] = 1; nor[k + 2] = 0;
       k += 3;
       uv[t++] = u; uv[t++] = s;
@@ -55,7 +56,7 @@ function railGeometry() {
     for (const [s, fr] of strip) {
       for (const [dl, dy] of W_BEAM) {
         const lat = RAIL_OFFSET - 0.2 - dl;
-        pos.push(fr.x + fr.rx * lat, 0.62 + dy, fr.z + fr.rz * lat);
+        pos.push(fr.x + fr.rx * lat, fr.y + 0.62 + dy, fr.z + fr.rz * lat);
       }
     }
     for (let r = 0; r < strip.length - 1; r++) for (let i = 0; i < m - 1; i++) {
@@ -70,18 +71,20 @@ function railGeometry() {
     parts.push(paint(flat, 0xa9afb2, 0.5, 0.45));
     strip = null;
   };
-  for (let s = 0; s <= PERIOD; s += STEP) {
-    if (railAt(s)) { (strip ||= []).push([s, frameAt(s, {})]); }
+  const len = routeLen();
+  for (let s = 0; s <= len; s += STEP) {
+    const fr = frameAt(s, {});
+    if (railAtZ(fr.z)) { (strip ||= []).push([s, fr]); }
     else flush();
   }
   flush();
 
   // posts and blockouts every 4 m along the rail; white delineators every 50 m elsewhere
-  for (let s = 0; s < PERIOD; s += 4) {
+  for (let s = 0; s < len; s += 4) {
     frameAt(s, f);
     const ang = Math.atan2(-f.tx, -f.tz);
-    const place = (g, lat) => { g.rotateY(ang); g.translate(f.x + f.rx * lat, 0, f.z + f.rz * lat); parts.push(g); };
-    if (railAt(s)) {
+    const place = (g, lat) => { g.rotateY(ang); g.translate(f.x + f.rx * lat, f.y, f.z + f.rz * lat); parts.push(g); };
+    if (railAtZ(f.z)) {
       place(box(0.1, 1.15, 0.15, 0, 0.12, 0, 0x9ba1a4, 0.55, 0.45), RAIL_OFFSET);
       place(box(0.16, 0.2, 0.1, 0.0, 0.62, 0, 0x7d8487, 0.55, 0.8), RAIL_OFFSET - 0.12);
     } else if (s % 48 === 0) {
@@ -93,12 +96,12 @@ function railGeometry() {
     }
   }
   // painted concrete kerb blocks along the far side of the oncoming lane
-  for (let s = 0; s < PERIOD; s += 1.6) {
-    if (!curbAt(s)) continue;
+  for (let s = 0; s < len; s += 1.6) {
     frameAt(s, f);
+    if (!curbAtZ(f.z)) continue;
     const g = box(0.24, 0.32, 0.9, 0, -0.04, 0, s % 3.2 < 1.6 ? 0xdedbd2 : 0xd5d1c6, 0.85, 0);
     g.rotateY(Math.atan2(-f.tx, -f.tz));
-    g.translate(f.x - f.rx * 4.55, 0, f.z - f.rz * 4.55);
+    g.translate(f.x - f.rx * 4.55, f.y, f.z - f.rz * 4.55);
     parts.push(g);
   }
   return merge(parts);
@@ -125,6 +128,8 @@ export function createRoad(shared, propMaterial) {
       ${ATMOS}
       ${CLOUD_SHADOW}
       ${HEADLIGHT}
+      ${BIOME}
+      uniform vec4 uMarks; // centre style, edge lines, dash period
       uniform vec3 uCamW;
       in vec3 vW;
       in vec2 vUv;
@@ -159,18 +164,30 @@ export function createRoad(shared, propMaterial) {
 
         // markings
         float wear = 0.75 + 0.25 * smoothstep(-0.4, 0.4, noise(q * vec2(6.0, 1.5)));
-        float edge = band(au, 3.48, 3.63, fw);
-        float dash = band(u, -0.075, 0.075, fw) * band(mod(s, ${(PERIOD / 546).toFixed(5)}), 0.0, 6.0, fs + 0.02);
+        float mode = uMarks.x;
+        float edge = band(au, 3.48, 3.63, fw) * uMarks.y;
+        float dashOn = band(mod(s, uMarks.z), 0.0, 6.0, fs + 0.02);
+        float centre = 0.0;
+        vec3 centreC = vec3(0.80, 0.56, 0.12);
+        if (mode < 0.5) centre = band(u, -0.075, 0.075, fw) * dashOn;
+        else if (mode < 1.5) centre = max(band(u, -0.2, -0.08, fw), band(u, 0.08, 0.2, fw));
+        else if (mode < 2.5) { centre = band(u, -0.075, 0.075, fw) * band(mod(s, uMarks.z * 2.0), 0.0, 4.0, fs + 0.02); centreC = vec3(0.78, 0.78, 0.74); }
         vec3 alb = asph;
         alb = mix(alb, vec3(0.78, 0.78, 0.74), edge * wear);
-        alb = mix(alb, vec3(0.80, 0.56, 0.12), dash * wear);
-        float paint = max(edge, dash) * wear;
+        alb = mix(alb, centreC, centre * wear);
+        float paint = max(edge, centre) * wear;
 
-        // gravel batter beyond the asphalt
-        float gr = smoothstep(${HALF_WIDTH.toFixed(2)}, ${(HALF_WIDTH + 0.12).toFixed(2)}, au);
+        // gravel batter beyond the asphalt; an unmarked lane has a ragged, crumbling edge
+        float rag = mode > 2.5 ? 0.45 + 0.35 * noise(q * vec2(2.0, 0.35)) + 0.12 * noise(q * vec2(9.0, 2.0)) : 0.0;
+        float gr = smoothstep(${HALF_WIDTH.toFixed(2)} - rag, ${(HALF_WIDTH + 0.12).toFixed(2)} - rag, au);
         vec3 gravel = mix(vec3(0.24, 0.21, 0.18), vec3(0.32, 0.28, 0.24), 0.5 + 0.5 * noise(q * 9.0));
         alb = mix(alb, gravel, gr);
 
+        // snow packed on the verge and dusted on the crown, clear in the wheel tracks
+        if (uSnowCover > 0.0) {
+          float dust = smoothstep(2.9, 3.9, au) * 0.8 + (1.0 - tracks) * 0.28 * (0.5 + 0.5 * mid);
+          alb = mix(alb, vec3(0.70, 0.73, 0.78), uSnowCover * clamp(dust + gr, 0.0, 1.0) * (0.75 + 0.25 * agg));
+        }
         float rough = mix(mix(0.62, 0.42, tracks * 0.6), 0.5, paint);
         rough = mix(rough, 0.95, gr);
         vec3 n = vec3(0.0, 1.0, 0.0);
@@ -197,18 +214,27 @@ export function createRoad(shared, propMaterial) {
       }`,
   });
 
-  const roadGeo = roadGeometry();
-  const railGeo = railGeometry();
   const group = new THREE.Group();
+  const roads = [], rails = [];
   for (const off of [PERIOD, 0, -PERIOD]) {
-    const r = new THREE.Mesh(roadGeo, material);
+    const r = new THREE.Mesh(undefined, material);
     r.position.z = off;
     r.frustumCulled = false;
-    const p = new THREE.Mesh(railGeo, propMaterial);
+    const p = new THREE.Mesh(undefined, propMaterial);
     p.position.z = off;
     p.frustumCulled = false;
+    roads.push(r); rails.push(p);
     group.add(r, p);
   }
+  // the active route changed: rebuild the strip and its furniture
+  group.rebuild = () => {
+    roads[0].geometry?.dispose?.(); rails[0].geometry?.dispose?.();
+    const roadGeo = roadGeometry();
+    const railGeo = railGeometry();
+    for (const r of roads) r.geometry = roadGeo;
+    for (const p of rails) p.geometry = railGeo;
+  };
+  group.rebuild();
   return group;
 }
 
