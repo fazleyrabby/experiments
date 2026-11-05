@@ -1,5 +1,11 @@
 [
   {
+    "slug": "hatchback-mech",
+    "title": "Hatchback to Mech",
+    "category": "Objects",
+    "description": "An original rally hatchback that unlatches, unfolds and stands up as a robot. Scrub the transformation, orbit it, and listen to the servos."
+  },
+  {
     "slug": "moto-island",
     "title": "Moto Island",
     "category": "Play",
