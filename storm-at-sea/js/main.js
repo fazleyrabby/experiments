@@ -18,12 +18,26 @@ import { HERO_SHIPS } from './presets.js';
 import { Atmosphere, TIMES, WEATHERS } from './atmosphere.js';
 import { SeaLife } from './creatures.js';
 import { buildCruiseShip } from './cruise.js';
+import { SAIL } from './wooden.js';
+import { buildTrireme } from './trireme.js';
+import { buildFirstRate } from './firstrate.js';
 import { Voyage } from './voyage.js';
 
-const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// accessibility & comfort preferences (persisted)
+const PREFS = (() => {
+  const d = { motion: matchMedia('(prefers-reduced-motion: reduce)').matches, gentle: false, captions: false, saver: false };
+  try { return { ...d, ...JSON.parse(localStorage.getItem('storm.prefs') || '{}') }; } catch { return d; }
+})();
+const savePrefs = () => { try { localStorage.setItem('storm.prefs', JSON.stringify(PREFS)); } catch {} };
 
 const $ = (id) => document.getElementById(id);
-const status = (s) => { const el = $('loadStatus'); if (el) el.textContent = s; };
+const LOAD_STEPS = 6;
+let loadStep = 0;
+const status = (s) => {
+  const el = $('loadStatus'); if (el) el.textContent = s;
+  loadStep = s ? loadStep + 1 : LOAD_STEPS;
+  const bar = $('loadFill'); if (bar) bar.style.transform = `scaleX(${Math.min(1, loadStep / LOAD_STEPS)})`;
+};
 const nextFrame = () => new Promise((r) => setTimeout(r, 16));
 
 /* ------------------------------------------------------------- renderer */
@@ -85,6 +99,10 @@ const flashLight = new THREE.DirectionalLight(C('#d6e2ff'), 0);
 scene.add(flashLight, flashLight.target);
 
 const waves = new WaveField(WIND_ANGLE);
+// motor ships hold their head into the sea; sailing ships run with the wind on the quarter
+const MOTOR_HEADING = -(WIND_ANGLE + Math.PI - 0.38);
+const SAIL_HEADING = 0.6 - WIND_ANGLE;
+const isSail = (ship) => ship && (ship.kind === 'sail' || ship.kind === 'trireme' || ship.kind === 'ghost');
 
 /* ---------------------------------------------------------------- build */
 let pmrem, envScene, envTimers = [];
@@ -117,7 +135,7 @@ async function build() {
   const s3 = Q.extraShips > 1 ? buildShip({ L: 198, seed: 23, name: 'AURORA', brand: 'HANSEMAR', hull: '#4a1b19', funnelBand: '#1d1d1d', stackMax: 6, texW: Q.shipTexW, floors: 6 }) : null;
   if (s3) scene.add(s3.group);
 
-  const heading = -(WIND_ANGLE + Math.PI - 0.38);
+  const heading = MOTOR_HEADING;
   const F = new THREE.Vector2(Math.cos(heading), -Math.sin(heading));
   const Rt = new THREE.Vector2(Math.sin(heading), Math.cos(heading));
   fleet = [
@@ -126,6 +144,7 @@ async function build() {
   ];
   if (s3) fleet.push(new ShipMotion(s3, waves, { x: -F.x * 700 + Rt.x * 1250, z: -F.y * 700 + Rt.y * 1250, heading: heading - 0.05, speed: 4.6 }));
   fleet.forEach((m) => { m.onSlam = onSlam; });
+  if (isSail(hero)) fleet[0].heading0 = SAIL_HEADING;
 
   status('Charging the clouds…'); await nextFrame();
   rain = new Rain(Q.rain, env);
@@ -138,6 +157,7 @@ async function build() {
   sealife.onSplash = (pt, I) => {
     _v.set(pt.x, 0, pt.z);
     audio.slam(I * 0.5, THREE.MathUtils.clamp(140 / camera.position.distanceTo(_v), 0.03, 1), panOf(_v));
+    if (I > 0.5) caption('[Whale breaches with a huge splash]', 'breach', 8); else if (I > 0.12) caption('[Whale blows]', 'blow', 8);
   };
   lightning = new Lightning(scene, env);
   lightning.onStrike = onStrike;
@@ -183,10 +203,12 @@ async function build() {
 
 /* ----------------------------------------------------------- ship select */
 const shipCache = {};
+// ships being rebuilt stay hidden, except for local review with ?preview
+const PREVIEW_HIDDEN = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('preview');
 let heroKey = (() => {
   const q = new URLSearchParams(location.search).get('ship');
-  if (q && HERO_SHIPS[q]) return q;
-  try { const v = localStorage.getItem('storm.ship'); if (v && HERO_SHIPS[v]) return v; } catch {}
+  if (q && HERO_SHIPS[q] && (!HERO_SHIPS[q].hidden || PREVIEW_HIDDEN)) return q;
+  try { const v = localStorage.getItem('storm.ship'); if (v && HERO_SHIPS[v] && !HERO_SHIPS[v].hidden) return v; } catch {}
   return 'meridian';
 })();
 
@@ -194,19 +216,37 @@ function heroShip(key) {
   if (!shipCache[key]) {
     const p = HERO_SHIPS[key];
     const opts = { ...p.opts, texW: Q.heroTexW, spots: Q.name !== 'low' };
-    shipCache[key] = p.kind === 'cruise' ? buildCruiseShip(opts) : buildShip(opts);
+    const build = { cruise: buildCruiseShip, trireme: buildTrireme, firstrate: buildFirstRate, ghost: buildFirstRate }[p.kind] || buildShip;
+    shipCache[key] = build(opts);
+    attachSplash(shipCache[key]);
   }
   return shipCache[key];
 }
 
+// oar splashes and other per-ship particle events, converted to world space
+function attachSplash(ship) {
+  ship.onSplash = (pts, I) => {
+    if (!particles) return;
+    ship.group.updateMatrixWorld();
+    for (const p of pts) {
+      _v.copy(p).applyMatrix4(ship.group.matrixWorld);
+      const wh = waves.heightAt(_v.x, _v.z, time);
+      for (let k = 0; k < 2; k++) particles.emit(_v.x + (Math.random() - 0.5), wh + 0.1, _v.z + (Math.random() - 0.5), (Math.random() - 0.5) * 2, 1.5 + Math.random() * 2.5 * I, (Math.random() - 0.5) * 2, 0.7 + Math.random() * 0.5, 0.4, 1.6, 0.4, 1, 8, 0.3);
+    }
+  };
+}
+const shipScale = () => THREE.MathUtils.clamp((fleet[0].ship.camL || fleet[0].ship.L) / 230, 0.3, 1.4);
+
 function switchShip(key) {
-  if (!HERO_SHIPS[key] || key === heroKey) return;
+  if (!HERO_SHIPS[key] || (HERO_SHIPS[key].hidden && !PREVIEW_HIDDEN) || key === heroKey) return;
   heroKey = key;
   const next = heroShip(key);
   scene.remove(hero.group);
   hero = next;
   scene.add(hero.group);
+  if (isSail(hero) !== isSail(fleet[0].ship)) fleet[0].heading0 = isSail(hero) ? SAIL_HEADING : MOTOR_HEADING;
   fleet[0].setShip(hero);
+  controls.minDistance = 45 * shipScale();
   fleet[0].update(0, time);
   try { localStorage.setItem('storm.ship', key); } catch {}
   syncShipUi();
@@ -238,6 +278,7 @@ function onStrike(ev) {
   const dist = Math.hypot(ev.pos.x - camera.position.x, ev.pos.z - camera.position.z);
   eventLog.push({ type: 'thunder', t: time, dist: Math.max(150, dist), pan: panOf(ev.mid), cloud: ev.kind === 'cloud' });
   audio.thunder(Math.max(150, dist), panOf(ev.mid), ev.kind === 'cloud');
+  setTimeout(() => caption(ev.kind === 'cloud' ? '[Distant thunder rolls]' : dist < 900 ? '[Thunder cracks overhead]' : '[Thunder rumbles]', 'thunder', 3), (0.08 + Math.max(150, dist) / 480) * 1000);
   if (ev.kind === 'bolt' && dist < 900) {
     const delay = 0.08 + dist / 480;
     setTimeout(() => { shake = Math.max(shake, (900 - dist) / 900 * 1.4); }, delay * 1000);
@@ -269,6 +310,7 @@ function onSlam(m, I) {
   _v.set(s.L / 2, 0, 0).applyMatrix4(g.matrixWorld);
   const d = heroDist(_v);
   audio.slam(I, THREE.MathUtils.clamp(180 / d, 0.04, 1), panOf(_v));
+  if (m === fleet[0] && d < 400) caption(I > 0.9 ? '[Sea slams into the bow]' : '[Water crashes over the bow]', 'slam', 5);
   eventLog.push({ type: 'slam', t: time, I, att: THREE.MathUtils.clamp(180 / d, 0.04, 1), pan: panOf(_v) });
   if (m === fleet[0] && d < 260) shake = Math.max(shake, 0.25 * I);
   if (m === fleet[0] && view === 'bridge') { splashGlass(Math.round(70 * I), true); shake = Math.max(shake, 0.5 * I); }
@@ -304,15 +346,16 @@ function setShot(i, snap) {
 
 function heroTarget(out) {
   const g = fleet[0].ship.group.position;
-  return out.set(g.x, fleet[0].heave * 0.4 + 12, g.z);
+  return out.set(g.x, fleet[0].heave * 0.4 + 12 * shipScale(), g.z);
 }
 
 const _t = new THREE.Vector3(), _o = new THREE.Vector3(), _look = new THREE.Vector3();
 function placeCine(dt, snap) {
   const shot = SHOTS[cine.shot];
   heroTarget(_t);
-  localToWorldOffset(shot.f(cine.t), _o);
-  localToWorldOffset(shot.look, _look);
+  const sk = shipScale();
+  localToWorldOffset(shot.f(cine.t).map((v) => v * sk), _o);
+  localToWorldOffset(shot.look.map((v) => v * sk), _look);
   const desired = _t.clone().add(_o);
   const k = snap ? 1 : 1 - Math.exp(-dt * 2.2);
   camera.position.lerp(desired, k);
@@ -403,6 +446,7 @@ function setTelegraph(i) {
   document.querySelectorAll('[data-tele]').forEach((b) => { const on = +b.dataset.tele === telegraphIdx; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
 }
 function hornDown() {
+  caption("[Ship's horn sounds]", 'horn', 2);
   if (!audio.ctx) audio.start();
   audio.hornStart();
   hornT = performance.now();
@@ -418,7 +462,9 @@ function hornUp() {
   for (const m of fleet.slice(1)) {
     const p = m.ship.group.position;
     const dist = camera.position.distanceTo(p);
-    audio.hornReply(2.2 + Math.random() * 3 + dist / 1200, 1.4 + Math.random() * 1.2, dist, THREE.MathUtils.clamp(panOf(p), -0.9, 0.9));
+    const delay = 2.2 + Math.random() * 3 + dist / 1200;
+    audio.hornReply(delay, 1.4 + Math.random() * 1.2, dist, THREE.MathUtils.clamp(panOf(p), -0.9, 0.9));
+    setTimeout(() => caption('[A distant horn answers]', 'reply', 3), delay * 1000);
   }
 }
 
@@ -523,7 +569,7 @@ function logLine(text) {
   tx.textContent = '';
   let i = 0;
   const step = () => { tx.textContent = text.slice(0, ++i); if (i >= text.length) clearInterval(logTimer); };
-  if (REDUCED) tx.textContent = text; else logTimer = setInterval(step, 26);
+  if (PREFS.motion) tx.textContent = text; else logTimer = setInterval(step, 26);
   logHide = setTimeout(() => el.classList.remove('show'), 9000 + text.length * 26);
 }
 
@@ -537,15 +583,16 @@ const flyLook = new THREE.CatmullRomCurve3([
 ]);
 let fly = null;
 function flyIn(done) {
-  if (REDUCED) { done(); return; }
+  if (PREFS.motion) { done(); return; }
   fly = { t: 0, dur: 11, done, struck: 0 };
   document.body.classList.add('flying');
   camHook = (dt, t, target) => {
     fly.t += dt;
     const u = Math.min(1, fly.t / fly.dur);
     const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
-    localToWorldOffset(flyPath.getPoint(e).toArray(), _o);
-    localToWorldOffset(flyLook.getPoint(e).toArray(), _look);
+    const fk = THREE.MathUtils.lerp(1, shipScale(), e * e);
+    localToWorldOffset(flyPath.getPoint(e).multiplyScalar(fk).toArray(), _o);
+    localToWorldOffset(flyLook.getPoint(e).multiplyScalar(fk).toArray(), _look);
     camera.position.copy(target).add(_o);
     camera.lookAt(_look.add(target));
     $('veil').style.opacity = String(Math.max(0, 1 - THREE.MathUtils.smoothstep(e, 0.08, 0.42)) * 0.92);
@@ -699,18 +746,114 @@ const clock = new THREE.Clock();
 let time = 0, hudTimer = 0, rogueTimer = 38;
 const windVel = new THREE.Vector3();
 const sampleOut = { x: 0, y: 0, z: 0, jac: 1 };
-let rainAmt = 1, windAmt = 1;
+let rainAmt = 1, windAmt = 1, creakTimer = 3, gentleFlash = 0;
+
+/* --------------------------------------------- the ghost ship: a rare encounter */
+const ghostEv = { ship: null, motion: null, t: 0, dur: 80, timer: 70 + Math.random() * 120, active: false, mats: [] };
+// the ghost ship is hidden while it's rebuilt, so it can't turn up as an encounter either
+const GHOST_ENABLED = !HERO_SHIPS.ghost.hidden;
+function ghostAllowed() {
+  if (!GHOST_ENABLED) return false;
+  return !CAPTURE && heroKey !== 'ghost' && (atmos.time === 'night' || atmos.time === 'moonlit') && atmos.cur.waves > 0.5;
+}
+function spawnGhost() {
+  if (!ghostEv.ship) {
+    ghostEv.ship = buildFirstRate({ ghost: true, spots: Q.name !== 'low' });
+    collectGhostMats();
+    scene.add(ghostEv.ship.group);
+  }
+  const m = fleet[0], side = Math.random() < 0.5 ? -1 : 1;
+  const f = m.forward, rt = new THREE.Vector2(-f.y, f.x).multiplyScalar(side);
+  const p = new THREE.Vector2(m.pos.x, m.pos.y).addScaledVector(rt, 850).addScaledVector(f, -350);
+  ghostEv.motion = new ShipMotion(ghostEv.ship, waves, { x: p.x, z: p.y, heading: m.heading0 + side * 0.18, speed: m.speed0 * 1.5 });
+  ghostEv.ship.group.visible = true;
+  ghostEv.t = 0; ghostEv.dur = 70 + Math.random() * 30; ghostEv.active = true;
+  if (voyage.active || Math.random() < 0.5) logLine('Ship off the beam. No lights, no answer on the radio.');
+  setTimeout(() => caption('[An eerie choir drifts across the water]', 'ghost', 30), 4000);
+}
+// its carved work streams in after it is built, so pick up new materials as they appear
+function collectGhostMats() {
+  const g = ghostEv;
+  g.kids = g.ship.group.children.length;
+  g.ship.group.traverse((o) => {
+    const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+    for (const mm of ms) if (!mm.userData.ghostFade) { mm.transparent = true; mm.userData.baseOpacity = mm.opacity; mm.userData.ghostFade = true; g.mats.push(mm); }
+  });
+}
+function updateGhost(dt) {
+  const g = ghostEv;
+  if (!g.active) {
+    if (audio.ready && g.ship === null) audio.ghost(0);
+    if (!ghostAllowed()) return;
+    g.timer -= dt;
+    if (g.timer <= 0) spawnGhost();
+    return;
+  }
+  g.t += dt;
+  if (g.ship.group.children.length !== g.kids) collectGhostMats();
+  g.motion.update(dt, time);
+  g.ship.setLights(atmos.cur.windows, atmos.cur.nav);
+  const leaving = !ghostAllowed();
+  if (leaving) g.t = Math.max(g.t, g.dur - 12);
+  const fade = THREE.MathUtils.smoothstep(g.t, 0, 12) * (1 - THREE.MathUtils.smoothstep(g.t, g.dur - 12, g.dur));
+  for (const mm of g.mats) mm.opacity = (mm.userData.baseOpacity ?? 1) * fade * 0.9;
+  // it trails its own fog
+  if (Math.random() < 0.6 * fade) {
+    const gp = g.ship.group.position;
+    particles.emit(gp.x + (Math.random() - 0.5) * 70, 1 + Math.random() * 6, gp.z + (Math.random() - 0.5) * 30, windVel.x * 0.15, 0.4, windVel.z * 0.15, 7, 8, 30, 0.22 * fade, 0.55, -0.02, 0.3);
+  }
+  const d = camera.position.distanceTo(g.ship.group.position);
+  if (audio.ready) audio.ghost(fade * THREE.MathUtils.clamp(1 - (d - 200) / 1100, 0.15, 1));
+  if (g.t >= g.dur) { g.active = false; g.ship.group.visible = false; g.timer = 150 + Math.random() * 240; if (audio.ready) audio.ghost(0); }
+}
 
 let camHook = null;
 const mixLog = [];
 
 const gov = { t: 0, frames: 0, warm: 3, good: 0 };
+let saverAcc = 0;
 function frame() {
   requestAnimationFrame(frame);
   const raw = clock.getDelta();
+  if (PREFS.saver) {
+    // battery saver: render at ~30 fps
+    saverAcc += raw;
+    if (saverAcc < 1 / 31) return;
+    const step = saverAcc; saverAcc = 0;
+    tick(paused ? 0 : Math.min(step, 0.06));
+    return;
+  }
   tick(paused ? 0 : Math.min(raw, 0.05));
   if (!paused) governor(raw);
 }
+
+/* ------------------------------------------------- captions, comfort, about */
+const capLast = {};
+function caption(text, key = text, gap = 4) {
+  if (!PREFS.captions) return;
+  const now = performance.now() / 1000;
+  if (capLast[key] && now - capLast[key] < gap) return;
+  capLast[key] = now;
+  const box = $('captions');
+  const el = document.createElement('div');
+  el.className = 'cap'; el.textContent = text;
+  box.appendChild(el);
+  while (box.children.length > 3) box.firstChild.remove();
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 600); }, 3200);
+}
+function applyPrefs() {
+  document.body.classList.toggle('reduce-motion', PREFS.motion);
+  lightning.gentle = PREFS.gentle || PREFS.motion;
+  if (PREFS.saver) {
+    setDpr(Math.max(Q.dprMin, Math.min(DPR, 0.85)));
+    bloom.enabled = false;
+  } else {
+    bloom.enabled = Q.bloom;
+  }
+  rain.mesh.geometry.setDrawRange(0, Math.floor(Q.rain * (PREFS.saver ? 0.4 : 1)) * 2);
+  for (const k of Object.keys(PREFS)) { const el = $(`pref-${k}`); if (el) el.checked = !!PREFS[k]; }
+}
+function setPref(k, v) { PREFS[k] = v; savePrefs(); applyPrefs(); }
 
 // Adaptive quality: shed bloom, then resolution, when the frame rate sags; win it back when there's headroom.
 function governor(raw) {
@@ -753,7 +896,12 @@ function tick(dt) {
   if (rogueTimer <= 0 && !waves.rogue.active) triggerRogue();
 
   lightning.update(dt, camera);
-  if (REDUCED) env.uFlash.value *= 0.45;
+  // gentle lightning: no strobing, a soft capped glow instead of hard flashes
+  if (PREFS.gentle || PREFS.motion) {
+    const target = Math.min(env.uFlash.value * 0.35, 0.45);
+    gentleFlash += (target - gentleFlash) * (1 - Math.exp(-dt * 3));
+    env.uFlash.value = gentleFlash;
+  }
   const f = env.uFlash.value;
   hemi.intensity = hemiBase + f * 0.9;
   if (lightning.best) {
@@ -781,8 +929,9 @@ function tick(dt) {
     camera.quaternion.copy(g.quaternion).multiply(_qa);
   } else if (view === 'heli') {
     heliA += dt * 0.07;
-    const r = 520 + 60 * Math.sin(time * 0.05);
-    camera.position.set(_t.x + Math.cos(heliA) * r, 170 + 25 * Math.sin(time * 0.21) + Math.sin(time * 1.7) * 0.6, _t.z + Math.sin(heliA) * r);
+    const hk = Math.max(0.45, shipScale());
+    const r = (520 + 60 * Math.sin(time * 0.05)) * hk;
+    camera.position.set(_t.x + Math.cos(heliA) * r, (170 + 25 * Math.sin(time * 0.21)) * hk + Math.sin(time * 1.7) * 0.6, _t.z + Math.sin(heliA) * r);
     camera.lookAt(_t.x, _t.y + 4, _t.z);
   } else {
     if (cine.on && !cine.paused) {
@@ -799,7 +948,7 @@ function tick(dt) {
   if (camera.position.y < wh) camera.position.y = wh;
   // handheld drift + thunder shake
   shake *= Math.exp(-dt * 2.5);
-  if (REDUCED) shake = 0;
+  if (PREFS.motion) shake = 0;
   shakeOff.set(Math.sin(time * 1.3) * 0.12 + (Math.random() - 0.5) * shake, Math.sin(time * 0.9 + 1) * 0.1 + (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
   camera.position.add(shakeOff);
   camera.updateMatrixWorld();
@@ -824,7 +973,7 @@ function tick(dt) {
   for (const m of fleet) {
     const g = m.ship.group;
     // smoke
-    if (Math.random() < 0.85) {
+    if (m.ship.funnelTop && Math.random() < 0.85) {
       _v.copy(m.ship.funnelTop).applyMatrix4(g.matrixWorld);
       particles.emit(_v.x + (Math.random() - 0.5) * 2, _v.y, _v.z + (Math.random() - 0.5) * 2,
         windVel.x * 0.4, 3 + Math.random() * 2, windVel.z * 0.4,
@@ -847,6 +996,30 @@ function tick(dt) {
   sealife.update(dt, time, fleet[0]);
   particles.update(dt, windVel);
   updateGlass(dt);
+  // apparent wind on each sailing hull: braces, fill and luffing follow it
+  const feedWind = (m) => {
+    if (!m || !m.ship.setWind) return;
+    const h = m.heading, Fx = Math.cos(h), Fz = -Math.sin(h), Sx = Math.sin(h), Sz = Math.cos(h);
+    const Vw = 9 + 16 * windAmt;
+    const ax = windDir.x * Vw - Fx * m.speed, az = windDir.y * Vw - Fz * m.speed;
+    m.ship.setWind(Math.atan2(ax * Sx + az * Sz, ax * Fx + az * Fz), windAmt);
+  };
+  feedWind(fleet[0]);
+  if (ghostEv.active) feedWind(ghostEv.motion);
+  // sails: wind strength drives the belly, rising seas take sail off
+  SAIL.uTime.value = time;
+  SAIL.uWind.value = windAmt;
+  SAIL.reef = THREE.MathUtils.clamp((atmos.cur.waves * windAmt - 0.35) / 0.9, 0, 1);
+  // timber groaning when the hero is a wooden ship
+  if (audio.ready && hero && hero.kind) {
+    creakTimer -= dt;
+    if (creakTimer <= 0 && audio.ready) {
+      const near = THREE.MathUtils.clamp(1 - (camera.position.distanceTo(fleet[0].ship.group.position) - 20) / 220, 0, 1);
+      audio.creak((0.15 + 0.5 * Math.abs(fleet[0].vr) * 6 + 0.2 * atmos.cur.waves) * near, (Math.random() - 0.5) * 0.8);
+      creakTimer = 1.5 + Math.random() * 4.5;
+    }
+  }
+  updateGhost(dt);
   rain.update(camera, windDir, rainAmt);
   ocean.update(camera, fleet);
   {
@@ -925,6 +1098,7 @@ function updateHud() {
     const s = (p.x - r.origin.x) * r.dir.x + (p.z - r.origin.y) * r.dir.y;
     const dist = s - r.sc;
     warn.classList.toggle('show', dist > -150 && dist < 950);
+    if (dist > 0 && dist < 400) caption('[Roar of a rogue wave approaching]', 'rogue', 20);
     $('rogueDist').textContent = dist > 0 ? `${Math.round(dist)} m` : 'impact';
   } else warn.classList.remove('show');
 }
@@ -966,6 +1140,22 @@ function bindUi() {
   $('phExp').addEventListener('input', (e) => { photo.exp = +e.target.value; });
   $('btnRec').addEventListener('click', toggleRecord);
   $('btnShare').addEventListener('click', share);
+  const about = $('about');
+  const openAbout = () => { if (!about.open) about.showModal(); };
+  $('btnAbout').addEventListener('click', openAbout);
+  $('aboutClose').addEventListener('click', () => about.close());
+  about.addEventListener('click', (e) => { if (e.target === about) about.close(); });
+  for (const k of Object.keys(PREFS)) { const el = $(`pref-${k}`); if (el) el.addEventListener('change', () => setPref(k, el.checked)); }
+  applyPrefs();
+  const gi = $('gentleIntro');
+  const syncGi = () => { gi.setAttribute('aria-pressed', String(PREFS.gentle)); gi.textContent = PREFS.gentle ? 'Gentle lightning: on' : 'Gentle lightning'; };
+  gi.addEventListener('click', () => { setPref('gentle', !PREFS.gentle); syncGi(); });
+  syncGi();
+  // battery saver kicks in by itself on a low, unplugged battery
+  navigator.getBattery?.().then((b) => {
+    const check = () => { if (!PREFS.saver && !b.charging && b.level < 0.2) { setPref('saver', true); toast('Battery saver on'); } };
+    check(); b.addEventListener('levelchange', check); b.addEventListener('chargingchange', check);
+  }).catch(() => {});
   // bridge look-around (mouse or touch drag)
   let drag = null;
   renderer.domElement.addEventListener('pointerdown', (e) => { if (view === 'bridge') drag = { x: e.clientX, y: e.clientY }; });
@@ -998,6 +1188,7 @@ function bindUi() {
     const k = e.key.toLowerCase();
     if (k === 'r') triggerRogue();
     if (k === 'l') lightning.strike(camera, { dist: 300 + Math.random() * 600, ahead: true });
+    if (e.key === '?') { $('btnAbout').click(); return; }
     if (k === 'p') { photo.on ? exitPhoto() : enterPhoto(); return; }
     if (photo.on && (k === 'enter' || k === ' ')) { e.preventDefault(); capturePhoto(); return; }
     if (photo.on && k === 'escape') { exitPhoto(); return; }
@@ -1065,6 +1256,6 @@ addEventListener('resize', () => { if (!CAPTURE) resizeTo(innerWidth, innerHeigh
   });
   window.__storm = {
     waves, fleet, lightning, camera, env, audio, triggerRogue, setShot, cine, renderer, eventLog, mixLog,
-    Q, atmos, sealife, voyage, begin, setView, setAtmosphere, switchShip, tick, resizeTo, setCamHook: (f) => { camHook = f; }, getTime: () => time,
+    Q, atmos, sealife, voyage, begin, setView, ghostEv, spawnGhost, setAtmosphere, switchShip, tick, resizeTo, setCamHook: (f) => { camHook = f; }, getTime: () => time,
   };
 })();

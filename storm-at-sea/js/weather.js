@@ -127,7 +127,8 @@ export class Particles {
           a = max(a * (0.75 + 0.25 * n2), smoothstep(0.82, 0.98, sp) * edge * 0.9 * vShade);
           a *= vAlpha * vNear;
           vec3 base = mix(vec3(0.045, 0.043, 0.042), vec3(0.88, 0.92, 0.94), vShade);
-          vec3 col = base * (uAmbient * 1.7 + uKeyColor * 0.25 + uFlashColor * uFlash * 0.7);
+          vec3 lit = mix(uAmbient * 1.7 + uKeyColor * 0.25, uAmbient * 2.6 + uKeyColor * 0.6, vShade); // spray scatters light, smoke absorbs
+          vec3 col = base * (lit + uFlashColor * uFlash * 0.7);
           col = mix(col, uFogColor, vFog);
           gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
         }`,
@@ -373,7 +374,7 @@ export class Lightning {
       const ev = this.events[i];
       ev.t += dt;
       const v = this.envelope(ev);
-      for (const m of ev.mats) m.uniforms.uIntensity.value = v > 0.02 ? Math.min(v, 1.6) : 0;
+      for (const m of ev.mats) m.uniforms.uIntensity.value = v > 0.02 ? Math.min(v, 1.6) * (this.gentle ? 0.35 : 1) : 0;
       const contrib = v * ev.gain;
       f += contrib;
       if (contrib > bestV) { bestV = contrib; best = ev; }

@@ -107,6 +107,9 @@
   .readout b { font-weight: 500; color: #ffd39a; }
   @keyframes sweep { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .scope i { animation: none; } }
+  .ship-row .seg { flex-wrap: wrap; border-radius: 14px; }
+  .ship-row .seg-btn { flex: 1 1 30%; }
+  .seg-btn[hidden] { display: none !important; }
   .seg { display: flex; min-width: 0; gap: 2px; padding: 2px; border: 1px solid var(--faint); border-radius: 999px; background: rgba(231,236,238,0.04); }
   .seg-btn { flex: 1; font: 500 10.5px/1 Inter, sans-serif; white-space: nowrap; color: var(--dim); background: none; border: 0; border-radius: 999px; padding: 7px 6px; cursor: pointer; transition: background .15s, color .15s; }
   .seg-btn:hover { color: var(--ink); }
@@ -142,6 +145,7 @@
   button.secondary:hover { background: rgba(231,236,238,0.16); }
   .enter-sub { margin-top: 16px; display: flex; gap: 8px; justify-content: center; align-items: center; color: var(--dim); font-size: 12px; }
   .enter-sub .sep { opacity: .5; }
+  #gentleIntro[aria-pressed="true"] { color: #8fd3c9; }
   #soundPref[aria-pressed="false"] { color: rgba(231,236,238,0.4); text-decoration: line-through; }
 
   #veil { position: fixed; inset: 0; z-index: 9; pointer-events: none; opacity: 0; transition: opacity .3s linear;
@@ -186,7 +190,48 @@
   @keyframes blink { 50% { opacity: .2; } }
   #btnRec.on { border-color: rgba(255,90,70,0.6); color: #ffb3a8; }
 
+  /* loading */
+  .load { width: 180px; height: 2px; margin: 24px auto 0; background: rgba(231,236,238,0.15); border-radius: 2px; overflow: hidden; }
+  #loadFill { height: 100%; background: var(--ink); transform: scaleX(0); transform-origin: left; transition: transform .5s ease; }
+  body.ready .load { opacity: 0; transition: opacity .6s .3s; }
+  #intro::before { content: ''; position: absolute; inset: 0; z-index: -1; background: url(og.jpg) center/cover; filter: blur(14px) brightness(0.45) saturate(0.8); transform: scale(1.08); transition: opacity 1.2s; }
+  body.ready #intro::before { opacity: 0; }
+
+  /* captions */
+  #captions { position: fixed; z-index: 13; left: 50%; top: 84px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+  .cap { font: 500 14px/1.3 Inter, sans-serif; color: #fff; background: rgba(0,0,0,0.72); padding: 6px 12px; border-radius: 6px; transition: opacity .5s; }
+  .cap.out { opacity: 0; }
+
+  /* about dialog */
+  #about { max-width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--faint); border-radius: 16px; background: rgba(12,16,19,0.92); color: var(--ink);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+  #about::backdrop { background: rgba(4,6,8,0.55); }
+  .about-inner { padding: 24px 24px 20px; position: relative; overflow: auto; max-height: calc(100vh - 50px); }
+  .about-inner h2 { font: 400 40px/1 'Instrument Serif', serif; margin: 8px 0 12px; }
+  .about-inner h3 { font: 500 10.5px/1 'JetBrains Mono', monospace; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); margin: 22px 0 10px; }
+  .about-inner p { color: rgba(231,236,238,0.8); font-size: 14px; line-height: 1.55; margin: 0; }
+  .about-inner .small { font-size: 12.5px; color: var(--dim); }
+  .about-inner a { color: var(--ink); }
+  .about-x { position: absolute; right: 16px; top: 16px; }
+  .sw { display: flex; gap: 12px; align-items: flex-start; padding: 9px 0; border-top: 1px solid rgba(231,236,238,0.07); cursor: pointer; font-size: 13px; color: var(--dim); line-height: 1.4; }
+  .sw b { display: block; color: var(--ink); font-weight: 500; font-size: 13.5px; }
+  .sw input { appearance: none; -webkit-appearance: none; flex: 0 0 34px; height: 20px; margin-top: 2px; border-radius: 999px; background: rgba(231,236,238,0.18); position: relative; cursor: pointer; transition: background .2s; }
+  .sw input::after { content: ''; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink); transition: transform .2s; }
+  .sw input:checked { background: #2f8a83; }
+  .sw input:checked::after { transform: translateX(14px); }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
+  .keys dt { font: 500 11px/1.6 'JetBrains Mono', monospace; color: var(--ink); white-space: nowrap; }
+  .keys dd { margin: 0; color: var(--dim); }
+
+  /* visible keyboard focus everywhere */
+  :focus-visible { outline: 2px solid #8fd3c9; outline-offset: 2px; }
+  input[type=range]:focus-visible { outline-offset: 6px; }
+  body.reduce-motion * { scroll-behavior: auto !important; }
+  body.reduce-motion #rogueWarn.show, body.reduce-motion #recBadge i { animation: none; }
+
   @media (max-width: 720px) {
+    #captions { top: 96px; width: calc(100vw - 32px); }
+    .cap { font-size: 13px; text-align: center; }
     #controls:not(.open) .chip.extra { display: none; }
     #photoBar { left: 12px; right: 12px; transform: none; bottom: max(12px, env(safe-area-inset-bottom)); justify-content: space-between; gap: 10px; }
     .ph-ctl { width: 90px; }
@@ -249,14 +294,45 @@
     <div class="enter-sub">
       <button id="soundPref" class="ghost" aria-pressed="true">Sound on</button>
       <span class="sep">·</span>
-      <span class="hint-inline">3 minutes · Contains flashing lights</span>
+      <span class="hint-inline">3 minutes · Flashing lights</span>
+      <span class="sep">·</span>
+      <button id="gentleIntro" class="ghost" aria-pressed="false">Gentle lightning</button>
     </div>
+    <div class="load"><div id="loadFill"></div></div>
     <div id="loadStatus">Loading…</div>
     <div class="hint">Headphones recommended</div>
   </div>
 </div>
 
 <div id="veil" aria-hidden="true"></div>
+<div id="captions" aria-live="polite"></div>
+<dialog id="about" aria-labelledby="aboutTitle">
+  <div class="about-inner">
+    <button id="aboutClose" class="chip about-x" aria-label="Close">Close<kbd>Esc</kbd></button>
+    <div class="eyebrow">About</div>
+    <h2 id="aboutTitle">Storm at Sea</h2>
+    <p>A real-time ocean built entirely in code with Three.js and the Web Audio API: no 3D models, textures or sound files. Waves, ships, clouds, lightning, whales and every sound are generated as you watch.</p>
+    <h3>Comfort &amp; accessibility</h3>
+    <label class="sw"><input type="checkbox" id="pref-gentle"><span><b>Gentle lightning</b> Soft glow instead of bright flashes. Recommended if you are sensitive to flashing light.</span></label>
+    <label class="sw"><input type="checkbox" id="pref-motion"><span><b>Reduce motion</b> No camera shake, no fly-in, calmer lightning.</span></label>
+    <label class="sw"><input type="checkbox" id="pref-captions"><span><b>Sound captions</b> Shows thunder, horns, slams and other sounds as text.</span></label>
+    <label class="sw"><input type="checkbox" id="pref-saver"><span><b>Battery saver</b> 30 fps, lower resolution, no glow. Turns on by itself below 20% battery.</span></label>
+    <h3>Keyboard</h3>
+    <dl class="keys">
+      <dt>V</dt><dd>Change view (cinematic, orbit, bridge, helicopter)</dd>
+      <dt>1–6</dt><dd>Cinematic shots</dd>
+      <dt>A / D</dt><dd>Helm to port / starboard (hold)</dd>
+      <dt>W / S</dt><dd>Engine telegraph up / down</dd>
+      <dt>B</dt><dd>Ship's horn (hold)</dd>
+      <dt>R / L</dt><dd>Rogue wave / lightning strike</dd>
+      <dt>P</dt><dd>Photo mode (Enter takes the photo)</dd>
+      <dt>M · H · ?</dt><dd>Mute · hide interface · this panel</dd>
+      <dt>Esc</dt><dd>Skip fly-in, leave voyage or photo mode, close panels</dd>
+    </dl>
+    <h3>Credits</h3>
+    <p class="small">Made by <a href="https://experiments.fazleyrabbi.xyz/" target="_blank" rel="noopener">Fazley Rabbi</a> with Claude. Built with Three.js r160. The MSC-style livery is a fan render, not affiliated with MSC. Ship names, lines and the ghost ship are fictional.</p>
+  </div>
+</dialog>
 <div id="shutter" aria-hidden="true"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="recBadge" class="hud panel"><i></i>REC <span id="recTime">0:15</span></div>
@@ -319,6 +395,9 @@
     <button type="button" class="seg-btn on" data-ship="meridian" aria-pressed="true">Meridian</button>
     <button type="button" class="seg-btn" data-ship="msc" aria-pressed="false">MSC</button>
     <button type="button" class="seg-btn" data-ship="cruise" aria-pressed="false">Cruise</button>
+    <button type="button" class="seg-btn" data-ship="trireme" aria-pressed="false">Trireme</button>
+    <button type="button" class="seg-btn" data-ship="firstrate" aria-pressed="false">First-rate</button>
+    <button type="button" class="seg-btn" data-ship="ghost" aria-pressed="false">Ghost</button>
   </div></div>
   <p id="shipNote" class="note"></p>
   <div class="row atm-row"><label>Weather</label><div class="seg" role="group" aria-label="Weather">
@@ -358,8 +437,9 @@
     <button class="chip extra" id="btnRec">Record clip</button>
     <button class="chip extra" id="btnRogue">Rogue wave<kbd>R</kbd></button>
     <button class="chip extra" id="btnStrike">Strike<kbd>L</kbd></button>
-    <button class="chip extra on" id="btnCine">Cinematic<kbd>C</kbd></button>
+    <button class="chip extra on" id="btnCine" hidden>Cinematic<kbd>C</kbd></button>
     <button class="chip" id="btnSound">Sound<kbd>M</kbd></button>
+    <button class="chip" id="btnAbout" aria-haspopup="dialog">About<kbd>?</kbd></button>
   </div>
 </section>
 

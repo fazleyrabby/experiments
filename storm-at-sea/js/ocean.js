@@ -27,8 +27,39 @@ function polarGrid(rings, segs, radius, power) {
   return g;
 }
 
+
+const MOUND_GLSL = /* glsl */ `
+uniform vec4 uShips[3];
+uniform vec4 uShipDims[3];
+// water piled up by each hull: bow cushion, shoulder trough, stern quarter wave
+float shipMound(vec2 p) {
+  float h = 0.0;
+  for (int i = 0; i < 3; i++) {
+    vec4 s = uShips[i]; vec4 d = uShipDims[i];
+    if (d.z < 0.5) continue;
+    vec2 r = p - s.xy;
+    float c = cos(s.z), sn = sin(s.z);
+    float lx = r.x * c - r.y * sn, lz = r.x * sn + r.y * c;
+    float hl = d.x, hb = d.y;
+    if (abs(lx) > hl + 90.0 || abs(lz) > hb + 70.0) continue;
+    float A = hb * 0.085 * (0.45 + s.w * 0.11);
+    float taper = max(0.0, (lx - hl * 0.38) / (hl * 0.62));
+    float hullW = hb * max(0.0, 1.0 - pow(taper, 1.8));
+    float side = max(abs(lz) - hullW, 0.0);
+    float bx = (lx - (hl - hb * 0.6)) / (hb * 1.1);
+    h += A * exp(-bx * bx) * exp(-pow(side / (hb * 0.55 + 3.0), 2.0));
+    float sx = (lx - hl * 0.25) / (hl * 0.45);
+    h -= A * 0.45 * exp(-sx * sx) * exp(-pow(side / (hb * 0.4 + 2.0), 2.0));
+    float qx = (lx + hl * 0.92) / (hb * 1.3);
+    h += A * 0.5 * exp(-qx * qx) * exp(-pow(side / (hb * 0.5 + 3.0), 2.0));
+  }
+  return h;
+}
+`;
+
 const vert = /* glsl */ `
 ${WAVE_GLSL}
+${MOUND_GLSL}
 uniform vec2 uCenter;
 uniform vec2 uGrid; // radial spacing coefficient, tangential spacing (rad)
 varying vec3 vWorld;
@@ -38,7 +69,7 @@ void main() {
   float r = length(position.xz);
   float spacing = max(uGrid.x * pow(r + 1.0, 0.583), uGrid.y * r);
   vec3 d = waveDisp(p0, spacing);
-  vec3 w = vec3(p0.x + d.x, d.y, p0.y + d.z);
+  vec3 w = vec3(p0.x + d.x, d.y + shipMound(p0), p0.y + d.z);
   vWorld = w;
   vP0 = p0;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
@@ -57,8 +88,7 @@ uniform float uFlash, uFogDensity, uStorm, uSunVis, uCover;
 uniform vec3 uPtPos[8];
 uniform vec3 uPtCol[8];
 uniform vec2 uWindDir;
-uniform vec4 uShips[3];
-uniform vec4 uShipDims[3];
+${MOUND_GLSL}
 varying vec3 vWorld;
 varying vec2 vP0;
 
@@ -122,6 +152,12 @@ void main() {
   float rough = mix(0.5, 1.5, smoothstep(0.3, 0.72, gust));
   float detAmt = (0.18 + 0.22 * uStorm) * rough / (1.0 + dist * 0.002);
   n = normalize(n + vec3(det.x, 0.0, det.y) * detAmt);
+  // slope of the water piled against the hulls
+  float m0 = shipMound(vP0);
+  if (abs(m0) > 0.01) {
+    float mx = shipMound(vP0 + vec2(1.5, 0.0)), mz = shipMound(vP0 + vec2(0.0, 1.5));
+    n = normalize(n + vec3(-(mx - m0) / 1.5, 0.0, -(mz - m0) / 1.5) * 1.4);
+  }
 
   float NdV = max(dot(n, V), 0.0);
   float fres = 0.02 + 0.98 * pow(1.0 - NdV, 5.0);
@@ -158,6 +194,11 @@ void main() {
   float open = uSunVis * (1.0 - 0.85 * uCover);
   vec3 glint = uKeyColor * (pow(max(dot(n, H), 0.0), 260.0) * (0.6 + 4.0 * open) + pow(max(dot(n, H), 0.0), 36.0) * 0.08 * open);
   col += min(glint, vec3(2.5));
+  // fine sparkle: tiny facets catching the sun close to the camera
+  vec2 spn = texture2D(uNormalMap, vP0 / 2.3 + wt * 0.09).xy * 2.0 - 1.0;
+  vec3 ns = normalize(n + vec3(spn.x, 0.0, spn.y) * 0.35);
+  float spark = pow(max(dot(ns, H), 0.0), 1400.0) * smoothstep(420.0, 60.0, dist);
+  col += uKeyColor * min(spark * 14.0 * open, 3.0);
   // ship lights glinting on the swell
   for (int i = 0; i < NPT; i++) {
     vec3 lc = uPtCol[i];
@@ -198,7 +239,11 @@ void main() {
   foam *= mix(1.0, 0.55, smoothstep(700.0, 4000.0, dist));
   vec3 foamLit = uFoamCol * (uAmbient * 1.3 + uKeyColor * 0.15 + uFlashColor * uFlash * (0.25 + 0.6 * flashNear));
   foamLit *= 0.85 + 0.15 * n.y;
-  col = mix(col, foamLit, foam * 0.93);
+  // thick foam: pile-up from the hull, sharper body, fake relief shading, brighter in sunlight
+  foam = clamp(foam + max(m0, 0.0) * 0.45 * (0.5 + foamTex), 0.0, 1.0);
+  foam = smoothstep(0.04, 0.78, foam);
+  foamLit *= (0.86 + 0.28 * clamp(0.5 + (dFdy(foam) - dFdx(foam)) * 5.0, 0.0, 1.0)) * mix(1.0, 1.22, uSunVis);
+  col = mix(col, foamLit, foam * 0.95);
 
   float fog = 1.0 - exp(-pow(uFogDensity * dist, 2.0));
   col = mix(col, uFogColor + uFlashColor * uFlash * 0.05, fog);

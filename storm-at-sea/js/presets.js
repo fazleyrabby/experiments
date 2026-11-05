@@ -31,4 +31,23 @@ export const HERO_SHIPS = {
     kind: 'cruise',
     opts: { L: 320, B: 40, D: 16, T: 8.6, seed: 9, name: 'AURELIA', brand: 'SEAVANTE' },
   },
+  trireme: {
+    label: 'Trireme',
+    tag: 'Trireme Nikē',
+    kind: 'trireme',
+    opts: {},
+  },
+  firstrate: {
+    label: 'First-rate',
+    tag: 'First-rate Valiant',
+    kind: 'firstrate',
+    opts: {},
+  },
+  ghost: {
+    label: 'Ghost',
+    tag: 'The Hollow Tide',
+    kind: 'ghost',
+    note: 'Seen only on stormy nights, they say.',
+    opts: { ghost: true },
+  },
 };

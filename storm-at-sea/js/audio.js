@@ -307,6 +307,43 @@ export class StormAudio {
     }, delay * 1000);
   }
 
+  // timber working in a seaway: a resonant groan that slides down in pitch
+  creak(I = 0.5, pan = 0) {
+    if (!this.ctx || I < 0.03) return;
+    const bp = this.filter('bandpass', 380 + Math.random() * 240, 28);
+    const t = this.now();
+    bp.frequency.setValueAtTime(bp.frequency.value, t);
+    bp.frequency.exponentialRampToValueAtTime(140 + Math.random() * 80, t + 0.5 + Math.random() * 0.6);
+    this.burst(this.white, {
+      chain: [bp], pan, verb: 0.25, dur: 1.4,
+      env: (gp, t0) => { gp.linearRampToValueAtTime(I * 2.2, t0 + 0.06); gp.setTargetAtTime(0, t0 + 0.3 + Math.random() * 0.4, 0.18); },
+    });
+  }
+
+  // the ghost ship: a low, slowly beating minor pad with a breathy choir formant
+  ghost(level) {
+    if (!this.ctx) return;
+    if (!this.ghostOut) {
+      const ctx = this.ctx, t0 = this.now();
+      this.ghostOut = ctx.createGain(); this.ghostOut.gain.value = 0;
+      const lp = this.filter('lowpass', 900, 0.7);
+      lp.connect(this.ghostOut); this.ghostOut.connect(this.master);
+      const v = ctx.createGain(); v.gain.value = 1.2; this.ghostOut.connect(v); v.connect(this.verb);
+      for (const [f, g] of [[55, 0.5], [65.4, 0.35], [82.4, 0.3], [110.6, 0.18], [131, 0.12]]) {
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+        const og = ctx.createGain(); og.gain.value = g;
+        const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07 + Math.random() * 0.1;
+        const lg = ctx.createGain(); lg.gain.value = g * 0.5; lfo.connect(lg); lg.connect(og.gain);
+        o.connect(og); og.connect(lp); o.start(t0); lfo.start(t0);
+      }
+      const voice = this.loop(this.pink, [this.filter('bandpass', 620, 7), this.filter('bandpass', 640, 5)], 0.0);
+      voice.out.disconnect(); voice.out.connect(lp); voice.gain.gain.value = 0.9;
+      this.ghostVoice = voice.filters[0];
+    }
+    this.set(this.ghostOut.gain, level * 0.28, 0.9);
+    if (this.ghostVoice) this.set(this.ghostVoice.frequency, 560 + Math.sin(this.now() * 0.23) * 90, 1.5);
+  }
+
   makeThunder(dist, cloud) {
     const sr = this.sr;
     const dur = Math.min(11, 4.5 + dist / 900);

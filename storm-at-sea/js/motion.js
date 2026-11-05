@@ -80,6 +80,14 @@ export class ShipMotion {
       this.roll += this.vr * h;
     }
     this.roll = THREE.MathUtils.clamp(this.roll, -0.42, 0.42);
+    // small hulls can't leave the water: keep the waterline within a fraction of the draft of the surface
+    if (L < 120) {
+      const lim = this.ship.T * 0.45;
+      if (this.heave > hs[2] + lim) { this.heave = hs[2] + lim; this.vh = Math.min(this.vh, 0); }
+      if (this.heave < hs[2] - lim * 1.6) { this.heave = hs[2] - lim * 1.6; this.vh = Math.max(this.vh, 0); }
+      const pl = Math.atan2(hs[4] - hs[0], 0.88 * L);
+      this.pitch = THREE.MathUtils.clamp(this.pitch, pl - 0.12, pl + 0.12);
+    }
 
     // slow down when climbing a sea, surge when sliding down the back
     this.speed = THREE.MathUtils.lerp(this.speed, this.speed0 * this.telegraph * (1 - THREE.MathUtils.clamp(this.pitch * 4, -0.25, 0.6)), 1 - Math.exp(-dt * 0.25));
