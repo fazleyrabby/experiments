@@ -1,5 +1,11 @@
 [
   {
+    "slug": "pressure-washer",
+    "title": "Pressure Washer Deck",
+    "category": "Play",
+    "description": "Blast a filthy cedar deck back to bare wood. Sweep the jet in stripes, switch nozzle tips, chase the leaves off the edge and lift the deep stains."
+  },
+  {
     "slug": "hatchback-mech",
     "title": "Hatchback to Mech",
     "category": "Objects",
