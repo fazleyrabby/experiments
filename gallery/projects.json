@@ -1,5 +1,17 @@
 [
   {
+    "slug": "overland-camp",
+    "title": "Overland Camp",
+    "category": "Worlds",
+    "description": "A 4x4 rig and vinyl awning camp in a rainy forest. Rain splashes differently on mud, puddles, grass and roofs. Walk the camp, change the weather, or let the camera drift."
+  },
+  {
+    "slug": "bullet-island",
+    "title": "Bullet Island",
+    "category": "Worlds",
+    "description": "A scenic bullet train simulation on a floating retro island. Take control of the throttle, shift camera perspectives, and ride through the day."
+  },
+  {
     "slug": "pressure-washer",
     "title": "Pressure Washer Deck",
     "category": "Play",
