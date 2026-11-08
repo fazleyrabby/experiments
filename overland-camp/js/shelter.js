@@ -12,7 +12,7 @@ import {
   getMetalMaps
 } from './textures.js';
 import { createContactShadow } from './decals.js';
-import { createCampChair, createSlattedTable } from './furniture.js';
+import { createCampChair, createSlattedTable, createCampCot, lathe } from './furniture.js';
 
 export function createOverlandShelter() {
   const shelter = new THREE.Group();
@@ -501,12 +501,35 @@ export function createOverlandShelter() {
 
   // Table hurricane lamp
   const tableLamp = new THREE.Group();
-  const lampBase = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.075, 0.05, 14), frameMat);
+  const lampMetal = frameMat.clone();
+  lampMetal.side = THREE.DoubleSide;
+  // Fuel fount
+  const lampBase = new THREE.Mesh(lathe([
+    [0, 0], [0.068, 0], [0.072, 0.008], [0.07, 0.022], [0.058, 0.036], [0.042, 0.044], [0.036, 0.05]
+  ], 24), lampMetal);
+  lampBase.castShadow = true;
   tableLamp.add(lampBase);
-  const lampGlass = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.046, 0.13, 14), warmLanternMat);
-  lampGlass.position.set(0, 0.085, 0);
+  // Bulging glass globe
+  const lampGlass = new THREE.Mesh(lathe([
+    [0.034, 0.048], [0.046, 0.062], [0.056, 0.09], [0.058, 0.112], [0.052, 0.14], [0.036, 0.166], [0.028, 0.176]
+  ], 24), warmLanternMat);
   tableLamp.add(lampGlass);
-  tableLamp.position.set(width * 0.55, 0.63, 0.35);
+  // Chimney cap, guard wires and the bail handle
+  const lampCap = new THREE.Mesh(lathe([
+    [0.03, 0.172], [0.042, 0.182], [0.04, 0.196], [0.022, 0.21], [0.018, 0.222], [0, 0.224]
+  ], 20), lampMetal);
+  tableLamp.add(lampCap);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    const pts = [[0.05, 0.045], [0.064, 0.09], [0.066, 0.112], [0.058, 0.15], [0.044, 0.182]]
+      .map(([r, y]) => new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+    tableLamp.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 12, 0.0022, 4, false), frameMat));
+  }
+  const bail = new THREE.Mesh(new THREE.TorusGeometry(0.068, 0.0028, 5, 20, Math.PI), frameMat);
+  bail.position.y = 0.19;
+  bail.rotation.y = 0.5;
+  tableLamp.add(bail);
+  tableLamp.position.set(width * 0.55, 0.598, 0.35);
   shelter.add(tableLamp);
   lanterns.push(lampGlass);
 
@@ -609,39 +632,59 @@ export function createOverlandShelter() {
     roughness: 0.28,
     envMapIntensity: 1.3
   });
-  const kettle = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.085, 0.13, 16), kettleMat);
-  kettle.position.set(-0.24, 0.66, 0.08);
+  const topY = 0.598;
+  const kettleX = -0.24;
+  const kettleZ = 0.08;
+  const kettle = new THREE.Mesh(lathe([
+    [0, 0], [0.074, 0], [0.084, 0.01], [0.088, 0.045], [0.082, 0.085], [0.062, 0.112],
+    [0.04, 0.122], [0.04, 0.13], [0.036, 0.134], [0.012, 0.138], [0.008, 0.15], [0.014, 0.156], [0, 0.158]
+  ], 24), kettleMat);
+  kettle.position.set(kettleX, topY, kettleZ);
   kettle.castShadow = true;
   tableGroup.add(kettle);
-  const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.02, 0.16, 8), kettleMat);
-  spout.position.set(-0.15, 0.71, 0.08);
-  spout.rotation.z = -0.9;
-  tableGroup.add(spout);
-  const kettleHandle = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.008, 6, 14, Math.PI), kettleMat);
-  kettleHandle.position.set(-0.24, 0.75, 0.08);
+  // Tapered spout from the belly up and out
+  {
+    const a = new THREE.Vector3(kettleX + 0.07, topY + 0.04, kettleZ);
+    const b = new THREE.Vector3(kettleX + 0.15, topY + 0.125, kettleZ);
+    const dir = b.clone().sub(a);
+    const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.019, dir.length(), 10), kettleMat);
+    spout.position.copy(a).addScaledVector(dir, 0.5);
+    spout.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    tableGroup.add(spout);
+  }
+  const kettleHandle = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.007, 6, 18, Math.PI), new THREE.MeshStandardMaterial({ color: 0x2a211a, roughness: 0.6 }));
+  kettleHandle.position.set(kettleX, topY + 0.118, kettleZ);
   kettleHandle.rotation.y = Math.PI * 0.5;
   tableGroup.add(kettleHandle);
 
-  [-0.02, 0.16].forEach((mX, i) => {
-    const mugT = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, 0.07, 14), mugMat);
-    mugT.position.set(mX, 0.63, -0.1 + i * 0.05);
+  // Enamel camp mugs with dark rims
+  const mugDS = mugMat.clone();
+  mugDS.side = THREE.DoubleSide;
+  const enamelRim = new THREE.MeshStandardMaterial({ color: 0x1d2833, roughness: 0.35 });
+  const brewMat = new THREE.MeshStandardMaterial({ color: 0x24160d, roughness: 0.15, metalness: 0.0 });
+  const mugGeo = lathe([
+    [0, 0], [0.032, 0], [0.035, 0.004], [0.036, 0.07], [0.037, 0.074], [0.033, 0.075], [0.032, 0.07], [0.031, 0.008], [0, 0.008]
+  ], 22);
+  [[-0.02, -0.1, 0.4], [0.16, -0.05, -0.9]].forEach(([mX, mZ, rot]) => {
+    const mugG = new THREE.Group();
+    const mugT = new THREE.Mesh(mugGeo, mugDS);
     mugT.castShadow = true;
-    tableGroup.add(mugT);
-    // Handle
-    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.005, 5, 12, Math.PI * 1.25), mugMat);
-    handle.position.set(mX + 0.036, 0.63, -0.1 + i * 0.05);
-    handle.rotation.y = Math.PI * 0.5;
-    handle.rotation.z = -0.4;
-    tableGroup.add(handle);
-    // Coffee inside
-    const brew = new THREE.Mesh(new THREE.CircleGeometry(0.029, 14), new THREE.MeshStandardMaterial({
-      color: 0x2a1a10,
-      roughness: 0.25,
-      metalness: 0.0
-    }));
+    mugG.add(mugT);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.0352, 0.0024, 5, 22), enamelRim);
+    rim.rotation.x = Math.PI * 0.5;
+    rim.position.y = 0.074;
+    mugG.add(rim);
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.021, 0.0045, 6, 14, Math.PI * 1.15), mugDS);
+    handle.position.set(0.036, 0.039, 0);
+    handle.rotation.z = -Math.PI * 0.575;
+    mugG.add(handle);
+    const brew = new THREE.Mesh(new THREE.CircleGeometry(0.0315, 18), brewMat);
     brew.rotation.x = -Math.PI * 0.5;
-    brew.position.set(mX, 0.663, -0.1 + i * 0.05);
-    tableGroup.add(brew);
+    brew.position.y = 0.058;
+    mugG.add(brew);
+    mugG.position.set(mX, topY, mZ);
+    mugG.rotation.y = rot;
+    tableGroup.add(mugG);
   });
 
   // Plates + cutting board + book
@@ -748,31 +791,12 @@ export function createOverlandShelter() {
   interiorGroup.add(coolerGroup);
 
   // Cot
-  const cot = new THREE.Group();
-  const cotBed = new THREE.Mesh(new RoundedBoxGeometry(0.92, 0.06, 1.85, 2, 0.02), canvasChairMat);
-  cotBed.position.set(0, 0.34, 0);
-  cotBed.castShadow = true;
-  cot.add(cotBed);
-
-  const pillow = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.1, 0.3, 2, 0.04), new THREE.MeshStandardMaterial({ color: 0xe9e1d1, roughness: 0.95 }));
-  pillow.position.set(0, 0.42, -0.7);
-  pillow.rotation.y = 0.1;
-  cot.add(pillow);
-
-  const blanket = new THREE.Mesh(new RoundedBoxGeometry(0.82, 0.1, 0.72, 2, 0.03), new THREE.MeshStandardMaterial({ color: 0x4c5c42, roughness: 0.98 }));
-  blanket.position.set(0, 0.42, 0.42);
-  cot.add(blanket);
-
-  [-0.41, 0.41].forEach(x => {
-    [-0.61, 0.61].forEach(z => {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.34, 7), frameMat);
-      leg.position.set(x, 0.17, z);
-      cot.add(leg);
-    });
-    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.76, 7), frameMat);
-    rail.rotation.x = Math.PI * 0.5;
-    rail.position.set(x, 0.5, 0);
-    cot.add(rail);
+  const cot = createCampCot({
+    canvasMat: canvasChairMat,
+    frameMat,
+    bagMat: new THREE.MeshStandardMaterial({ color: 0x3b4855, roughness: 0.62, metalness: 0.02 }),
+    pillowMat: new THREE.MeshStandardMaterial({ color: 0xe9e1d1, roughness: 0.95 }),
+    blanketMat: new THREE.MeshStandardMaterial({ color: 0x4c5c42, map: fabric.map, roughness: 0.98 })
   });
 
   const cotShade = createContactShadow(0.52, 0.95, 0.45);
@@ -810,16 +834,34 @@ export function createOverlandShelter() {
 
   // Boots by the door
   const bootMat = new THREE.MeshStandardMaterial({ color: 0x2b2f2a, roughness: 0.6 });
-  [-0.11, 0.11].forEach((dx, i) => {
-    const boot = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.3, 0.2, 2, 0.04), bootMat);
-    boot.position.set(width * 0.5 + dx, 0.15, length * 0.5 - 0.44 + i * 0.04);
-    boot.rotation.y = (i - 0.5) * 0.35;
-    boot.castShadow = true;
+  const laceMat = new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 });
+  [-0.09, 0.09].forEach((dx, i) => {
+    const boot = new THREE.Group();
+    // Toe box pointing +Z, ankle shaft over the heel
+    const foot = new THREE.Mesh(new RoundedBoxGeometry(0.105, 0.085, 0.27, 3, 0.04), bootMat);
+    foot.position.set(0, 0.062, 0.035);
+    foot.castShadow = true;
+    boot.add(foot);
+    const shaft = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.19, 0.125, 3, 0.04), bootMat);
+    shaft.position.set(0, 0.17, -0.045);
+    shaft.rotation.x = -0.06;
+    shaft.castShadow = true;
+    boot.add(shaft);
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.046, 0.011, 6, 16), seamBorderMat);
+    collar.rotation.x = Math.PI * 0.5;
+    collar.scale.set(1, 1.25, 1);
+    collar.position.set(0, 0.262, -0.05);
+    boot.add(collar);
+    const tongue = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.16, 0.02, 2, 0.008), laceMat);
+    tongue.position.set(0, 0.15, 0.022);
+    tongue.rotation.x = -0.45;
+    boot.add(tongue);
+    const sole = new THREE.Mesh(new RoundedBoxGeometry(0.118, 0.028, 0.29, 2, 0.01), seamBorderMat);
+    sole.position.set(0, 0.016, 0.025);
+    boot.add(sole);
+    boot.position.set(width * 0.5 + dx, 0, length * 0.5 - 0.44 + i * 0.05);
+    boot.rotation.y = (i - 0.5) * 0.4;
     interiorGroup.add(boot);
-    const sole = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.04, 0.24), seamBorderMat);
-    sole.position.set(width * 0.5 + dx, 0.024, length * 0.5 - 0.42 + i * 0.04);
-    sole.rotation.y = (i - 0.5) * 0.35;
-    interiorGroup.add(sole);
   });
 
   // Hanging jacket
@@ -874,12 +916,26 @@ export function createOverlandShelter() {
   crateGroup.position.set(width * 0.72, 0, length * 0.5 - 0.6);
   crateGroup.rotation.y = 0.22;
   interiorGroup.add(crateGroup);
-  const bottleMat = new THREE.MeshStandardMaterial({ color: 0x516b3b, roughness: 0.25, metalness: 0.1 });
-  [-0.1, 0.08].forEach((bx, i) => {
-    const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.045, 0.24, 10), bottleMat);
-    bottle.position.set(width * 0.72 + bx, 0.36, length * 0.5 - 0.6 + i * 0.05);
-    interiorGroup.add(bottle);
+  const bottleMat = new THREE.MeshStandardMaterial({ color: 0x3f5a2c, roughness: 0.12, metalness: 0.15, side: THREE.DoubleSide });
+  const corkMat = new THREE.MeshStandardMaterial({ color: 0xa07a52, roughness: 0.9 });
+  const bottleGeo = lathe([
+    [0, 0], [0.034, 0], [0.037, 0.006], [0.037, 0.17], [0.03, 0.2], [0.015, 0.232], [0.013, 0.272], [0.016, 0.276], [0.015, 0.286], [0, 0.286]
+  ], 18);
+  [[-0.1, -0.06, 0], [0.07, 0.05, 0], [0.1, -0.08, 0.16]].forEach(([bx, bz, tilt]) => {
+    const bottle = new THREE.Mesh(bottleGeo, bottleMat);
+    bottle.position.set(bx, 0.022, bz);
+    bottle.rotation.z = tilt;
+    bottle.castShadow = true;
+    crateGroup.add(bottle);
+    const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.011, 0.022, 10), corkMat);
+    cork.position.set(0, 0.292, 0);
+    bottle.add(cork);
   });
+  // Rolled tea towel tucked in the corner
+  const towel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 14), new THREE.MeshStandardMaterial({ color: 0xb8432f, map: fabric.map, roughness: 0.95 }));
+  towel.rotation.set(0.25, 0, Math.PI * 0.5 - 0.3);
+  towel.position.set(-0.04, 0.22, 0.11);
+  crateGroup.add(towel);
 
   shelter.add(interiorGroup);
 
