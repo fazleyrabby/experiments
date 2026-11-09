@@ -94,7 +94,7 @@ class CampAudioEngine {
     // Back-compat name used by footstep()
     this.noiseBuffer = this.pinkBuffer;
 
-    const wlen = ctx.sampleRate * 2;
+    const wlen = ctx.sampleRate * 5;
     this.whiteBuffer = ctx.createBuffer(1, wlen, ctx.sampleRate);
     const wd = this.whiteBuffer.getChannelData(0);
     for (let i = 0; i < wlen; i++) wd[i] = Math.random() * 2 - 1;
@@ -131,8 +131,12 @@ class CampAudioEngine {
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
-    src.loopStart = Math.random() * 2;
-    src.start(0, Math.random() * 3);
+    // Loop the whole buffer from a random entry point. (A random loopStart
+    // near the end of a short buffer makes a loop a few ms long = a buzz.)
+    const dur = buffer.duration;
+    src.loopStart = 0;
+    src.loopEnd = dur;
+    src.start(0, Math.random() * dur * 0.9);
     return src;
   }
 
@@ -185,8 +189,9 @@ class CampAudioEngine {
     patterAm.gain.value = 0.7;
     patter.connect(patterBp); patterBp.connect(patterAm); patterAm.connect(this.rainPatterGain);
     this.rainPatterGain.connect(this.rainBus);
-    this.lfo(23, 0.3, patterAm.gain);
+    // Slow, uneven breathing only: an audio-rate wobble here reads as a buzz
     this.lfo(0.21, 0.15, patterAm.gain);
+    this.lfo(0.53, 0.08, patterAm.gain);
 
     // Hiss: the broadband wash of rain on leaves.
     const hiss = this.loopNoise(this.whiteBuffer);
