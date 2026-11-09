@@ -1,5 +1,11 @@
 [
   {
+    "slug": "firefighter-island",
+    "title": "Firefighter Island",
+    "category": "Play",
+    "description": "Lightning sparks wildfires on a floating forest island at golden hour. Fill a helicopter bucket at the lake and drop on the fire line before the wind carries it into the village."
+  },
+  {
     "slug": "overland-camp",
     "title": "Overland Camp",
     "category": "Worlds",

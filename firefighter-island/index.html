@@ -1,0 +1,2128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Firefighter Island</title>
+<meta name="description" content="A floating forest island at golden hour. Lightning starts wildfires that run with the wind. Fly a water-bucket helicopter, dip in the lake and drop on the fire line to save the village.">
+<link rel="icon" href="data:,">
+<style>
+  :root { --bg: #e8b48a; --ink: #f6f3ee; --chip: rgba(16, 18, 24, 0.58); --line: rgba(246, 243, 238, 0.18); --hot: #ff8a2a; --water: #7cd4ff; --ok: #9be07a; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; color: var(--ink); }
+  body { font: 500 12px/1.4 ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; image-rendering: pixelated; image-rendering: crisp-edges; cursor: crosshair; }
+  .hud { position: fixed; z-index: 2; }
+  body.clean .hud { display: none !important; }
+  .glass { background: var(--chip); border: 1px solid var(--line); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  #back { left: max(16px, env(safe-area-inset-left)); top: max(14px, env(safe-area-inset-top)); color: var(--ink); text-decoration: none; padding: 6px 11px; border-radius: 999px; }
+  #back:hover { background: rgba(26, 30, 40, 0.8); }
+  #stats { top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; gap: 4px; padding: 5px 6px; border-radius: 999px; pointer-events: none; }
+  .stat { display: flex; align-items: baseline; gap: 6px; padding: 3px 11px; border-radius: 999px; white-space: nowrap; }
+  .stat b { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .stat span { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; opacity: .68; }
+  .stat.warn b { color: #ffb36b; }
+  .stat.bad b { color: #ff6a4a; }
+  #tools { right: max(16px, env(safe-area-inset-right)); top: max(14px, env(safe-area-inset-top)); display: flex; gap: 6px; align-items: stretch; }
+  button { font: inherit; color: var(--ink); cursor: pointer; }
+  #tools button { border-radius: 999px; padding: 6px 12px; }
+  #tools button:hover, .seg button:hover { background: rgba(26, 30, 40, 0.82); }
+  #tools button[aria-pressed="false"] { opacity: .6; }
+  #wind { display: flex; align-items: center; gap: 7px; padding: 3px 12px 3px 5px; border-radius: 999px; pointer-events: none; }
+  #wind svg { width: 24px; height: 24px; transition: transform .25s linear; }
+  #wind svg path { fill: var(--ink); }
+  #wind b { font-size: 13px; font-variant-numeric: tabular-nums; }
+  #wind span { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; opacity: .68; margin-left: 4px; }
+  #dock { left: 50%; transform: translateX(-50%); bottom: max(16px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 22px; max-width: calc(100vw - 24px); }
+  .bucket { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+  .bucket label { font-size: 10px; letter-spacing: .09em; text-transform: uppercase; display: flex; justify-content: space-between; gap: 10px; }
+  .bucket label span:first-child { opacity: .65; }
+  #wbar { height: 7px; border-radius: 99px; background: rgba(255,255,255,.14); overflow: hidden; }
+  #wbar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #4fb2ff, var(--water)); border-radius: 99px; }
+  .seg { display: flex; gap: 4px; }
+  .seg button { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.04); border: 1px solid var(--line); white-space: nowrap; }
+  .seg button kbd { font: inherit; opacity: .5; font-size: 10px; margin-right: 3px; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #12161c; border-color: var(--ink); }
+  .sep { width: 1px; align-self: stretch; background: var(--line); }
+  button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  #title { left: max(20px, env(safe-area-inset-left)); bottom: max(20px, env(safe-area-inset-bottom)); text-shadow: 0 1px 10px rgba(0,0,0,.55); pointer-events: none; max-width: 290px; }
+  #title h1 { margin: 0; font-size: 15px; font-weight: 650; }
+  #title p { margin: 3px 0 0; opacity: .85; }
+  #title kbd { font: inherit; font-size: 10.5px; background: rgba(0,0,0,.28); padding: 0 4px; border-radius: 3px; }
+  #toast { left: 50%; top: calc(max(14px, env(safe-area-inset-top)) + 52px); transform: translateX(-50%); padding: 7px 16px; border-radius: 999px; font-weight: 600; opacity: 0; pointer-events: none; white-space: nowrap; transition: opacity .3s; }
+  #toast.show { opacity: 1; }
+  #toast.warn { background: rgba(170, 52, 30, .78); }
+  #end { inset: 0; display: grid; place-items: center; background: rgba(12, 10, 14, 0.36); opacity: 0; pointer-events: none; transition: opacity .6s ease; }
+  #end.show { opacity: 1; pointer-events: auto; }
+  #end .card { text-align: center; padding: 24px 32px 22px; border-radius: 22px; max-width: min(430px, calc(100vw - 32px)); }
+  #end h2 { margin: 0 0 4px; font-size: 26px; letter-spacing: -.02em; }
+  #end p { margin: 0 0 16px; opacity: .8; }
+  #end .grid { display: grid; grid-template-columns: repeat(4, auto); gap: 18px; justify-content: center; margin-bottom: 18px; }
+  #end .grid b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  #end .grid span { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .65; }
+  #again { background: var(--hot); color: #1d1204; border: 0; border-radius: 999px; padding: 10px 22px; font-weight: 700; }
+  #again:hover { filter: brightness(1.08); }
+  #auto { margin-top: 10px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; opacity: .6; min-height: 1em; }
+  /* scene menu */
+  #menu { position: fixed; top: 0; right: 0; bottom: 0; width: 340px; z-index: 5; overflow-y: auto; overflow-x: hidden; background: linear-gradient(180deg, rgba(30, 22, 22, .95), rgba(14, 12, 16, .97) 280px); border-left: 1px solid var(--line);
+    transform: translateX(102%); transition: transform .28s ease; scrollbar-width: thin; scrollbar-color: #4a3a3a transparent; font-size: 11px; }
+  body.menu #menu { transform: none; }
+  body.menu #stage { width: calc(100% - 340px); }
+  body.menu #tools { right: calc(340px + max(16px, env(safe-area-inset-right))); }
+  body.menu #stats, body.menu #dock, body.menu #toast { left: calc(50% - 170px); }
+  body.menu #end { right: 340px; }
+  #menuBtn[aria-pressed="true"] { background: var(--ink); color: #12161c; }
+  .phead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 16px 16px 13px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, rgba(255,120,40,.13), transparent 60%); }
+  .phead .logo { font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+  .phead .logo b { color: var(--hot); font-weight: 750; }
+  .phead .sub { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; opacity: .6; margin-top: 4px; }
+  .phead .x { background: rgba(255,255,255,.07); border: 1px solid var(--line); border-radius: 999px; width: 28px; height: 28px; font-size: 16px; line-height: 1; padding: 0; }
+  .sec { padding: 12px 16px 14px; border-bottom: 1px solid var(--line); }
+  .sec h3 { margin: 0 0 9px; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; font-weight: 650; opacity: .55; display: flex; align-items: center; gap: 7px; }
+  .sec h3::before { content: ""; width: 12px; height: 1px; background: var(--hot); }
+  #menu .seg { flex-wrap: wrap; }
+  #menu .seg button { padding: 5px 9px; font-size: 11px; }
+  .btn { padding: 7px 10px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid var(--line); text-align: center; white-space: nowrap; }
+  .btn:hover { background: rgba(255,255,255,.13); }
+  .btn[aria-pressed="true"] { background: var(--hot); border-color: var(--hot); color: #1d1204; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 7px; }
+  .field { display: grid; grid-template-columns: 86px 1fr 52px; align-items: center; gap: 8px; margin-top: 7px; color: rgba(246,243,238,.78); }
+  .field.wide { grid-template-columns: 86px 1fr; }
+  .field .val { text-align: right; font-variant-numeric: tabular-nums; color: var(--water); font-size: 10.5px; }
+  #menu input[type=range] { width: 100%; margin: 0; accent-color: var(--hot); }
+  .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-top: 9px; }
+  label.chk { display: flex; align-items: center; gap: 7px; cursor: pointer; color: rgba(246,243,238,.8); white-space: nowrap; }
+  label.chk input { accent-color: var(--hot); margin: 0; }
+  .gauges { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 4px; }
+  .g { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); padding: 6px 7px; border-radius: 8px; min-width: 0; }
+  .g .gl { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; opacity: .55; }
+  .g .gv { font-weight: 700; font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .g .bar { height: 3px; background: rgba(255,255,255,.1); margin-top: 5px; border-radius: 9px; overflow: hidden; }
+  .g .bar i { display: block; height: 100%; width: 0; background: var(--ok); }
+  .g.hot .bar i { background: var(--hot); } .g.cool .bar i { background: var(--water); }
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 12px; margin-top: 9px; font-size: 10.5px; }
+  .kv div { display: flex; justify-content: space-between; border-bottom: 1px dotted rgba(255,255,255,.1); padding: 2px 0; opacity: .85; }
+  .kv b { font-variant-numeric: tabular-nums; }
+  .note { font-size: 10px; line-height: 1.6; opacity: .5; margin-top: 7px; }
+  @media (max-width: 880px) {
+    #menu { width: 100%; }
+    body.menu #stage { width: 100%; }
+    body.menu #tools, body.menu #stats, body.menu #dock, body.menu #toast { visibility: hidden; }
+  }
+  @media (max-width: 1100px) { #title { display: none; } }
+  @media (max-width: 1060px) { #stats { top: calc(max(14px, env(safe-area-inset-top)) + 42px); } #toast { top: calc(max(14px, env(safe-area-inset-top)) + 88px); } }
+  @media (max-width: 760px) {
+    #stats { top: calc(max(14px, env(safe-area-inset-top)) + 42px); }
+    .stat { padding: 2px 6px; } .stat b { font-size: 14px; } .stat span { display: none; }
+    #wind span { display: none; }
+    #tools button { padding: 6px 9px; }
+    #dock { flex-wrap: wrap; justify-content: center; gap: 8px; border-radius: 18px; }
+    .sep { display: none; } .seg button kbd { display: none; } .seg button { padding: 5px 8px; }
+    #toast { top: calc(max(14px, env(safe-area-inset-top)) + 84px); }
+    #end .grid { grid-template-columns: repeat(2, auto); }
+  }
+  @media (prefers-reduced-motion: reduce) { #end, #toast { transition: none; } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="stage" aria-label="A floating forest island where a water-bucket helicopter fights wildfires"></canvas>
+<a id="back" class="hud glass" href="/">← Experiments</a>
+<div id="stats" class="hud glass">
+  <div class="stat" id="stForest"><b id="sForest">100%</b><span>Forest</span></div>
+  <div class="stat" id="stHouses"><b id="sHouses">0/0</b><span>Houses</span></div>
+  <div class="stat" id="stFires"><b id="sFires">0</b><span>Fires</span></div>
+  <div class="stat"><b id="sBolts">0</b><span>Strikes</span></div>
+</div>
+<div id="tools" class="hud">
+  <div id="wind" class="glass" title="Wind direction on screen and speed"><svg id="windArrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 L18.5 17 L12 13.4 L5.5 17 Z"/></svg><b id="windSpd">0</b><span>km/h</span></div>
+  <button id="apBtn" class="glass" type="button" aria-pressed="true" title="Autopilot (P)">Autopilot: on</button>
+  <button id="menuBtn" class="glass" type="button" aria-pressed="false" aria-controls="menu" title="Scene menu (O)">☰ Menu</button>
+  <button id="mute" class="glass" type="button" aria-pressed="true" title="Sound (M)">Sound</button>
+</div>
+<div id="toast" class="hud glass" role="status"></div>
+<div id="dock" class="hud glass">
+  <div class="bucket"><label><span>Bucket</span><span id="waterTxt">Empty</span></label><div id="wbar"><i id="wfill"></i></div></div>
+  <div class="sep"></div>
+  <div class="seg" id="cams">
+    <button type="button" data-cam="1" aria-pressed="false"><kbd>1</kbd>Chase</button>
+    <button type="button" data-cam="2" aria-pressed="true"><kbd>2</kbd>Orbit</button>
+    <button type="button" data-cam="3" aria-pressed="false"><kbd>3</kbd>Tactical</button>
+    <button type="button" data-cam="4" aria-pressed="false"><kbd>4</kbd>Bucket</button>
+  </div>
+  <div class="sep"></div>
+  <div class="seg" id="diffs">
+    <button type="button" data-diff="calm" aria-pressed="false">Calm</button>
+    <button type="button" data-diff="windy" aria-pressed="true">Windy</button>
+    <button type="button" data-diff="storm" aria-pressed="false">Storm</button>
+  </div>
+</div>
+<div id="title" class="hud">
+  <h1>Firefighter Island</h1>
+  <p><kbd>WASD</kbd> fly · <kbd>Q</kbd><kbd>E</kbd> yaw · <kbd>Space</kbd>/<kbd>Shift</kbd> up/down · hover low over the lake to fill · <kbd>F</kbd> drop · click to fly there · <kbd>1-4</kbd> cameras · <kbd>P</kbd> autopilot</p>
+</div>
+<div id="end" class="hud">
+  <div class="card glass">
+    <h2 id="endTitle">Village saved</h2>
+    <p id="endSub">Every fire is out.</p>
+    <div class="grid">
+      <div><b id="eForest">0%</b><span>Forest</span></div>
+      <div><b id="eHouses">0/0</b><span>Houses</span></div>
+      <div><b id="eDrops">0</b><span>Drops</span></div>
+      <div><b id="eTime">0:00</b><span>Time</span></div>
+    </div>
+    <button id="again" type="button">Fly again</button>
+    <div id="auto"></div>
+  </div>
+</div>
+
+<aside id="menu" class="hud" aria-label="Scene menu" aria-hidden="true">
+  <div class="phead">
+    <div><div class="logo">Firefighter <b>Island</b></div><div class="sub">Round <span id="mRound">1</span> · seed <span id="mSeed">0</span> · <span id="mState">in play</span></div></div>
+    <button id="menuClose" class="x" type="button" aria-label="Close menu">×</button>
+  </div>
+  <section class="sec">
+    <h3>Round</h3>
+    <div class="field wide"><span>Difficulty</span><span class="seg"><button type="button" data-diff="calm">Calm</button><button type="button" data-diff="windy">Windy</button><button type="button" data-diff="storm">Storm</button></span></div>
+    <div class="field wide"><span>Sim speed</span><span class="seg" id="mSpeed"><button type="button" data-spd="1" aria-pressed="true">1×</button><button type="button" data-spd="2">2×</button><button type="button" data-spd="4">4×</button></span></div>
+    <div class="row2"><button class="btn" type="button" id="mNew">New island</button><button class="btn" type="button" id="mPause" aria-pressed="false">Pause</button></div>
+    <div class="row2"><button class="btn" type="button" id="mAuto" aria-pressed="true">Autopilot</button><button class="btn" type="button" id="mDirector" aria-pressed="true">Auto camera cuts</button></div>
+    <div class="kv"><div><span>Time</span><b id="mTime">0:00</b></div><div><span>Drops</span><b id="mDrops">0</b></div><div><span>Strikes left</span><b id="mStrikes">0</b></div><div><span>FPS</span><b id="mFps">60</b></div></div>
+  </section>
+  <section class="sec">
+    <h3>Fire</h3>
+    <div class="gauges">
+      <div class="g hot"><div class="gl">Burning</div><div class="gv" id="gBurn">0</div><div class="bar"><i id="gBurnBar"></i></div></div>
+      <div class="g"><div class="gl">Forest</div><div class="gv" id="gForest">100%</div><div class="bar"><i id="gForestBar"></i></div></div>
+      <div class="g"><div class="gl">Houses</div><div class="gv" id="gHouses">0/0</div><div class="bar"><i id="gHousesBar"></i></div></div>
+    </div>
+    <div class="field"><span>Spread rate</span><input type="range" id="cSpread" min="0.3" max="2.5" step="0.05" value="1"><span class="val" id="vSpread">1.00×</span></div>
+    <div class="field"><span>Regrowth</span><input type="range" id="cRegrow" min="0" max="4" step="0.1" value="1"><span class="val" id="vRegrow">1.0×</span></div>
+    <div class="checks">
+      <label class="chk"><input type="checkbox" id="cLightning" checked> Lightning</label>
+      <label class="chk"><input type="checkbox" id="cEmbers" checked> Ember jumps</label>
+      <label class="chk"><input type="checkbox" id="cSmoke" checked> Smoke</label>
+      <label class="chk"><input type="checkbox" id="cTint"> Heat tint</label>
+    </div>
+    <div class="row2"><button class="btn" type="button" id="mStrike">Strike lightning</button><button class="btn" type="button" id="mSpark">Spark a fire</button></div>
+    <div class="row2"><button class="btn" type="button" id="mRain">Rain shower</button><button class="btn" type="button" id="mRegrow">Regrow all</button></div>
+  </section>
+  <section class="sec">
+    <h3>Wind</h3>
+    <div class="field"><span>Direction</span><input type="range" id="cWindDir" min="0" max="359" step="1" value="0"><span class="val" id="vWindDir">0°</span></div>
+    <div class="field"><span>Speed</span><input type="range" id="cWindSpd" min="0" max="16" step="0.1" value="6"><span class="val" id="vWindSpd">22 km/h</span></div>
+    <div class="checks"><label class="chk"><input type="checkbox" id="cWindShift" checked> Shifting wind</label></div>
+  </section>
+  <section class="sec">
+    <h3>Helicopter</h3>
+    <div class="gauges">
+      <div class="g cool"><div class="gl">Bucket</div><div class="gv" id="gWater">0%</div><div class="bar"><i id="gWaterBar"></i></div></div>
+      <div class="g"><div class="gl">Speed</div><div class="gv" id="gSpeed">0 km/h</div><div class="bar"><i id="gSpeedBar"></i></div></div>
+      <div class="g"><div class="gl">Altitude</div><div class="gv" id="gAlt">0 m</div><div class="bar"><i id="gAltBar"></i></div></div>
+    </div>
+    <div class="field wide"><span>Wingmen</span><span class="seg"><button type="button" data-wing="0" aria-pressed="true">None</button><button type="button" data-wing="1">1</button><button type="button" data-wing="2">2</button><button type="button" data-wing="3">3</button></span></div>
+    <div class="field"><span>Water flow</span><input type="range" id="cFlow" min="0.5" max="2.5" step="0.05" value="1.4"><span class="val" id="vFlow">1.40×</span></div>
+    <div class="field"><span>Bucket size</span><input type="range" id="cBucket" min="0.6" max="1.8" step="0.05" value="1"><span class="val" id="vBucket">1.00×</span></div>
+    <div class="field"><span>Rope length</span><input type="range" id="cRope" min="3" max="12" step="0.5" value="6.5"><span class="val" id="vRope">6.5 m</span></div>
+    <div class="field"><span>Top speed</span><input type="range" id="cTop" min="10" max="34" step="1" value="20"><span class="val" id="vTop">72 km/h</span></div>
+    <div class="row2"><button class="btn" type="button" id="mFill">Fill bucket</button><button class="btn" type="button" id="mDrop">Drop water</button></div>
+  </section>
+  <section class="sec">
+    <h3>Light</h3>
+    <div class="field wide"><span>Time of day</span><span class="seg" id="mTod"><button type="button" data-tod="golden" aria-pressed="true">Golden</button><button type="button" data-tod="noon">Noon</button><button type="button" data-tod="dusk">Dusk</button><button type="button" data-tod="night">Night</button></span></div>
+    <div class="checks">
+      <label class="chk"><input type="checkbox" id="cShadows" checked> Shadows</label>
+      <label class="chk"><input type="checkbox" id="cClouds" checked> Clouds</label>
+      <label class="chk"><input type="checkbox" id="cBirds" checked> Birds</label>
+      <label class="chk"><input type="checkbox" id="cSound" checked> Sound</label>
+    </div>
+  </section>
+  <section class="sec">
+    <h3>Camera &amp; pixels</h3>
+    <div class="seg"><button type="button" data-cam="1">1 Chase</button><button type="button" data-cam="2">2 Orbit</button><button type="button" data-cam="3">3 Tactical</button><button type="button" data-cam="4">4 Bucket</button></div>
+    <div class="field"><span>Rotate</span><input type="range" id="cRot" min="0" max="359" step="1" value="45"><span class="val" id="vRot">45°</span></div>
+    <div class="field"><span>Tilt</span><input type="range" id="cTilt" min="17" max="72" step="1" value="34"><span class="val" id="vTilt">34°</span></div>
+    <div class="field"><span>Zoom</span><input type="range" id="cZoom" min="0.4" max="2.5" step="0.01" value="1"><span class="val" id="vZoom">1.00×</span></div>
+    <div class="field"><span>Pixel size</span><input type="range" id="cPx" min="1" max="6" step="1" value="2"><span class="val" id="vPx">2px</span></div>
+    <div class="checks">
+      <label class="chk"><input type="checkbox" id="cOutline" checked> Depth outlines</label>
+      <label class="chk"><input type="checkbox" id="cDither" checked> Bayer dither</label>
+      <label class="chk"><input type="checkbox" id="cRaw"> Raw 3D</label>
+    </div>
+  </section>
+  <section class="sec"><div class="note">Keys · WASD fly · Q/E yaw (chase) or rotate · Space/Shift altitude · F drop · click to fly there · 1–4 cameras · +/− zoom · P autopilot · M sound · O menu</div></section>
+</aside>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ───────── helpers ───────── */
+const TAU = Math.PI * 2;
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash1 = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+const angLerp = (a, b, t) => { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return a + d * t; };
+const $ = id => document.getElementById(id);
+const fmtTime = t => { const m = Math.floor(t / 60), s = Math.floor(t - m * 60); return m + ':' + (s < 10 ? '0' : '') + s; };
+const params = new URLSearchParams(location.search);
+const CLEAN = params.get('clean') === '1';
+if (CLEAN) document.body.classList.add('clean');
+const COARSE = matchMedia('(pointer: coarse)').matches;
+let RG = mulberry(1);                    // gameplay randomness, reseeded per round
+const _lc = new THREE.Color();
+const lin = hex => { _lc.setHex(hex); return [_lc.r, _lc.g, _lc.b]; };
+
+/* ───────── renderer: tiny framebuffer + palette / outline / dither post pass ───────── */
+const canvas = $('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+const scene = new THREE.Scene();
+const pcam = new THREE.PerspectiveCamera(60, 16 / 9, 0.3, 1600);
+const ocam = new THREE.OrthographicCamera(-1, 1, 1, -1, 5, 1800);
+let camera = ocam;
+const opt = { ps: COARSE ? 3 : 2 };
+let rt = null, rtW = 1, rtH = 1;
+
+// fixed OKLab palette: 11 hues x 7 lightness steps + 13 neutrals (warm hues a little richer for fire)
+const palLin = [], palOk = [];
+{
+  const toLin = (L, C, h) => {
+    for (let k = 0; k < 24; k++) {
+      const a = C * Math.cos(h), b = C * Math.sin(h);
+      const l_ = L + 0.3963377774 * a + 0.2158037573 * b, m_ = L - 0.1055613458 * a - 0.0638541728 * b, s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+      const l = l_ ** 3, m = m_ ** 3, s2 = s_ ** 3;
+      const r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s2, g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s2, bb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s2;
+      if (r >= -0.001 && r <= 1.001 && g >= -0.001 && g <= 1.001 && bb >= -0.001 && bb <= 1.001) return { rgb: [clamp(r, 0, 1), clamp(g, 0, 1), clamp(bb, 0, 1)], ab: [a, b] };
+      C *= 0.9;
+    }
+    return { rgb: [L, L, L], ab: [0, 0] };
+  };
+  const hues = [28, 52, 85, 122, 146, 176, 215, 250, 292, 335, 8], Ls = [0.28, 0.40, 0.52, 0.63, 0.74, 0.85, 0.94];
+  for (const h of hues) for (const L of Ls) { const c = toLin(L, (h < 90 || h > 330) ? 0.16 : 0.12, h * Math.PI / 180); palLin.push(new THREE.Vector3(...c.rgb)); palOk.push(new THREE.Vector3(L, c.ab[0], c.ab[1])); }
+  for (let i = 0; i < 13; i++) { const L = 0.1 + i * 0.075, c = toLin(L, 0.008, 1.2); palLin.push(new THREE.Vector3(...c.rgb)); palOk.push(new THREE.Vector3(L, c.ab[0], c.ab[1])); }
+}
+const postMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tColor: { value: null }, tDepth: { value: null }, texel: { value: new THREE.Vector2(1, 1) },
+    pal: { value: palLin }, palOk: { value: palOk },
+    near: { value: 5 }, far: { value: 1800 }, ortho: { value: 1 }, thr: { value: 1 }, outline: { value: 1 }, dither: { value: 1 },
+  },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: `
+    precision highp float;
+    uniform sampler2D tColor, tDepth; uniform vec2 texel; uniform vec3 pal[90]; uniform vec3 palOk[90];
+    uniform float near, far, ortho, thr, outline, dither;
+    varying vec2 vUv;
+    float lin(float d){ return ortho > 0.5 ? near + d * (far - near) : near * far / (far - d * (far - near)); }
+    vec3 toOk(vec3 c){
+      float l = 0.4122214708*c.r + 0.5363325363*c.g + 0.0514459929*c.b;
+      float m = 0.2119034982*c.r + 0.6806995451*c.g + 0.1073969566*c.b;
+      float s = 0.0883024619*c.r + 0.2817188376*c.g + 0.6299787005*c.b;
+      l = pow(max(l,0.0), 1.0/3.0); m = pow(max(m,0.0), 1.0/3.0); s = pow(max(s,0.0), 1.0/3.0);
+      return vec3(0.2104542553*l + 0.7936177850*m - 0.0040720468*s, 1.9779984951*l - 2.4285922050*m + 0.4505937099*s, 0.0259040371*l + 0.7827717662*m - 0.8086757660*s);
+    }
+    const float B[16] = float[16](0.,8.,2.,10., 12.,4.,14.,6., 3.,11.,1.,9., 15.,7.,13.,5.);
+    void main(){
+      vec3 col = texture2D(tColor, vUv).rgb;
+      float z = lin(texture2D(tDepth, vUv).x);
+      float e = 0.0;
+      e = max(e, lin(texture2D(tDepth, vUv + vec2(texel.x, 0.)).x) - z);
+      e = max(e, lin(texture2D(tDepth, vUv - vec2(texel.x, 0.)).x) - z);
+      e = max(e, lin(texture2D(tDepth, vUv + vec2(0., texel.y)).x) - z);
+      e = max(e, lin(texture2D(tDepth, vUv - vec2(0., texel.y)).x) - z);
+      vec3 ok = toOk(col);
+      float t = ortho > 0.5 ? thr : thr * z * 0.06;
+      if (outline > 0.5 && e > t) ok.x *= 0.62;
+      ivec2 pc = ivec2(mod(gl_FragCoord.xy, 4.0));
+      if (dither > 0.5) ok.x += (B[pc.x + pc.y*4] / 16.0 - 0.47) * 0.05;
+      float best = 1e9; int bi = 0;
+      for (int i = 0; i < 90; i++) { vec3 d = palOk[i] - ok; float k = dot(d, d); if (k < best) { best = k; bi = i; } }
+      gl_FragColor = vec4(pow(pal[bi], vec3(1.0/2.2)), 1.0);
+    }`,
+  depthTest: false, depthWrite: false,
+});
+const postScene = new THREE.Scene(), postCam = new THREE.Camera();
+{ const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat); q.frustumCulled = false; postScene.add(q); }
+// the stage can be narrower than the window while the menu is open
+const VW = () => canvas.clientWidth || innerWidth, VH = () => canvas.clientHeight || innerHeight;
+// live scene settings driven by the menu
+const CFG = { wingAuto: true, spread: 1, regrow: 1, lightning: true, embers: true, smoke: true, tint: false, flow: 1.4, bucket: 1, speed: 1, director: true,
+  outline: true, dither: true, raw: false, shadows: true, clouds: true, birds: true, tod: 'golden' };
+function resize() {
+  const w = Math.max(1, VW()), h = Math.max(1, VH());
+  if (!VW() || !VH()) return;                               // 0x0 windows: keep the old target
+  rtW = Math.max(1, Math.ceil(w / opt.ps)); rtH = Math.max(1, Math.ceil(h / opt.ps));
+  renderer.setSize(rtW, rtH, false);
+  if (rt) { rt.dispose(); rt.depthTexture.dispose(); }
+  rt = new THREE.WebGLRenderTarget(rtW, rtH, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthTexture: new THREE.DepthTexture(rtW, rtH) });
+  rt.depthTexture.minFilter = rt.depthTexture.magFilter = THREE.NearestFilter;
+  postMat.uniforms.tColor.value = rt.texture; postMat.uniforms.tDepth.value = rt.depthTexture;
+  postMat.uniforms.texel.value.set(1 / rtW, 1 / rtH);
+  pcam.aspect = w / h; pcam.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+if (!rt) { rt = new THREE.WebGLRenderTarget(1, 1, { depthTexture: new THREE.DepthTexture(1, 1) }); postMat.uniforms.tColor.value = rt.texture; postMat.uniforms.tDepth.value = rt.depthTexture; }
+
+/* ───────── light, sky ───────── */
+const SKY = { zen: new THREE.Color(0x86a8d8), hor: new THREE.Color(0xf7cd92), low: new THREE.Color(0xe7a47c), smoke: new THREE.Color(0x6a5a60) };
+scene.background = new THREE.Color(0xe8b48a);
+scene.fog = new THREE.Fog(0xf0c090, 900, 1900);
+const hemi = new THREE.HemisphereLight(0xffd8b0, 0x5a4468, 1.0);
+const sun = new THREE.DirectionalLight(0xffb878, 2.5);
+const SUN_DIR = new THREE.Vector3(-200, 105, 140).normalize();
+sun.position.copy(SUN_DIR).multiplyScalar(300);
+sun.castShadow = true; sun.shadow.mapSize.set(COARSE ? 1024 : 2048, COARSE ? 1024 : 2048); sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.35;
+{ const c = sun.shadow.camera; c.left = -170; c.right = 170; c.top = 170; c.bottom = -170; c.near = 20; c.far = 700; }
+scene.add(hemi, sun, sun.target);
+const domeGeo = new THREE.SphereGeometry(1, 32, 18);
+domeGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(domeGeo.attributes.position.count * 3), 3));
+function paintDome() {
+  const p = domeGeo.attributes.position, col = domeGeo.attributes.color.array, c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i);
+    if (y >= 0) c.copy(SKY.hor).lerp(SKY.zen, Math.pow(y, 0.55)); else c.copy(SKY.hor).lerp(SKY.low, Math.pow(-y, 0.5));
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  domeGeo.attributes.color.needsUpdate = true;
+}
+paintDome();
+const domeMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false });
+const dome = new THREE.Mesh(domeGeo, domeMat); dome.scale.setScalar(1200); dome.renderOrder = -10; dome.frustumCulled = false; scene.add(dome);
+const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(46, 20), new THREE.MeshBasicMaterial({ color: 0xfff1c8, fog: false, depthWrite: false })); sunDisc.renderOrder = -9; sunDisc.frustumCulled = false; scene.add(sunDisc);
+// time-of-day presets (the default is golden hour)
+const TOD = {
+  golden: { zen: 0x86a8d8, hor: 0xf7cd92, low: 0xe7a47c, smoke: 0x6a5a60, sun: 0xffb878, burn: 0xff8a50, sunI: 2.5, dir: [-200, 105, 140], hs: 0xffd8b0, hg: 0x5a4468, hI: 1.0, disc: 0xfff1c8, win: 0x6a4a18, dark: 0x8a706a },
+  noon: { zen: 0x5c9ce2, hor: 0xc4e2f4, low: 0xa2cce6, smoke: 0x6e6a6e, sun: 0xfff2dc, burn: 0xffc08a, sunI: 2.4, dir: [-70, 230, 90], hs: 0xe2f0ff, hg: 0x5c6048, hI: 1.15, disc: 0xffffff, win: 0x2a2010, dark: 0x8a8486 },
+  dusk: { zen: 0x34386e, hor: 0xea8668, low: 0x8a5a7a, smoke: 0x4a3a4a, sun: 0xff7a50, burn: 0xff5a30, sunI: 1.7, dir: [-230, 42, 120], hs: 0xd0a0b8, hg: 0x3a2a48, hI: 0.8, disc: 0xffb090, win: 0xb07a30, dark: 0x5a4250 },
+  night: { zen: 0x0b1230, hor: 0x283258, low: 0x121834, smoke: 0x1c1a24, sun: 0x9cb4ec, burn: 0xc06040, sunI: 1.0, dir: [120, 170, -70], hs: 0x7088c0, hg: 0x1e2236, hI: 0.85, disc: 0xe4ecff, win: 0xffb84a, dark: 0x3a3440 },
+};
+const LIGHT = { sun: new THREE.Color(), burn: new THREE.Color(), sunI: 2.5, hI: 1, win: 0x6a4a18, dark: new THREE.Color() };
+function applyTod(name) {
+  const T = TOD[name] || TOD.golden; CFG.tod = TOD[name] ? name : 'golden';
+  SKY.zen.setHex(T.zen); SKY.hor.setHex(T.hor); SKY.low.setHex(T.low); SKY.smoke.setHex(T.smoke); paintDome();
+  SUN_DIR.set(...T.dir).normalize(); sun.position.copy(SUN_DIR).multiplyScalar(300);
+  LIGHT.sun.setHex(T.sun); LIGHT.burn.setHex(T.burn); LIGHT.sunI = T.sunI; LIGHT.hI = T.hI; LIGHT.win = T.win; LIGHT.dark.setHex(T.dark);
+  hemi.color.setHex(T.hs); hemi.groundColor.setHex(T.hg); sunDisc.material.color.setHex(T.disc);
+  sunDisc.scale.setScalar(name === 'night' ? 0.55 : 1);
+  document.querySelectorAll('[data-tod]').forEach(e => e.setAttribute('aria-pressed', String(e.dataset.tod === CFG.tod)));
+}
+
+const gradData = new Uint8Array([70, 135, 200, 255]);
+const GRAD = new THREE.DataTexture(gradData, 4, 1, THREE.RedFormat);
+GRAD.minFilter = GRAD.magFilter = THREE.NearestFilter; GRAD.needsUpdate = true;
+const matCache = new Map();
+const toon = (hex, extra = {}) => {
+  const key = hex + JSON.stringify(extra);
+  if (!matCache.has(key)) matCache.set(key, new THREE.MeshToonMaterial({ color: hex, gradientMap: GRAD, ...extra }));
+  return matCache.get(key);
+};
+const CHAR = toon(0x2a2422);
+const TERRAIN_MAT = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: GRAD });
+function box(w, h, d, mat, x = 0, y = 0, z = 0, parent = null) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
+  if (parent) parent.add(m);
+  return m;
+}
+function gableGeo(w, h, d) {
+  const a = -w / 2, b = w / 2, f = d / 2, k = -d / 2;
+  const v = [a, 0, f, b, 0, f, 0, h, f, b, 0, k, a, 0, k, 0, h, k,
+    a, 0, k, a, 0, f, 0, h, f, a, 0, k, 0, h, f, 0, h, k,
+    b, 0, f, b, 0, k, 0, h, k, b, 0, f, 0, h, k, 0, h, f];
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); g.computeVertexNormals(); return g;
+}
+function mergeGeos(list) {
+  const pos = [], nor = [];
+  for (const g0 of list) { const g = g0.index ? g0.toNonIndexed() : g0; pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); return g;
+}
+const tBox = (w, h, d, x, y, z, rz = 0) => { const g = new THREE.BoxGeometry(w, h, d); if (rz) g.rotateZ(rz); g.translate(x, y, z); return g; };
+
+/* ───────── island grid ───────── */
+const GW = 120, GH = 90, CELL = 2, NC = GW * GH, LV = 1;
+const HX = GW * CELL / 2, HZ = GH * CELL / 2;
+const T_VOID = 0, T_GRASS = 1, T_LAWN = 2, T_FOREST = 3, T_DRY = 4, T_HOUSE = 5, T_WATER = 6, T_ROAD = 7, T_ROCK = 8, T_SAND = 9, T_PAD = 10;
+const PROP = [];
+PROP[T_GRASS] = { rate: 0.38, I: 0.55, thr: 1.0, smoke: 0.55 };
+PROP[T_LAWN] = { rate: 0.45, I: 0.42, thr: 1.4, smoke: 0.45 };
+PROP[T_FOREST] = { rate: 0.085, I: 1.2, thr: 2.6, smoke: 1.0 };
+PROP[T_DRY] = { rate: 0.1, I: 1.5, thr: 2.0, smoke: 1.2 };
+PROP[T_HOUSE] = { rate: 0.05, I: 1.35, thr: 3.0, smoke: 1.5 };
+const TYPE_HEX = { [T_GRASS]: [0xcdb256, 0xc2a64c, 0xd8c069], [T_LAWN]: [0x7fae4c, 0x74a346, 0x8ab955], [T_FOREST]: [0x4d6a2c, 0x56722f, 0x445f28], [T_DRY]: [0x8a7a3a, 0x7e6e34, 0x958442],
+  [T_HOUSE]: [0x7fae4c, 0x74a346, 0x7fae4c], [T_WATER]: [0x3f8fd0, 0x3a88ca, 0x4596d6], [T_ROAD]: [0xa08c70, 0x978468, 0xa89478], [T_ROCK]: [0x8b847c, 0x7d776f, 0x968f86], [T_SAND]: [0xdcc690, 0xd2bb84, 0xe3cf9c], [T_PAD]: [0x6c7078, 0x666a72, 0x72767e] };
+const TYP = new Uint8Array(NC), HGT = new Int16Array(NC), BOT = new Int16Array(NC), RIM = new Float32Array(NC);
+const FUEL = new Float32Array(NC), HEAT = new Float32Array(NC), WET = new Float32Array(NC), AGE = new Float32Array(NC);
+const ST = new Uint8Array(NC), EVER = new Uint8Array(NC), LOST = new Uint8Array(NC), DEEP = new Uint8Array(NC);
+const BLD = new Int16Array(NC), TREE = new Int32Array(NC), TUFT = new Int32Array(NC), TOPV = new Int32Array(NC), MARK = new Int32Array(NC);
+const BR = new Float32Array(NC), BG = new Float32Array(NC), BB = new Float32Array(NC), TOPH = new Float32Array(NC);
+const cellX = i => (i % GW + 0.5) * CELL - HX, cellZ = i => (Math.floor(i / GW) + 0.5) * CELL - HZ;
+const w2c = (x, z) => { const gx = Math.floor((x + HX) / CELL), gz = Math.floor((z + HZ) / CELL); return (gx < 0 || gz < 0 || gx >= GW || gz >= GH) ? -1 : gz * GW + gx; };
+const topY = i => HGT[i] * LV - (TYP[i] === T_WATER ? 0.25 : 0);
+const groundAt = (x, z) => { const i = w2c(x, z); return i < 0 || TYP[i] === T_VOID ? -60 : topY(i); };
+const ASH = 12, REGROW = 60;
+const regrowP = i => clamp((AGE[i] - ASH) / REGROW, 0, 1);
+const ISL = { village: [0, 0], lake: [0, 0], tower: [0, 0], dips: [], buildings: [], pad: null, seed: 0, forestTotal: 1, lakeY: 0 };
+
+function generate(seed) {
+  const r = mulberry(seed);
+  const flipX = r() < 0.5, flipZ = r() < 0.5;
+  const P = (u, v) => [(flipX ? 1 - u : u) * GW, (flipZ ? 1 - v : v) * GH];
+  const jit = (a, s = 0.05) => a + (r() - 0.5) * s * 2;
+  const ph = Array.from({ length: 16 }, () => r() * TAU);
+  const V = P(jit(0.70, 0.03), jit(0.65, 0.03)).map(Math.round);
+  const Lk = P(jit(0.25, 0.03), jit(0.54, 0.05)), lr = [9.5 + r() * 2, 6.5 + r() * 1.5], la = (r() - 0.5) * 0.8;
+  const Tw = P(jit(0.44), jit(0.2, 0.04)), Dc = P(jit(0.82, 0.04), jit(0.24, 0.05)), Rend = P(jit(0.12, 0.04), 1.08);
+  const nz = (x, z, s, o) => Math.sin(x * s + ph[o]) * Math.cos(z * s * 1.3 + ph[o + 1]) + 0.5 * Math.sin((x + z) * s * 2.1 + ph[o + 2]);
+  const lakeQ = (x, z) => { const dx = x - Lk[0], dz = z - Lk[1], c = Math.cos(la), s = Math.sin(la); return Math.hypot((dx * c + dz * s) / lr[0], (-dx * s + dz * c) / lr[1]); };
+  TYP.fill(0); HGT.fill(0); BLD.fill(-1); DEEP.fill(0);
+  for (let z = 0; z < GH; z++) for (let x = 0; x < GW; x++) {
+    const i = z * GW + x;
+    const dx = (x + 0.5 - GW / 2) / (GW / 2 - 1.5), dz = (z + 0.5 - GH / 2) / (GH / 2 - 1.5), a = Math.atan2(dz, dx);
+    const rn = Math.hypot(dx, dz) * (1 + 0.05 * Math.sin(3 * a + ph[0]) + 0.035 * Math.sin(5 * a + ph[1]) + 0.02 * Math.sin(9 * a + ph[2]));
+    RIM[i] = rn; if (rn >= 1) continue;
+    const v = flipZ ? 1 - z / GH : z / GH;
+    const dT = Math.hypot(x - Tw[0], z - Tw[1]);
+    let e = 2.0 + 1.5 * nz(x, z, 0.09, 3) + 0.7 * nz(x, z, 0.23, 6) + 7.5 * Math.exp(-dT * dT / (2 * 12 * 12)) + 2.6 * (1 - v);
+    const dV = Math.hypot((x - V[0]) * 0.8, z - V[1]);
+    e = lerp(e, 2, sstep(17, 11, dV));
+    const q = lakeQ(x, z);
+    if (q < 1.9) e = lerp(2, e, sstep(1.0, 1.9, q));
+    if (rn > 0.93) e = Math.min(e, 2 - Math.floor((rn - 0.93) / 0.022));
+    HGT[i] = clamp(Math.round(e), -3, 12);
+    let t = T_GRASS;
+    const fn = nz(x, z, 0.13, 8) + 0.5 * nz(x, z, 0.31, 9);
+    if (fn > 0.1) t = T_FOREST;
+    const dD = Math.hypot(x - Dc[0], (z - Dc[1]) * 1.25);
+    if (dD < 21 + 4 * nz(x, z, 0.2, 10)) t = T_DRY;
+    if (t === T_GRASS && r() < 0.035) t = T_FOREST;
+    if (HGT[i] >= 9 && nz(x, z, 0.4, 11) > 0.35) t = T_ROCK;
+    if (dV < 16) t = r() < 0.04 ? T_FOREST : T_LAWN;
+    if (q < 1) { t = T_WATER; HGT[i] = 1; } else if (q < 1.32) t = T_SAND;
+    if (rn > 0.955) t = (hash1(i) < 0.6) ? T_ROCK : T_SAND;
+    TYP[i] = t;
+  }
+  ISL.lakeY = 1 * LV - 0.25;
+  // river: lake to the south-west rim, stepping down to a waterfall
+  ISL.fall = null;
+  {
+    let prevH = 1; const px = -(Rend[1] - Lk[1]), pz = Rend[0] - Lk[0], pl = Math.hypot(px, pz) || 1;
+    for (let s = 0; s <= 1.0001; s += 0.0015) {
+      const env = Math.sin(s * Math.PI), w = Math.sin(s * TAU * 1.3 + ph[12]) * 6 * env;
+      const x = lerp(Lk[0], Rend[0], s) + px / pl * w, z = lerp(Lk[1], Rend[1], s) + pz / pl * w;
+      for (let ox = -1; ox <= 0; ox++) for (let oz = -1; oz <= 0; oz++) {
+        const gx = Math.round(x + ox * 0.9), gz = Math.round(z + oz * 0.9);
+        if (gx < 0 || gz < 0 || gx >= GW || gz >= GH) continue;
+        const i = gz * GW + gx; if (RIM[i] >= 1 || TYP[i] === T_VOID) continue;
+        if (TYP[i] === T_WATER && HGT[i] <= prevH) continue;
+        prevH = Math.min(prevH, HGT[i] - 1); HGT[i] = prevH; TYP[i] = T_WATER;
+        if (RIM[i] > 0.9) ISL.fall = i;
+      }
+    }
+  }
+  // village streets and buildings
+  const road = (x, z) => { if (x < 0 || z < 0 || x >= GW || z >= GH) return; const i = z * GW + x; if (TYP[i] !== T_VOID && TYP[i] !== T_WATER) TYP[i] = T_ROAD; };
+  for (let dx = -14; dx <= 14; dx++) { road(V[0] + dx, V[1]); road(V[0] + dx, V[1] + 1); }
+  for (let dz = -11; dz <= 10; dz++) { road(V[0], V[1] + dz); road(V[0] + 1, V[1] + dz); }
+  const path = (a, b, wig, o) => {
+    const n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) * 3);
+    const px = -(b[1] - a[1]), pz = b[0] - a[0], pl = Math.hypot(px, pz) || 1;
+    for (let k = 0; k <= n; k++) { const s = k / n, w = Math.sin(s * Math.PI * 2 + ph[o]) * wig * Math.sin(s * Math.PI); const x = lerp(a[0], b[0], s) + px / pl * w, z = lerp(a[1], b[1], s) + pz / pl * w; road(Math.round(x), Math.round(z)); road(Math.round(x + 0.5), Math.round(z)); }
+  };
+  const toLk = [V[0] - Lk[0], V[1] - Lk[1]], tl = Math.hypot(...toLk);
+  const dock = [Lk[0] + toLk[0] / tl * (lr[0] + 1.2), Lk[1] + toLk[1] / tl * (lr[1] + 1.2)];
+  path([V[0] - 14, V[1]], dock, 4, 13);
+  // lookout tower on the highest ground near its hill
+  let best = -1, bh = -99;
+  for (let z = Math.round(Tw[1]) - 9; z <= Math.round(Tw[1]) + 9; z++) for (let x = Math.round(Tw[0]) - 9; x <= Math.round(Tw[0]) + 9; x++) {
+    if (x < 2 || z < 2 || x >= GW - 2 || z >= GH - 2) continue; const i = z * GW + x;
+    if (TYP[i] === T_VOID || TYP[i] === T_WATER || RIM[i] > 0.8) continue; if (HGT[i] > bh) { bh = HGT[i]; best = i; }
+  }
+  ISL.tower = best >= 0 ? [best % GW, Math.floor(best / GW)] : [Math.round(Tw[0]), Math.round(Tw[1])];
+  path([V[0], V[1] - 11], [ISL.tower[0], ISL.tower[1] + 2], 6, 14);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const x = ISL.tower[0] + dx, z = ISL.tower[1] + dz; const i = z * GW + x; if (i >= 0 && i < NC && TYP[i] !== T_VOID) { TYP[i] = T_ROCK; HGT[i] = bh; } }
+  ISL.buildings = [];
+  const place = (kind, dx, dz, w, d, face) => {
+    const cells = [];
+    for (let a = 0; a < w; a++) for (let b = 0; b < d; b++) {
+      const x = V[0] + dx + a, z = V[1] + dz + b; if (x < 0 || z < 0 || x >= GW || z >= GH) return false;
+      const i = z * GW + x; if (TYP[i] !== T_LAWN && TYP[i] !== T_FOREST) return false; cells.push(i);
+    }
+    const id = ISL.buildings.length;
+    for (const i of cells) { TYP[i] = kind === 'pad' ? T_PAD : T_HOUSE; BLD[i] = kind === 'pad' ? -1 : id; HGT[i] = 2; }
+    const b = { kind, cells, x: (V[0] + dx + w / 2) * CELL - HX, z: (V[1] + dz + d / 2) * CELL - HZ, w, d, face, lost: false, group: null, mats: [] };
+    if (kind === 'pad') { ISL.pad = b; return true; }
+    ISL.buildings.push(b); return true;
+  };
+  place('station', -6, 3, 3, 3, -1);
+  place('pad', -12, 3, 4, 4, 0);
+  place('church', 3, -9, 3, 4, 1);
+  const slots = [[-12, -3, 1], [-9, -3, 1], [-6, -3, 1], [-3, -3, 1], [3, -3, 1], [6, -3, 1], [9, -3, 1], [12, -3, 1],
+    [3, 3, -1], [6, 3, -1], [9, 3, -1], [12, 3, -1], [-11, -6, 1], [-8, -6, 1], [7, -6, 1], [10, -6, 1], [4, 6, -1], [8, 6, -1], [11, 6, -1], [-3, 6, -1]];
+  for (let k = slots.length - 1; k > 0; k--) { const j = Math.floor(r() * (k + 1)); [slots[k], slots[j]] = [slots[j], slots[k]]; }
+  const want = 9 + Math.floor(r() * 3); let got = 0;
+  for (const s of slots) { if (got >= want) break; if (place('house', s[0], s[1], 2, 2, s[2])) got++; }
+  ISL.village = [V[0], V[1]];
+  ISL.lake = [Lk[0], Lk[1], lr[0], lr[1], la];
+  ISL.dock = dock;
+  // bottoms, fuel, base colours
+  let ft = 0;
+  for (let i = 0; i < NC; i++) {
+    const t = TYP[i];
+    if (t === T_VOID) continue;
+    const rn = RIM[i], depth = 4 + 36 * Math.pow(Math.max(0, 1 - rn), 0.8);
+    BOT[i] = Math.min(HGT[i] - 2, -Math.round(depth + (hash1(i * 3.1) - 0.5) * 2));
+    const hx = TYPE_HEX[t], h = hash1(i * 1.7), c = lin(hx[h < 0.45 ? 0 : h < 0.8 ? 1 : 2]), j = 0.94 + hash1(i * 2.3) * 0.12;
+    BR[i] = c[0] * j; BG[i] = c[1] * j; BB[i] = c[2] * j;
+    if (t === T_WATER) { let open = 1; for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const n = i + dz * GW + dx; if (n < 0 || n >= NC || TYP[n] !== T_WATER) open = 0; } DEEP[i] = open; if (open) { BR[i] *= 0.8; BG[i] *= 0.86; } }
+    if (t === T_FOREST || t === T_DRY) ft++;
+  }
+  ISL.forestTotal = Math.max(1, ft);
+  ISL.dips = [];
+  for (let i = 0; i < NC; i++) if (DEEP[i] && HGT[i] === 1 && (i % 2 === 0)) ISL.dips.push(i);
+  ISL.seed = seed;
+}
+
+/* ───────── meshes per island ───────── */
+const world = new THREE.Group(); scene.add(world);
+let tops = null, topCol = null, trunks = null, foliage = null, tufts = null;
+const treeCell = [], treeData = [], tuftCell = [], tuftData = [];
+let nTrees = 0, nTufts = 0;
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _e = new THREE.Euler(), _col = new THREE.Color();
+const UP = new THREE.Vector3(0, 1, 0);
+const trunkGeo = tBox(0.5, 1.5, 0.5, 0, 0.75, 0);
+const folGeo = mergeGeos([tBox(2.3, 1.5, 2.3, 0, 0.75, 0), tBox(1.7, 1.4, 1.7, 0, 2.0, 0), tBox(1.1, 1.3, 1.1, 0, 3.15, 0), tBox(0.5, 0.8, 0.5, 0, 4.1, 0)]);
+const tuftGeo = mergeGeos([tBox(0.16, 1.0, 0.16, 0, 0.45, 0, 0.0), tBox(0.14, 0.85, 0.14, 0.18, 0.38, 0.05, -0.45), tBox(0.14, 0.8, 0.14, -0.16, 0.36, -0.06, 0.5), tBox(0.12, 0.7, 0.12, 0.02, 0.32, 0.2, 0.25)]);
+const FOL_COL = { [T_FOREST]: [0x2f6b34, 0x3c7a38, 0x2a5f37, 0x467f3a], [T_DRY]: [0x8f8a3c, 0x7d7a35, 0x9c8740, 0x86803a] };
+const C_FLARE1 = lin(0xffd24a), C_FLARE2 = lin(0xff7a1c), C_EMB1 = lin(0xc8361a), C_EMB2 = lin(0x6a1a10), C_SAP = lin(0x6fa040), C_SCORCH = lin(0x4a3a1e);
+const C_TRUNK = lin(0x6b4a2e), C_BURNT = lin(0x1c1816), C_ASH = lin(0x2a2624), C_ASH2 = lin(0x45403c), C_GLOW = lin(0x5a1406), C_REG = lin(0x5d8f38);
+const C_FIRE1 = lin(0xff6a14), C_FIRE2 = lin(0xa8240c), C_TUFT = [0xdcc46c, 0xcfb257, 0xe6d283].map(lin);
+
+function disposeWorld() {
+  world.traverse(o => { if (o.geometry && o.geometry !== trunkGeo && o.geometry !== folGeo && o.geometry !== tuftGeo) o.geometry.dispose(); if (o.isInstancedMesh) o.dispose(); });
+  world.clear();
+}
+function buildTerrain() {
+  // tops: one quad per cell, dynamic colours
+  let nv = 0; for (let i = 0; i < NC; i++) TOPV[i] = TYP[i] ? (nv += 4) - 4 : -1;
+  const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), idx = new Uint32Array(nv / 4 * 6);
+  topCol = new Float32Array(nv * 3);
+  let q = 0;
+  for (let i = 0; i < NC; i++) {
+    const v = TOPV[i]; if (v < 0) continue;
+    const x0 = (i % GW) * CELL - HX, z0 = Math.floor(i / GW) * CELL - HZ, y = topY(i);
+    pos.set([x0, y, z0, x0 + CELL, y, z0, x0 + CELL, y, z0 + CELL, x0, y, z0 + CELL], v * 3);
+    for (let k = 0; k < 4; k++) nor[(v + k) * 3 + 1] = 1;
+    idx.set([v, v + 2, v + 1, v, v + 3, v + 2], q); q += 6;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(topCol, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeBoundingSphere();
+  tops = new THREE.Mesh(g, TERRAIN_MAT);
+  tops.receiveShadow = true; world.add(tops);
+  // sides and underside
+  const sp = [], sn = [], sc = [], si = [];
+  const c = new THREE.Color();
+  const SLATE = [0x6d7480, 0x586070, 0x7b828c, 0x4e5563, 0x646b78];
+  const quad = (a, b2, c2, d, n, col) => {
+    const vv = [a, b2, c2, d];
+    const e1 = [b2[0] - a[0], b2[1] - a[1], b2[2] - a[2]], e2 = [c2[0] - a[0], c2[1] - a[1], c2[2] - a[2]];
+    const cr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    if (cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2] < 0) vv.reverse();
+    const base = sp.length / 3;
+    for (const p of vv) { sp.push(p[0], p[1], p[2]); sn.push(n[0], n[1], n[2]); sc.push(col[0], col[1], col[2]); }
+    si.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const colAt = (i, y, top, j) => {
+    const dd = top - y;
+    if (TYP[i] === T_WATER && dd < 1.2) c.setHex(0x3a84c8);
+    else if (dd < 0.9) c.setHex(TYP[i] === T_ROCK ? 0x7d766e : TYP[i] === T_SAND ? 0xc7ae78 : 0x5f4a2a);
+    else if (y > -3) c.setHex(0x6e4b2c);
+    else { c.setHex(SLATE[Math.floor(-y / 4) % 5]); c.multiplyScalar(1 - 0.45 * Math.min(1, -y / 40)); }
+    c.multiplyScalar(0.93 + j * 0.14); return [c.r, c.g, c.b];
+  };
+  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (let i = 0; i < NC; i++) {
+    if (!TYP[i]) continue;
+    const gx = i % GW, gz = Math.floor(i / GW);
+    const x0 = gx * CELL - HX, z0 = gz * CELL - HZ, x1 = x0 + CELL, z1 = z0 + CELL;
+    const tI = topY(i), bI = BOT[i] * LV;
+    quad([x0, bI, z0], [x1, bI, z0], [x1, bI, z1], [x0, bI, z1], [0, -1, 0], lin(0x3e4552));
+    for (const [dx, dz] of DIRS) {
+      const nx = gx + dx, nzz = gz + dz, n = nzz * GW + nx;
+      const has = nx >= 0 && nzz >= 0 && nx < GW && nzz < GH && TYP[n];
+      const segs = [];
+      if (!has) segs.push([bI, tI]);
+      else { const tN = topY(n), bN = BOT[n] * LV; if (bI < bN) segs.push([bI, Math.min(tI, bN)]); if (tN < tI - 0.01) segs.push([Math.max(bI, tN), tI]); }
+      for (const [y0, y1] of segs) {
+        let ya = y0;
+        while (ya < y1 - 0.001) {
+          const step = ya < -3 ? 3 : 1; let yb = Math.min(y1, Math.floor(ya / step + 1e-6) * step + step); if (yb <= ya + 0.001) yb = Math.min(y1, ya + step);
+          const col = colAt(i, (ya + yb) / 2, tI, hash1(i + ya * 7.3));
+          if (dx) { const x = dx > 0 ? x1 : x0; quad([x, ya, z0], [x, ya, z1], [x, yb, z1], [x, yb, z0], [dx, 0, 0], col); }
+          else { const z = dz > 0 ? z1 : z0; quad([x0, ya, z], [x1, ya, z], [x1, yb, z], [x0, yb, z], [0, 0, dz], col); }
+          ya = yb;
+        }
+      }
+    }
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3)); sg.setAttribute('normal', new THREE.Float32BufferAttribute(sn, 3));
+  sg.setAttribute('color', new THREE.Float32BufferAttribute(sc, 3)); sg.setIndex(new THREE.Uint32BufferAttribute(si, 1));
+  const sides = new THREE.Mesh(sg, TERRAIN_MAT);
+  sides.castShadow = true; sides.receiveShadow = true; world.add(sides);
+}
+function buildFlora() {
+  treeCell.length = 0; treeData.length = 0; tuftCell.length = 0; tuftData.length = 0;
+  TREE.fill(-1); TUFT.fill(-1);
+  for (let i = 0; i < NC; i++) {
+    const t = TYP[i]; TOPH[i] = TYP[i] ? topY(i) : -60;
+    if ((t === T_FOREST || t === T_DRY) && (!COARSE || hash1(i * 4.1) < 0.65)) { TREE[i] = treeCell.length; treeCell.push(i); }
+    else if (t === T_GRASS && hash1(i * 5.3) < (COARSE ? 0.45 : 0.9)) { TUFT[i] = tuftCell.length; tuftCell.push(i); }
+  }
+  nTrees = treeCell.length; nTufts = tuftCell.length;
+  trunks = new THREE.InstancedMesh(trunkGeo, toon(0xffffff), Math.max(1, nTrees));
+  foliage = new THREE.InstancedMesh(folGeo, toon(0xffffff), Math.max(1, nTrees));
+  for (const m of [trunks, foliage]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; m.count = nTrees; }
+  for (let k = 0; k < nTrees; k++) {
+    const i = treeCell[k], t = TYP[i], h = hash1(i * 9.7);
+    const s = (t === T_DRY ? 0.9 : 0.82) + hash1(i * 3.3) * 0.45;
+    const x = cellX(i) + (hash1(i * 6.1) - 0.5) * 0.9, z = cellZ(i) + (hash1(i * 7.9) - 0.5) * 0.9, y = topY(i);
+    const fc = lin(FOL_COL[t][Math.floor(h * 4)]);
+    treeData.push({ x, y, z, s, ry: Math.floor(hash1(i * 2.9) * 4) * Math.PI / 2 + (hash1(i) - 0.5) * 0.3, fc, key: -1, h: (1.5 + 4.5) * s });
+    TOPH[i] = y + (1.5 + 4.5) * s;
+    setTree(k, 1, fc, 0);
+  }
+  tufts = new THREE.InstancedMesh(tuftGeo, toon(0xffffff), Math.max(1, nTufts));
+  tufts.receiveShadow = true; tufts.frustumCulled = false; tufts.count = nTufts;
+  for (let k = 0; k < nTufts; k++) {
+    const i = tuftCell[k];
+    tuftData.push({ x: cellX(i) + (hash1(i * 6.7) - 0.5) * 1.1, y: topY(i), z: cellZ(i) + (hash1(i * 8.3) - 0.5) * 1.1, s: 0.8 + hash1(i * 1.9) * 0.6, ry: hash1(i * 4.4) * TAU, c: C_TUFT[Math.floor(hash1(i * 3.7) * 3)], bend: 0, ba: 0, vis: 1, key: -1 });
+    setTuft(k, 1, tuftData[k].c);
+  }
+  world.add(trunks, foliage, tufts);
+}
+function setTree(k, fs, fc, dark) {
+  const d = treeData[k];
+  _q.setFromAxisAngle(UP, d.ry);
+  _p.set(d.x, d.y, d.z); _s.set(d.s * 0.9 + 0.1, d.s, d.s * 0.9 + 0.1); _m.compose(_p, _q, _s); trunks.setMatrixAt(k, _m);
+  _col.setRGB(lerp(C_TRUNK[0], C_BURNT[0], dark), lerp(C_TRUNK[1], C_BURNT[1], dark), lerp(C_TRUNK[2], C_BURNT[2], dark)); trunks.setColorAt(k, _col);
+  const f = Math.max(0.0001, fs) * d.s;
+  _p.set(d.x, d.y + 1.3 * d.s, d.z); _s.set(f, fs < 0.001 ? 0.0001 : f, f); _m.compose(_p, _q, _s); foliage.setMatrixAt(k, _m);
+  _col.setRGB(fc[0], fc[1], fc[2]); foliage.setColorAt(k, _col);
+}
+function setTuft(k, vis, c) {
+  const d = tuftData[k];
+  const b = d.bend;
+  _e.set(Math.sin(d.ba) * b * 1.1, d.ry, -Math.cos(d.ba) * b * 1.1, 'YXZ'); _q.setFromEuler(_e);
+  const s = d.s * vis; _p.set(d.x, d.y, d.z); _s.set(s, Math.max(0.0001, s * (1 - b * 0.45)), s); _m.compose(_p, _q, _s); tufts.setMatrixAt(k, _m);
+  if (c) { _col.setRGB(c[0], c[1], c[2]); tufts.setColorAt(k, _col); }
+}
+
+function buildStructures() {
+  const V = ISL.village;
+  for (const b of ISL.buildings) {
+    const g = new THREE.Group(); g.position.set(b.x, 2 * LV, b.z); world.add(g); b.group = g;
+    const rot = b.face < 0 ? Math.PI : 0; const inner = new THREE.Group(); inner.rotation.y = rot; g.add(inner);
+    const R = mulberry(ISL.seed + b.cells[0]);
+    const winMat = () => new THREE.MeshToonMaterial({ color: 0xffe2a0, emissive: 0x6a4a18, gradientMap: GRAD });
+    if (b.kind === 'house') {
+      const wall = [0xf0e6d2, 0xe9d7b0, 0xc9dce6, 0xf2d6a2, 0xe6c3b0, 0xdfe6cf][Math.floor(R() * 6)];
+      const roof = [0xb8452e, 0x8a4a32, 0x5a6270, 0x4f7a4a, 0x9a3a3a][Math.floor(R() * 5)];
+      const ww = 2.8 + R() * 0.5, hh = 2.2 + R() * 0.6, dd = 2.8 + R() * 0.4;
+      box(ww, hh, dd, toon(wall), 0, hh / 2, 0, inner);
+      const rf = new THREE.Mesh(gableGeo(ww + 0.6, 1.5 + R() * 0.4, dd + 0.5), toon(roof)); rf.position.y = hh; rf.castShadow = true; rf.receiveShadow = true;
+      if (R() < 0.5) rf.rotation.y = Math.PI / 2; inner.add(rf); b.roof = rf;
+      box(0.7, 1.25, 0.12, toon(0x6a4630), (R() - 0.5) * 0.8, 0.62, dd / 2 + 0.03, inner);
+      const win = winMat(); b.win = win;
+      box(0.55, 0.5, 0.1, win, -ww / 2 + 0.6, hh * 0.62, dd / 2 + 0.03, inner); box(0.55, 0.5, 0.1, win, ww / 2 - 0.6, hh * 0.62, dd / 2 + 0.03, inner);
+      box(0.1, 0.5, 0.55, win, ww / 2 + 0.03, hh * 0.62, 0, inner);
+      box(0.45, 1.1, 0.45, toon(0x8a5a44), ww * 0.25, hh + 1.0, -dd * 0.15, inner);
+      b.h = hh + 1.6;
+    } else if (b.kind === 'church') {
+      const wall = toon(0xeee6d6);
+      box(4.2, 3.4, 6.2, wall, 0, 1.7, -0.4, inner);
+      const rf = new THREE.Mesh(gableGeo(4.9, 2.3, 6.7), toon(0x585e6c)); rf.rotation.y = Math.PI / 2; rf.rotation.y = 0; rf.position.set(0, 3.4, -0.4); rf.castShadow = true; inner.add(rf); b.roof = rf;
+      box(2.0, 6.6, 2.0, wall, 0, 3.3, 2.9, inner);
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(1.55, 3.4, 4), toon(0x585e6c)); sp.rotation.y = Math.PI / 4; sp.position.set(0, 8.3, 2.9); sp.castShadow = true; inner.add(sp);
+      box(0.2, 1.1, 0.2, toon(0xf4f0e6), 0, 10.4, 2.9, inner); box(0.7, 0.2, 0.2, toon(0xf4f0e6), 0, 10.55, 2.9, inner);
+      box(1.0, 1.6, 0.1, toon(0x6a4630), 0, 0.8, 3.92, inner);
+      const win = winMat(); b.win = win;
+      for (const zz of [-2.6, -0.6, 1.4]) { box(0.1, 1.2, 0.5, win, 2.13, 2.0, zz - 0.6, inner); box(0.1, 1.2, 0.5, win, -2.13, 2.0, zz - 0.6, inner); }
+      box(0.7, 0.7, 0.1, win, 0, 5.4, 3.92, inner);
+      b.h = 7;
+    } else {
+      const brick = toon(0xb5442e);
+      box(5.4, 3.3, 5.0, brick, 0, 1.65, 0, inner);
+      box(5.8, 0.35, 5.4, toon(0x6a6f78), 0, 3.45, 0, inner);
+      box(5.45, 0.42, 0.1, toon(0xffc23a), 0, 2.85, 2.53, inner);
+      for (const xx of [-1.3, 1.3]) box(2.1, 2.3, 0.12, toon(0xece6dc), xx, 1.15, 2.52, inner);
+      box(1.4, 6.2, 1.4, brick, 2.1, 3.1, -1.9, inner); box(1.6, 0.3, 1.6, toon(0x6a6f78), 2.1, 6.3, -1.9, inner);
+      const win = winMat(); b.win = win;
+      box(0.1, 0.6, 1.4, win, 2.73, 2.2, -0.5, inner); box(0.1, 0.6, 1.4, win, -2.73, 2.2, 0.5, inner);
+      b.h = 4;
+    }
+    b.mats = []; g.traverse(o => { if (o.isMesh) b.mats.push([o, o.material]); });
+    for (const i of b.cells) TOPH[i] = 2 * LV + b.h;
+  }
+  // helipad markings
+  if (ISL.pad) {
+    const p = ISL.pad, g = new THREE.Group(); g.position.set(p.x, 2 * LV + 0.02, p.z); world.add(g);
+    const wh = toon(0xf4f0e6), ye = toon(0xffc23a);
+    box(0.5, 0.06, 3.0, wh, -1.0, 0, 0, g); box(0.5, 0.06, 3.0, wh, 1.0, 0, 0, g); box(1.6, 0.06, 0.5, wh, 0, 0, 0, g);
+    for (let k = 0; k < 20; k++) { const a = k / 20 * TAU; const m = box(0.95, 0.05, 0.35, ye, Math.cos(a) * 3.2, 0, Math.sin(a) * 3.2, g); m.rotation.y = -a + Math.PI / 2; }
+  }
+  // lookout tower
+  {
+    const [tx, tz] = ISL.tower, i = tz * GW + tx, g = new THREE.Group(); g.position.set(cellX(i), topY(i), cellZ(i)); world.add(g);
+    const wood = toon(0x8a5a36), dark = toon(0x5e3c24);
+    for (const sx of [-1.4, 1.4]) for (const sz of [-1.4, 1.4]) { const l = box(0.35, 10.4, 0.35, wood, sx, 5.2, sz, g); l.rotation.z = -sx * 0.035; l.rotation.x = sz * 0.035; }
+    for (const yy of [3.2, 6.6]) { box(3.1, 0.22, 0.22, dark, 0, yy, 1.3, g); box(3.1, 0.22, 0.22, dark, 0, yy, -1.3, g); box(0.22, 0.22, 3.1, dark, 1.3, yy, 0, g); box(0.22, 0.22, 3.1, dark, -1.3, yy, 0, g); }
+    box(3.8, 0.3, 3.8, dark, 0, 10.2, 0, g);
+    box(3.4, 1.0, 3.4, wood, 0, 10.85, 0, g); box(3.45, 0.9, 3.45, toon(0x2e3946), 0, 11.8, 0, g);
+    const rf = new THREE.Mesh(new THREE.ConeGeometry(3.1, 1.8, 4), toon(0x8a3a2a)); rf.rotation.y = Math.PI / 4; rf.position.y = 13.2; rf.castShadow = true; g.add(rf);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) TOPH[i + dz * GW + dx] = topY(i) + 14;
+  }
+  // dock
+  {
+    const [lx, lz] = ISL.lake, [dx, dz] = ISL.dock;
+    const a = Math.atan2(lz - dz, lx - dx), g = new THREE.Group();
+    g.position.set((dx + 0.5) * CELL - HX, ISL.lakeY + 0.45, (dz + 0.5) * CELL - HZ); g.rotation.y = -a + Math.PI / 2; world.add(g);
+    const wood = toon(0x9a6a40);
+    box(1.8, 0.22, 9, wood, 0, 0, 3.5, g);
+    for (let k = 0; k < 4; k++) { box(0.28, 1.6, 0.28, toon(0x5e3c24), -0.85, -0.6, k * 2.6 + 0.2, g); box(0.28, 1.6, 0.28, toon(0x5e3c24), 0.85, -0.6, k * 2.6 + 0.2, g); }
+    const boat = new THREE.Group(); boat.position.set(1.9, -0.2, 6); g.add(boat);
+    box(1.0, 0.5, 2.6, toon(0xe8e2d4), 0, 0, 0, boat); box(1.05, 0.12, 2.65, toon(0x3a6ea8), 0, 0.2, 0, boat);
+  }
+  // waterfall off the rim
+  if (ISL.fall != null) {
+    const i = ISL.fall, x = cellX(i), z = cellZ(i), y = topY(i);
+    const a = Math.atan2(cellZ(i), cellX(i));
+    const f = new THREE.Mesh(new THREE.BoxGeometry(2.6, 46, 0.9), new THREE.MeshBasicMaterial({ color: 0xa8dcff }));
+    f.position.set(x + Math.cos(a) * 1.6, y - 23, z + Math.sin(a) * 1.6); f.rotation.y = -a + Math.PI / 2; world.add(f);
+  }
+}
+
+/* ───────── sky dressing: clouds below the rim, birds ───────── */
+const clouds = new THREE.Group(); scene.add(clouds);
+{
+  const R = mulberry(77), geo = new THREE.IcosahedronGeometry(1, 0);
+  const n = COARSE ? 60 : 120, im = new THREE.InstancedMesh(geo, toon(0xffffff, { emissive: 0x7a6a6a }), n); im.frustumCulled = false;
+  let k = 0;
+  for (let c = 0; c < n / 6; c++) {
+    const a = R() * TAU, rr = 100 + R() * 190, y = -34 - R() * 56;
+    const cx = Math.cos(a) * rr * 1.15, cz = Math.sin(a) * rr * 0.9, col = new THREE.Color(R() < 0.5 ? 0xfff2e6 : 0xffe6d6);
+    for (let j = 0; j < 6 && k < n; j++, k++) {
+      const s = 4 + R() * 6; _p.set(cx + (R() - 0.5) * 22, y + (R() - 0.5) * 3, cz + (R() - 0.5) * 14); _s.set(s * 1.5, s * 0.45, s);
+      _q.setFromAxisAngle(UP, R() * 3); _m.compose(_p, _q, _s); im.setMatrixAt(k, _m); im.setColorAt(k, col);
+    }
+  }
+  clouds.add(im);
+}
+const birds = [];
+{
+  const mat = toon(0x2b2b30);
+  for (let k = 0; k < 12; k++) {
+    const g = new THREE.Group(), body = box(0.5, 0.3, 1.0, mat, 0, 0, 0, g);
+    const wl = new THREE.Group(), wr = new THREE.Group(); g.add(wl, wr);
+    box(1.4, 0.08, 0.5, mat, -0.7, 0, 0, wl); box(1.4, 0.08, 0.5, mat, 0.7, 0, 0, wr);
+    body.castShadow = false; g.traverse(o => { if (o.isMesh) o.castShadow = false; });
+    scene.add(g);
+    birds.push({ g, wl, wr, a: Math.random() * TAU, r: 30 + Math.random() * 60, y: 28 + Math.random() * 14, sp: 0.12 + Math.random() * 0.08, ph: Math.random() * 10, cx: (Math.random() - 0.5) * 80, cz: (Math.random() - 0.5) * 60, flock: k % 3 });
+  }
+}
+
+/* ───────── particles ───────── */
+// flames: unlit voxel blocks rebuilt each frame from the burning cells
+const MAXF = COARSE ? 700 : 1600;
+const flames = new THREE.InstancedMesh(tBox(1, 1, 1, 0, 0.5, 0), new THREE.MeshBasicMaterial({ color: 0xffffff }), MAXF);
+flames.frustumCulled = false; flames.count = 0; scene.add(flames);
+for (let k = 0; k < MAXF; k++) flames.setColorAt(k, _col.setRGB(1, 0.5, 0.1));
+const FL_COL = [lin(0xffe070), lin(0xff9424), lin(0xe8461a), lin(0xffc040)];
+// smoke + steam puffs
+const MAXS = COARSE ? 420 : 950;
+const puffs = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), toon(0xffffff, { emissive: 0x241e1c }), MAXS);
+puffs.frustumCulled = false; puffs.count = 0; puffs.castShadow = true; scene.add(puffs);
+puffs.setColorAt(0, _col.setRGB(1, 1, 1));
+const PF = { n: 0, x: new Float32Array(MAXS), y: new Float32Array(MAXS), z: new Float32Array(MAXS), vx: new Float32Array(MAXS), vy: new Float32Array(MAXS), vz: new Float32Array(MAXS),
+  age: new Float32Array(MAXS), life: new Float32Array(MAXS), s0: new Float32Array(MAXS), s1: new Float32Array(MAXS), kind: new Uint8Array(MAXS), rot: new Float32Array(MAXS) };
+function addPuff(x, y, z, kind, s0, s1, life, vy) {
+  if (PF.n >= MAXS) return; const k = PF.n++;
+  PF.x[k] = x; PF.y[k] = y; PF.z[k] = z; PF.vx[k] = (Math.random() - 0.5) * 0.6; PF.vy[k] = vy; PF.vz[k] = (Math.random() - 0.5) * 0.6;
+  PF.age[k] = 0; PF.life[k] = life; PF.s0[k] = s0; PF.s1[k] = s1; PF.kind[k] = kind; PF.rot[k] = Math.random() * TAU;
+}
+// points: embers, spray, splash (fx) and the falling water (drops)
+function makePoints(n, size, colorful) {
+  const g = new THREE.BufferGeometry(); const pos = new Float32Array(n * 3); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  let col = null; if (colorful) { col = new Float32Array(n * 3); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
+  g.setDrawRange(0, 0);
+  const m = new THREE.Points(g, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: colorful, color: colorful ? 0xffffff : 0x9ad8ff, fog: false }));
+  m.frustumCulled = false; scene.add(m);
+  return { m, g, pos, col, n: 0, max: n, vel: new Float32Array(n * 3), age: new Float32Array(n), life: new Float32Array(n), kind: new Uint8Array(n), base: new Float32Array(n * 3) };
+}
+const FX = makePoints(COARSE ? 700 : 1600, 2, true);
+// falling water: each drop is a bright head plus a velocity streak, so the curtain reads as a fast sheet
+const MAXD = COARSE ? 500 : 1000, G_WATER = 38;
+const DR = { n: 0, max: MAXD, pos: new Float32Array(MAXD * 3), vel: new Float32Array(MAXD * 3), seg: new Float32Array(MAXD * 6), col: new Float32Array(MAXD * 6) };
+{
+  DR.g = new THREE.BufferGeometry(); DR.g.setAttribute('position', new THREE.BufferAttribute(DR.seg, 3)); DR.g.setAttribute('color', new THREE.BufferAttribute(DR.col, 3)); DR.g.setDrawRange(0, 0);
+  DR.lines = new THREE.LineSegments(DR.g, new THREE.LineBasicMaterial({ vertexColors: true, fog: false }));
+  DR.hg = new THREE.BufferGeometry(); DR.hg.setAttribute('position', new THREE.BufferAttribute(DR.pos, 3)); DR.hg.setDrawRange(0, 0);
+  DR.heads = new THREE.Points(DR.hg, new THREE.PointsMaterial({ size: 3, sizeAttenuation: false, color: 0xc8eeff, fog: false }));
+  DR.lines.frustumCulled = DR.heads.frustumCulled = false; scene.add(DR.lines, DR.heads);
+}
+const C_DROP0 = lin(0xd8f4ff), C_DROP1 = lin(0x3f8fd0);
+function addFx(x, y, z, vx, vy, vz, life, kind, c) {
+  if (FX.n >= FX.max) return; const k = FX.n++;
+  FX.pos[k * 3] = x; FX.pos[k * 3 + 1] = y; FX.pos[k * 3 + 2] = z; FX.vel[k * 3] = vx; FX.vel[k * 3 + 1] = vy; FX.vel[k * 3 + 2] = vz;
+  FX.age[k] = 0; FX.life[k] = life; FX.kind[k] = kind; FX.base[k * 3] = c[0]; FX.base[k * 3 + 1] = c[1]; FX.base[k * 3 + 2] = c[2];
+}
+function addDrop(x, y, z, vx, vy, vz) {
+  if (DR.n >= DR.max) return; const k = DR.n++;
+  DR.pos[k * 3] = x; DR.pos[k * 3 + 1] = y; DR.pos[k * 3 + 2] = z; DR.vel[k * 3] = vx; DR.vel[k * 3 + 1] = vy; DR.vel[k * 3 + 2] = vz;
+}
+const C_EMBER = lin(0xffa030), C_SPRAY = lin(0xdff4ff), C_SPLASH = lin(0x9fd8ff);
+// lightning bolt
+const boltGeo = new THREE.BufferGeometry(); boltGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(26 * 3), 3));
+const bolt = new THREE.Line(boltGeo, new THREE.LineBasicMaterial({ color: 0xfffbe6, fog: false })); bolt.visible = false; bolt.frustumCulled = false; scene.add(bolt);
+// assist target marker
+const marker = new THREE.Group(); scene.add(marker); marker.visible = false;
+{ const m = toon(0xffd23a); box(0.25, 3, 0.25, m, 0, 1.5, 0, marker); for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; box(0.7, 0.15, 0.25, m, Math.cos(a) * 1.6, 0.1, Math.sin(a) * 1.6, marker).rotation.y = -a + Math.PI / 2; } }
+
+/* ───────── helicopters + buckets (the player and any wingmen share this code) ───────── */
+function makeHeli(mainHex, trimHex, scale) {
+  const heliG = new THREE.Group(); scene.add(heliG);
+  const rotor = new THREE.Group(), tailRotor = new THREE.Group();
+  const red = toon(mainHex), white = toon(trimHex), dark = toon(0x2b2f36), glass = toon(0x9fd6ee, { emissive: 0x1a3442 }), yellow = toon(0xffc23a);
+  const body = new THREE.Group(); heliG.add(body); heliG.userData.body = body;
+  box(2.4, 2.1, 3.6, red, 0, 2.0, 0.2, body);
+  box(2.46, 0.38, 3.66, white, 0, 1.55, 0.2, body);
+  box(2.1, 1.5, 1.5, glass, 0, 2.05, -2.15, body);
+  box(2.1, 0.75, 1.5, red, 0, 0.98, -2.1, body);
+  box(1.7, 0.8, 2.3, red, 0, 3.4, 0.6, body);
+  box(0.9, 0.45, 0.9, dark, 0, 3.3, 1.9, body);
+  box(0.3, 0.6, 0.3, dark, 0, 4.0, 0.2, body);
+  box(0.65, 0.65, 5.2, red, 0, 2.5, 4.4, body);
+  box(0.22, 1.9, 1.1, red, 0, 3.3, 6.7, body);
+  box(2.3, 0.15, 0.7, white, 0, 2.55, 6.1, body);
+  box(0.3, 0.3, 0.3, yellow, 0, 4.35, 6.7, body);
+  box(0.9, 0.5, 0.06, white, 1.22, 2.25, 0.8, body).rotation.y = Math.PI / 2;
+  for (const sx of [-1.25, 1.25]) { box(0.25, 0.2, 4.8, dark, sx, 0.1, -0.1, body); box(0.18, 0.95, 0.18, dark, sx * 0.9, 0.55, -1.2, body); box(0.18, 0.95, 0.18, dark, sx * 0.9, 0.55, 1.1, body); }
+  box(0.4, 0.4, 0.4, dark, 0, 0.75, 0.2, body);
+  rotor.position.set(0, 4.35, 0.2); body.add(rotor);
+  box(0.6, 0.3, 0.6, dark, 0, 0, 0, rotor);
+  const bl = toon(0x2f333a);
+  box(10.5, 0.09, 0.5, bl, 0, 0.12, 0, rotor); box(0.5, 0.09, 10.5, bl, 0, 0.12, 0, rotor);
+  box(10.5, 0.1, 0.12, yellow, 0, 0.14, 0, rotor).scale.set(0.12, 1, 1);
+  tailRotor.position.set(0.25, 3.3, 6.95); body.add(tailRotor);
+  box(0.06, 2.0, 0.25, bl, 0, 0, 0, tailRotor); box(0.06, 0.25, 2.0, bl, 0, 0, 0, tailRotor);
+  heliG.scale.setScalar(scale);
+  return { G: heliG, rotor, tail: tailRotor };
+}
+function makeBucket(shellHex) {
+  const bucketG = new THREE.Group(); scene.add(bucketG);
+  const bucketWater = new THREE.Mesh(new THREE.CircleGeometry(0.82, 10), toon(0x3f8fd0));
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.7, 1.35, 10, 1, true), toon(shellHex, { side: THREE.DoubleSide }));
+  shell.position.y = -0.95; shell.castShadow = true; bucketG.add(shell);
+  const bot = new THREE.Mesh(new THREE.CircleGeometry(0.7, 10), toon(0xc85a14)); bot.rotation.x = Math.PI / 2; bot.position.y = -1.62; bucketG.add(bot);
+  box(1.95, 0.12, 0.12, toon(0xf2efe6), 0, -0.36, 0, bucketG).scale.set(1, 1, 1);
+  const strap = toon(0x2b2f36);
+  for (let k = 0; k < 3; k++) { const a = k / 3 * TAU; const s = box(0.06, 0.75, 0.06, strap, Math.cos(a) * 0.45, -0.05, Math.sin(a) * 0.45, bucketG); s.rotation.set(Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9); }
+  bucketWater.rotation.x = -Math.PI / 2; bucketWater.position.y = -1.5; bucketG.add(bucketWater);
+  return { g: bucketG, water: bucketWater };
+}
+function makeRope() {
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12 * 3), 3));
+  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x24262a })); line.frustumCulled = false; scene.add(line);
+  return { geo, line };
+}
+function makeCraft(mainHex, trimHex, scale, bucketHex) {
+  return {
+    m: makeHeli(mainHex, trimHex, scale), bk: makeBucket(bucketHex), rp: makeRope(),
+    h: { p: new THREE.Vector3(), v: new THREE.Vector3(), yaw: 0, pitch: 0, roll: 0, yawRate: 0, ty: 0, manualTY: 0, spin: 0,
+      b: new THREE.Vector3(), bv: new THREE.Vector3(), water: 0, dropping: false, inWater: false, anchor: new THREE.Vector3() },
+    ai: { phase: 'idle', target: null, aim: null, dip: -1, pickT: 0, relT: -1, err: [0, 0], loiterA: 0, attackT: 0, alt: 0, seed: 0 },
+  };
+}
+let ROPE = 6.5, MAXS_H = 20, AI_SPEED = 15.5;
+const PLAYER = makeCraft(0xd8352a, 0xf2efe6, 1, 0xe8581a);
+// the flight / bucket / autopilot code works on "the current helicopter"; use() points it at a craft
+let heli, ai, heliG, rotor, tailRotor, bucketG, bucketWater, ropeGeo;
+function use(c) { heli = c.h; ai = c.ai; heliG = c.m.G; rotor = c.m.rotor; tailRotor = c.m.tail; bucketG = c.bk.g; bucketWater = c.bk.water; ropeGeo = c.rp.geo; }
+use(PLAYER);
+const WING = [], CRAFTS = [PLAYER];
+const WING_LOOK = [[0xf2b21c, 0x2b2f36, 0x2b2f36], [0xf4f0e6, 0xd8352a, 0xd8352a], [0x2f7fd0, 0xf2efe6, 0xf2b21c]];
+function resetCraft(c, k) {
+  const pad = ISL.pad || { x: 0, z: 0 }, a = k * 2.1 + 0.7, h = c.h;
+  const x = pad.x + Math.cos(a) * 14, z = pad.z + Math.sin(a) * 14;
+  h.p.set(x, topAround(x, z, 2) + 14, z); h.v.set(0, 0, 0); h.yaw = Math.random() * TAU; h.pitch = h.roll = h.yawRate = 0;
+  h.water = 0; h.dropping = false; h.inWater = false; h.spin = 1; h.ty = h.manualTY = h.p.y;
+  h.b.set(x, h.p.y - ROPE, z); h.bv.set(0, 0, 0);
+  Object.assign(c.ai, { phase: 'idle', target: null, aim: null, dip: -1, pickT: 0, relT: -1, attackT: 0, loiterA: a, alt: 3.5 * (k + 1), seed: 17 + k * 31 });
+}
+function setWingmen(n) {
+  n = clamp(Math.round(n), 0, 3);
+  while (WING.length < n) {
+    const k = WING.length, L = WING_LOOK[k], c = makeCraft(L[0], L[1], 0.8, L[2]);
+    if (ISL.pad) resetCraft(c, k);
+    c.bk.g.scale.set(Math.sqrt(CFG.bucket), 1, Math.sqrt(CFG.bucket));
+    WING.push(c);
+  }
+  while (WING.length > n) { const c = WING.pop(); scene.remove(c.m.G, c.bk.g, c.rp.line); }
+  CRAFTS.length = 0; CRAFTS.push(PLAYER, ...WING);
+  document.querySelectorAll('[data-wing]').forEach(e => e.setAttribute('aria-pressed', String(+e.dataset.wing === n)));
+}
+
+/* ───────── game state ───────── */
+const DIFF = {
+  calm: { ws: [2.2, 3.8], strikes: 3, first: 3, gap: 30, ramp: 0.88, gloom: 0 },
+  windy: { ws: [6.0, 8.5], strikes: 5, first: 3, gap: 22, ramp: 0.86, gloom: 0.08 },
+  storm: { ws: [10, 13.5], strikes: 8, first: 2.5, gap: 15, ramp: 0.85, gloom: 0.28 },
+};
+const game = { state: 'play', t: 0, diff: 'windy', strikesLeft: 0, nextStrike: 0, gap: 20, drops: 0, endT: 0, round: 0, autopilot: true, apLock: false, apBlend: 1, paused: false, attract: true,
+  housesTotal: 0, housesLost: 0, forestSaved: 1, result: '', endShown: false };
+const wind = { dir: 0, speed: 5, baseDir: 0, baseSpeed: 5, locked: false, ph: [0, 0, 0, 0] };
+let simNow = 0, lastInput = -1e9, fireAcc = 0;
+const TICK = 1 / 12;
+const burnList = [];
+let clusters = [], burnCount = 0, smokeAmt = 0, flash = 0, boltT = 0, hissAmt = 0, fireNear = 0;
+const assist = { active: false, x: 0, z: 0, fill: false };
+
+function newRound(seed, diff) {
+  if (diff) game.diff = diff;
+  seed = seed ?? (Math.random() * 1e9) | 0;
+  RG = mulberry(seed ^ 0x5bd1e995);
+  disposeWorld();
+  generate(seed);
+  FUEL.fill(0); HEAT.fill(0); WET.fill(0); AGE.fill(0); ST.fill(0); EVER.fill(0); LOST.fill(0);
+  for (let i = 0; i < NC; i++) if (PROP[TYP[i]]) FUEL[i] = 1;
+  buildTerrain(); buildFlora(); buildStructures();
+  recolorAll();
+  const D = DIFF[game.diff];
+  wind.baseDir = RG() * TAU; wind.baseSpeed = lerp(D.ws[0], D.ws[1], RG()); wind.locked = false; wind.ph = [RG() * 9, RG() * 9, RG() * 9, RG() * 9];
+  wind.dir = wind.baseDir; wind.speed = wind.baseSpeed;
+  game.state = 'play'; game.result = ''; game.hadFire = false; game.t = 0; game.drops = 0; rain.t = 0; game.strikesLeft = D.strikes; game.nextStrike = D.first + RG() * 2; game.gap = D.gap; game.endShown = false; game.round++;
+  game.housesTotal = ISL.buildings.length; game.housesLost = 0; game.forestSaved = 1;
+  PF.n = 0; FX.n = 0; DR.n = 0; flames.count = 0; puffs.count = 0; burnList.length = 0; clusters = []; burnCount = 0;
+  const pad = ISL.pad || { x: 0, z: 0 };
+  heli.p.set(pad.x, 2 * LV, pad.z); heli.v.set(0, 0, 0); heli.yaw = RG() * TAU; heli.pitch = heli.roll = 0; heli.water = 0; heli.dropping = false;
+  heli.ty = heli.manualTY = 2 * LV + 16; heli.spin = 0.25;
+  heli.b.set(pad.x + 2.5, 2 * LV + 1.62, pad.z + 1.5); heli.bv.set(0, 0, 0);
+  ai.phase = 'idle'; ai.target = null; ai.aim = null; ai.dip = -1; ai.relT = -1; ai.loiterA = RG() * TAU;
+  game.wingDrops = 0;
+  if (CFG.wingAuto) setWingmen(game.diff === 'storm' ? 1 : 0);
+  WING.forEach((c, k) => resetCraft(c, k));
+  assist.active = false; marker.visible = false;
+  $('end').classList.remove('show');
+  if (game.autopilot && game.attract) { setCam(2, false); CAM.cut = true; director.t = 6 + Math.random() * 4; }
+  hudT = 0;
+}
+
+/* ───────── ground colours ───────── */
+let tactical = false;
+function cellRGB(i, out) {
+  let r = BR[i], g = BG[i], b = BB[i];
+  const st = ST[i];
+  if (st === 1) { r = C_FIRE1[0]; g = C_FIRE1[1]; b = C_FIRE1[2]; }
+  else if (st === 2) {
+    const a = AGE[i], p = regrowP(i), j = 0.85 + hash1(i * 5.1) * 0.3, ash = hash1(i * 2.7) < 0.35 ? C_ASH2 : C_ASH;
+    r = ash[0] * j; g = ash[1] * j; b = ash[2] * j;
+    if (a < 4) { const k = 1 - a / 4; r = lerp(r, C_GLOW[0], k); g = lerp(g, C_GLOW[1], k); b = lerp(b, C_GLOW[2], k); }
+    if (p > 0) { const k1 = Math.min(1, p * 1.6); r = lerp(r, C_REG[0], k1); g = lerp(g, C_REG[1], k1); b = lerp(b, C_REG[2], k1); if (p > 0.6) { const k2 = (p - 0.6) / 0.4; r = lerp(r, BR[i], k2); g = lerp(g, BG[i], k2); b = lerp(b, BB[i], k2); } }
+  } else if (EVER[i] && FUEL[i] < 1) { const k = clamp((1 - FUEL[i]) * 1.3, 0, 0.85); r = lerp(r, C_ASH2[0], k); g = lerp(g, C_ASH2[1], k); b = lerp(b, C_ASH2[2], k); }
+  if (WET[i] > 0 && TYP[i] !== T_WATER) { const k = Math.min(1, WET[i] / 8); r *= 1 - 0.38 * k; g *= 1 - 0.3 * k; b = b * (1 - 0.12 * k) + 0.035 * k; }
+  if (tactical || CFG.tint) {
+    const t = TYP[i];
+    if (st === 1) { r = 1; g = 0.12; b = 0.03; }
+    else if (st === 0 && PROP[t] && HEAT[i] > 0.05) { const k = clamp(HEAT[i] / PROP[t].thr, 0, 1) * 0.9; r = lerp(r, 1, k); g = lerp(g, 0.45, k); b = lerp(b, 0.05, k); }
+    if (WET[i] > 0 && t !== T_WATER) { const k = Math.min(1, WET[i] / 10) * 0.7; r = lerp(r, 0.1, k); g = lerp(g, 0.35, k); b = lerp(b, 0.9, k); }
+    if (t === T_HOUSE) { r = 0.9; g = 0.85; b = 0.75; if (st === 2) { r = g = b = 0.05; } }
+    const chk = ((i % GW) + Math.floor(i / GW)) & 1 ? 1.06 : 0.94; r *= chk; g *= chk; b *= chk;
+  }
+  out[0] = r; out[1] = g; out[2] = b;
+}
+const _rgb = [0, 0, 0];
+function writeCell(i, r, g, b) { const v = TOPV[i] * 3; if (v < 0) return; for (let k = 0; k < 4; k++) { topCol[v + k * 3] = r; topCol[v + k * 3 + 1] = g; topCol[v + k * 3 + 2] = b; } }
+function recolorAll() { for (let i = 0; i < NC; i++) if (TYP[i]) { cellRGB(i, _rgb); writeCell(i, _rgb[0], _rgb[1], _rgb[2]); } if (tops) tops.geometry.attributes.color.needsUpdate = true; }
+
+/* ───────── fire simulation (fixed tick) ───────── */
+const NB = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 0.7], [-1, 1, 0.7], [1, -1, 0.7], [-1, -1, 0.7]];
+const SPREAD = 0.55;
+function ignite(i) {
+  if (i < 0 || !PROP[TYP[i]] || ST[i] !== 0 || FUEL[i] <= 0.02 || WET[i] > 0) return false;
+  ST[i] = 1; EVER[i] = 1; HEAT[i] = 0; game.hadFire = true; return true;
+}
+function fireTick(dt) {
+  const ws = wind.speed, wx = Math.cos(wind.dir), wz = Math.sin(wind.dir);
+  const decay = Math.exp(-dt * 0.25), dry = dt * (1 + ws * 0.06);
+  burnList.length = 0;
+  let spotted = 0;
+  for (let i = 0; i < NC; i++) {
+    const st = ST[i];
+    if (WET[i] > 0) { WET[i] = Math.max(0, WET[i] - dry); HEAT[i] = 0; }
+    else if (HEAT[i] > 0) { HEAT[i] *= decay; if (HEAT[i] < 0.01) HEAT[i] = 0; }
+    if (st === 2) {
+      AGE[i] += dt * (AGE[i] < ASH ? 1 : CFG.regrow);
+      if (AGE[i] > ASH + REGROW) { ST[i] = 0; FUEL[i] = TYP[i] === T_HOUSE ? 0 : 0.6; }
+      continue;
+    }
+    if (st !== 1) continue;
+    const t = TYP[i], P = PROP[t];
+    FUEL[i] -= P.rate * dt * (1 + ws * 0.02);
+    if (FUEL[i] <= 0) { FUEL[i] = 0; ST[i] = 2; AGE[i] = 0; LOST[i] = 1; continue; }
+    burnList.push(i);
+    const f = FUEL[i], inten = P.I * (f > 0.15 ? 1 : 0.35 + f / 0.15 * 0.65);
+    const gx = i % GW, gz = (i - gx) / GW, hi = HGT[i];
+    for (const [dx, dz, w] of NB) {
+      const nx = gx + dx, nz = gz + dz; if (nx < 0 || nz < 0 || nx >= GW || nz >= GH) continue;
+      const j = nz * GW + nx; if (ST[j] !== 0 || !PROP[TYP[j]] || WET[j] > 0 || FUEL[j] <= 0.02) continue;
+      const dot = (dx * wx + dz * wz) * (w < 1 ? 0.7071 : 1);
+      const wf = Math.exp(dot * ws * 0.11), sf = clamp(1 + 0.28 * (HGT[j] - hi), 0.45, 2.4);
+      HEAT[j] += inten * SPREAD * CFG.spread * dt * w * wf * sf;
+    }
+    if (CFG.embers && ws > 5 && (t === T_FOREST || t === T_DRY || t === T_HOUSE) && spotted < 1 && RG() < 0.0006 * (ws - 5) * dt * (t === T_DRY ? 1.6 : 1)) {
+      const d = 3 + RG() * (ws - 4) * 0.9, lat = (RG() - 0.5) * 0.6 * d;
+      const tx = Math.round(gx + wx * d - wz * lat), tz = Math.round(gz + wz * d + wx * lat);
+      if (tx >= 0 && tz >= 0 && tx < GW && tz < GH) {
+        const j = tz * GW + tx; spotted++;
+        spawnEmberArc(i, j);
+        if (RG() < 0.4) ignite(j);
+      }
+    }
+  }
+  for (let i = 0; i < NC; i++) if (ST[i] === 0 && HEAT[i] > 0) { const P = PROP[TYP[i]]; if (P && HEAT[i] >= P.thr && WET[i] <= 0 && FUEL[i] > 0.02) ignite(i); }
+  burnCount = burnList.length;
+  // buildings
+  for (const b of ISL.buildings) {
+    if (b.lost) continue;
+    let s = 0; for (const i of b.cells) s += FUEL[i];
+    if (s / b.cells.length < 0.55) loseBuilding(b);
+  }
+  computeClusters();
+  // forest saved
+  let lostF = 0;
+  for (let i = 0; i < NC; i++) { const t = TYP[i]; if ((t === T_FOREST || t === T_DRY) && (LOST[i] || (EVER[i] && FUEL[i] < 0.6))) lostF++; }
+  game.forestSaved = 1 - lostF / ISL.forestTotal;
+  recolorAll();
+  updateTreesTick();
+  updateTuftsTick();
+}
+function computeClusters() {
+  MARK.fill(0);
+  const out = []; const stack = [];
+  const alive = ISL.buildings.filter(b => !b.lost);
+  for (const s of burnList) {
+    if (MARK[s]) continue;
+    const c = { n: 0, sx: 0, sz: 0, cells: [], threat: 1e9, near: -1 };
+    MARK[s] = 1; stack.push(s);
+    while (stack.length) {
+      const i = stack.pop(); c.n++; c.cells.push(i);
+      const x = cellX(i), z = cellZ(i); c.sx += x; c.sz += z;
+      for (const bd of alive) { const d = Math.hypot(bd.x - x, bd.z - z); if (d < c.threat) { c.threat = d; c.near = i; } }
+      const gx = i % GW, gz = (i - gx) / GW;
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = gx + dx, nz = gz + dz; if (nx < 0 || nz < 0 || nx >= GW || nz >= GH) continue;
+        const j = nz * GW + nx; if (!MARK[j] && ST[j] === 1) { MARK[j] = 1; stack.push(j); }
+      }
+    }
+    c.x = c.sx / c.n; c.z = c.sz / c.n; out.push(c);
+  }
+  clusters = out;
+}
+function loseBuilding(b) {
+  b.lost = true; game.housesLost++;
+  for (const [m] of b.mats) m.material = CHAR;
+  if (b.roof) { b.roof.scale.y = 0.35; b.roof.position.y *= 0.8; b.roof.rotation.z = (Math.random() - 0.5) * 0.4; }
+  toast(b.kind === 'church' ? 'The church is lost' : b.kind === 'station' ? 'Fire station lost' : 'House lost', true);
+  sfxThud();
+}
+function soakCell(i, amt) {
+  if (i < 0 || TYP[i] === T_VOID || TYP[i] === T_WATER) return 0;
+  WET[i] = Math.max(WET[i], amt); HEAT[i] = 0;
+  if (ST[i] === 1) { if (FUEL[i] > 0.06) ST[i] = 0; else { ST[i] = 2; AGE[i] = 0; FUEL[i] = 0; LOST[i] = 1; } return 1; }
+  return 0;
+}
+function soakAt(x, z, rad) {
+  const gx = Math.floor((x + HX) / CELL), gz = Math.floor((z + HZ) / CELL), R = Math.ceil(rad);
+  let out = 0;
+  for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+    if (dx * dx + dz * dz > rad * rad) continue;
+    const nx = gx + dx, nz = gz + dz; if (nx < 0 || nz < 0 || nx >= GW || nz >= GH) continue;
+    const i = nz * GW + nx; const was = ST[i] === 1;
+    if (soakCell(i, 30)) { out++; if (was) { for (let k = 0; k < 2; k++) addPuff(cellX(i) + (Math.random() - 0.5) * 1.5, topY(i) + 0.5, cellZ(i) + (Math.random() - 0.5) * 1.5, 1, 0.8, 2.6 + Math.random(), 1.8 + Math.random() * 1.2, 4 + Math.random() * 2); } }
+    cellRGB(i, _rgb); writeCell(i, _rgb[0], _rgb[1], _rgb[2]);
+  }
+  if (out) hissAmt += out;
+  return out;
+}
+function igniteCell(i) {
+  if (i < 0 || i >= NC) return false;
+  if (!PROP[TYP[i]]) { // find nearest fuel
+    const gx = i % GW, gz = Math.floor(i / GW);
+    for (let r = 1; r <= 3 && !PROP[TYP[i]]; r++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) { const j = (gz + dz) * GW + gx + dx; if (j >= 0 && j < NC && PROP[TYP[j]] && ST[j] === 0) { i = j; dz = dx = r + 1; } }
+  }
+  WET[i] = 0; const ok = ignite(i);
+  const gx = i % GW, gz = Math.floor(i / GW);
+  for (const [dx, dz] of NB) { const nx = gx + dx, nz = gz + dz; if (nx >= 0 && nz >= 0 && nx < GW && nz < GH) { const j = nz * GW + nx; if (PROP[TYP[j]]) HEAT[j] += PROP[TYP[j]].thr * 0.6; } }
+  return ok;
+}
+
+/* ───────── lightning ───────── */
+function pickStrikeCell() {
+  const V = ISL.village, minD = game.strikesLeft >= DIFF[game.diff].strikes - 1 ? 26 : 12;
+  for (let tries = 0; tries < 400; tries++) {
+    const i = Math.floor(RG() * NC), t = TYP[i];
+    if (t !== T_FOREST && t !== T_DRY && t !== T_GRASS) continue;
+    if (ST[i] !== 0 || WET[i] > 0 || RIM[i] > 0.9) continue;
+    const d = Math.hypot(i % GW - V[0], Math.floor(i / GW) - V[1]); if (d < minD) continue;
+    if (t === T_GRASS && RG() < 0.5) continue;
+    return i;
+  }
+  return -1;
+}
+function strike(i) {
+  if (i < 0) return;
+  igniteCell(i);
+  const x = cellX(i), z = cellZ(i), y = TOPH[i];
+  const p = boltGeo.attributes.position.array; let bx = x + (Math.random() - 0.5) * 30, bz = z + (Math.random() - 0.5) * 30;
+  for (let k = 0; k < 26; k++) { const t = k / 25, y2 = lerp(150, y, t); const j = (1 - t) * 4; p[k * 3] = lerp(bx, x, t) + (k && k < 25 ? (Math.random() - 0.5) * j : 0); p[k * 3 + 1] = y2; p[k * 3 + 2] = lerp(bz, z, t) + (k && k < 25 ? (Math.random() - 0.5) * j : 0); }
+  boltGeo.attributes.position.needsUpdate = true; bolt.visible = true; boltT = 0.42; flash = 1;
+  for (let k = 0; k < 18; k++) addFx(x, y, z, (Math.random() - 0.5) * 8, 4 + Math.random() * 6, (Math.random() - 0.5) * 8, 0.8 + Math.random(), 0, C_EMBER);
+  const d = camera.position.distanceTo(_p.set(x, y, z)); sfxThunder(Math.min(2.2, d / 400));
+  toast('Lightning strike', true);
+}
+function updateLightning(dt) {
+  if (boltT > 0) { boltT -= dt; bolt.visible = boltT > 0 && (Math.floor(boltT * 30) % 3 !== 0); }
+  flash = Math.max(0, flash - dt * 3.5);
+  if (game.state !== "play" || game.strikesLeft <= 0 || !CFG.lightning) return;
+  game.nextStrike -= dt;
+  if (game.nextStrike <= 0) {
+    strike(pickStrikeCell()); game.strikesLeft--;
+    game.gap *= DIFF[game.diff].ramp; game.nextStrike = game.gap * (0.8 + RG() * 0.4);
+  }
+}
+
+/* ───────── wind ───────── */
+function updateWind(dt) {
+  if (wind.locked) return;
+  const t = game.t, p = wind.ph;
+  wind.baseDir += (RG() - 0.5) * dt * 0.02;
+  wind.dir = wind.baseDir + 0.55 * Math.sin(t * 0.017 + p[0]) + 0.25 * Math.sin(t * 0.043 + p[1]);
+  wind.speed = Math.max(0.5, wind.baseSpeed * (1 + 0.16 * Math.sin(t * 0.06 + p[2]) + 0.07 * Math.sin(t * 0.23 + p[3])));
+}
+
+/* ───────── visuals per frame ───────── */
+function updateTreesTick() {
+  for (let k = 0; k < nTrees; k++) {
+    const i = treeCell[k], st = ST[i];
+    if (st === 1) continue;                       // flickered per frame
+    let key;
+    if (st === 2) key = 1000 + Math.floor(AGE[i] * 3);
+    else if (EVER[i]) key = 2000 + Math.floor(FUEL[i] * 20);
+    else key = WET[i] > 0 ? 1 : 0;
+    const d = treeData[k]; if (d.key === key) continue; d.key = key;
+    if (st === 2) {
+      const p = regrowP(i); const fs = p <= 0 ? 0 : 0.12 + 0.88 * p;
+      setTree(k, fs, [lerp(C_SAP[0], d.fc[0], p), lerp(C_SAP[1], d.fc[1], p), lerp(C_SAP[2], d.fc[2], p)], 1 - p);
+    } else if (EVER[i]) {
+      const f = FUEL[i]; setTree(k, 0.45 + 0.55 * f, [lerp(C_SCORCH[0], d.fc[0], f), lerp(C_SCORCH[1], d.fc[1], f), lerp(C_SCORCH[2], d.fc[2], f)], 0.7 * (1 - f));
+    } else { const w = key === 1 ? 0.82 : 1; setTree(k, 1, [d.fc[0] * w, d.fc[1] * w, d.fc[2] * w], 0); }
+  }
+  trunks.instanceMatrix.needsUpdate = foliage.instanceMatrix.needsUpdate = true;
+  if (trunks.instanceColor) trunks.instanceColor.needsUpdate = true; if (foliage.instanceColor) foliage.instanceColor.needsUpdate = true;
+}
+function updateTuftsTick() {
+  for (let k = 0; k < nTufts; k++) {
+    const i = tuftCell[k], st = ST[i], d = tuftData[k];
+    let key = st === 1 ? 1 : st === 2 ? 1000 + Math.floor(AGE[i] * 2) : (EVER[i] ? 3 : 0);
+    if (d.key === key && !d.bend) continue; d.key = key;
+    if (st === 1) { d.vis = 0.6; setTuft(k, 0.6, C_FIRE1); }
+    else if (st === 2) { const p = regrowP(i); d.vis = p; setTuft(k, p, [lerp(C_REG[0], d.c[0], p), lerp(C_REG[1], d.c[1], p), lerp(C_REG[2], d.c[2], p)]); }
+    else if (EVER[i]) { d.vis = 0.5 + 0.5 * FUEL[i]; setTuft(k, d.vis, C_SCORCH); }
+    else { d.vis = 1; setTuft(k, 1, d.c); }
+  }
+  tufts.instanceMatrix.needsUpdate = true; if (tufts.instanceColor) tufts.instanceColor.needsUpdate = true;
+}
+const bentSet = new Set();
+function rotorWash(dt) {
+  const h = heli.p.y - groundAt(heli.p.x, heli.p.z);
+  const str = clamp(1 - (h - 4) / 16, 0, 1) * heli.spin;
+  if (str > 0.02) {
+    const R = 9 * (0.5 + str * 0.5), gx = Math.floor((heli.p.x + HX) / CELL), gz = Math.floor((heli.p.z + HZ) / CELL), rc = Math.ceil(R / CELL);
+    for (let dz = -rc; dz <= rc; dz++) for (let dx = -rc; dx <= rc; dx++) {
+      const nx = gx + dx, nz = gz + dz; if (nx < 0 || nz < 0 || nx >= GW || nz >= GH) continue;
+      const i = nz * GW + nx, k = TUFT[i]; if (k < 0) continue;
+      const d = tuftData[k], ex = d.x - heli.p.x, ez = d.z - heli.p.z, dist = Math.hypot(ex, ez); if (dist > R) continue;
+      const b = str * (1 - dist / R) * (0.75 + 0.25 * Math.sin(simNow * 22 + k));
+      if (b > d.bend) { d.bend = b; d.ba = Math.atan2(ez, ex); }
+      bentSet.add(k);
+    }
+    // spray on the water under the rotor
+    const gi = w2c(heli.p.x, heli.p.z);
+    if (gi >= 0 && TYP[gi] === T_WATER && Math.random() < str * 1.5) for (let k = 0; k < 3; k++) { const a = Math.random() * TAU, rr = 3 + Math.random() * 4; addFx(heli.p.x + Math.cos(a) * rr, topY(gi) + 0.2, heli.p.z + Math.sin(a) * rr, Math.cos(a) * 5, 1 + Math.random() * 2, Math.sin(a) * 5, 0.6, 1, C_SPRAY); }
+  }
+  if (!bentSet.size) return;
+  for (const k of bentSet) {
+    const d = tuftData[k]; d.bend *= Math.exp(-dt * 2.2);
+    if (d.bend < 0.02) { d.bend = 0; bentSet.delete(k); }
+    setTuft(k, d.vis, null);
+  }
+  tufts.instanceMatrix.needsUpdate = true;
+}
+function updateBurningVisuals(dt) {
+  const t = simNow;
+  let nf = 0;
+  const stride = burnList.length * 2.6 > MAXF ? Math.ceil(burnList.length * 2.6 / MAXF) : 1;
+  const ws = wind.speed, wx = Math.cos(wind.dir), wz = Math.sin(wind.dir);
+  const lean = Math.min(0.5, ws * 0.04);
+  const smokeK = Math.min(1, 150 / Math.max(1, burnList.length)) * (tactical ? 0.5 : 1);
+  for (let n = 0; n < burnList.length; n++) {
+    const i = burnList[n], ty = TYP[i], f = FUEL[i], h = hash1(i * 1.37);
+    // ground flicker
+    const fl = 0.5 + 0.5 * Math.sin(t * 11 + h * 40);
+    writeCell(i, lerp(C_FIRE1[0], C_FIRE2[0], fl), lerp(C_FIRE1[1], C_FIRE2[1], fl), lerp(C_FIRE1[2], C_FIRE2[2], fl));
+    const x = cellX(i), z = cellZ(i), y0 = topY(i);
+    // trees flare
+    const k = TREE[i];
+    if (k >= 0) {
+      const d = treeData[k], fl2 = 0.5 + 0.5 * Math.sin(t * 17 + k * 1.7);
+      if (f > 0.5) setTree(k, 1.03 + 0.09 * fl2, [lerp(C_FLARE1[0], C_FLARE2[0], fl2), lerp(C_FLARE1[1], C_FLARE2[1], fl2), lerp(C_FLARE1[2], C_FLARE2[2], fl2)], 0.4);
+      else setTree(k, 0.3 + f * 1.3, [lerp(C_EMB1[0], C_EMB2[0], fl2), lerp(C_EMB1[1], C_EMB2[1], fl2), lerp(C_EMB1[2], C_EMB2[2], fl2)], 1 - f);
+      d.key = -1;
+    }
+    // flame blocks
+    if (n % stride === 0) {
+      const tall = ty === T_FOREST || ty === T_DRY ? (k >= 0 ? treeData[k].h : 3) : ty === T_HOUSE ? 4 : 1.2;
+      const cnt = ty === T_GRASS || ty === T_LAWN ? 2 : 3;
+      const life = ty === T_HOUSE ? clamp(f * 1.4, 0.3, 1) : clamp(f * 1.6 + 0.25, 0.3, 1);
+      for (let q = 0; q < cnt && nf < MAXF; q++) {
+        const ph = t * (9 + q * 3) + h * 50 + q * 2.1, fl3 = 0.5 + 0.5 * Math.sin(ph);
+        const hh = (ty === T_GRASS || ty === T_LAWN ? 0.7 + 0.8 * fl3 : (1.2 + 1.8 * fl3)) * life;
+        const by = y0 + (q === 0 ? 0 : tall * (0.25 + 0.5 * hash1(i * 3 + q)) * life);
+        const ox = (hash1(i * 7 + q) - 0.5) * 1.5, oz = (hash1(i * 11 + q) - 0.5) * 1.5;
+        const w = (ty === T_GRASS ? 0.55 : 0.85) + 0.35 * (1 - fl3);
+        _p.set(x + ox + wx * hh * lean, by, z + oz + wz * hh * lean); _q.setFromAxisAngle(UP, h * 6 + q); _s.set(w, hh, w);
+        _m.compose(_p, _q, _s); flames.setMatrixAt(nf, _m);
+        const c = FL_COL[(q + Math.floor(fl3 * 2.2)) % 4]; flames.setColorAt(nf, _col.setRGB(c[0], c[1], c[2])); nf++;
+      }
+    }
+    // smoke and embers
+    const P = PROP[ty];
+    if (CFG.smoke && Math.random() < P.smoke * 0.7 * dt * smokeK) addPuff(x + (Math.random() - 0.5) * 2, y0 + 4 + Math.random() * 3, z + (Math.random() - 0.5) * 2, 0, 0.6 + Math.random() * 0.5, 2.2 + Math.random() * 1.8 * P.smoke, 6 + Math.random() * 3, 4.5 + Math.random() * 2.5);
+    if ((ty === T_FOREST || ty === T_DRY || ty === T_HOUSE) && Math.random() < dt * (0.4 + ws * 0.06) * smokeK) addFx(x, y0 + 2 + Math.random() * 3, z, wx * ws * 0.6 + (Math.random() - 0.5) * 2, 3 + Math.random() * 4, wz * ws * 0.6 + (Math.random() - 0.5) * 2, 1.2 + Math.random() * 1.8, 0, C_EMBER);
+  }
+  flames.count = nf;
+  flames.instanceMatrix.needsUpdate = true; if (flames.instanceColor) flames.instanceColor.needsUpdate = true;
+  if (nTrees) { trunks.instanceMatrix.needsUpdate = foliage.instanceMatrix.needsUpdate = true; if (foliage.instanceColor) foliage.instanceColor.needsUpdate = true; if (trunks.instanceColor) trunks.instanceColor.needsUpdate = true; }
+  if (tops) tops.geometry.attributes.color.needsUpdate = true;
+  // burning buildings: glowing windows
+  for (const b of ISL.buildings) {
+    let burn = 0; for (const i of b.cells) if (ST[i] === 1) burn = 1;
+    if (b.win) b.win.emissive.setHex(burn ? (Math.sin(t * 13 + b.x) > 0 ? 0xff5a10 : 0xc83a08) : LIGHT.win);
+  }
+}
+function spawnEmberArc(i, j) {
+  const x = cellX(i), z = cellZ(i), y = TOPH[i], x2 = cellX(j), z2 = cellZ(j), T = 1.6;
+  addFx(x, y, z, (x2 - x) / T, 9, (z2 - z) / T, T, 2, C_EMBER);
+}
+const C_SMOKE0 = lin(0x3c3532), C_SMOKE1 = lin(0xa39a94), C_STEAM0 = lin(0xf6f8fa), C_STEAM1 = lin(0xd2d9df);
+function updatePuffs(dt) {
+  const ws = wind.speed, wx = Math.cos(wind.dir) * ws, wz = Math.sin(wind.dir) * ws;
+  let k = 0;
+  while (k < PF.n) {
+    PF.age[k] += dt;
+    if (PF.age[k] >= PF.life[k]) { const l = --PF.n; for (const a of ['x', 'y', 'z', 'vx', 'vy', 'vz', 'age', 'life', 's0', 's1', 'kind', 'rot']) PF[a][k] = PF[a][l]; continue; }
+    const u = PF.age[k] / PF.life[k], up = 0.35 + u * 0.9;
+    PF.x[k] += (PF.vx[k] + wx * up * 0.55) * dt; PF.z[k] += (PF.vz[k] + wz * up * 0.55) * dt; PF.y[k] += PF.vy[k] * dt * (1 - u * 0.5);
+    let s = lerp(PF.s0[k], PF.s1[k], Math.sqrt(u)); if (u > 0.82) s *= 1 - (u - 0.82) / 0.18 * 0.85; if (tactical) s *= 0.55;
+    if (camera === pcam) {
+      // keep the line of sight from the camera to the helicopter (or bucket) clear of smoke
+      const C = pcam.position, T = CAM.mode === 4 ? heli.b : heli.p;
+      const ax = T.x - C.x, ay = T.y - C.y, az = T.z - C.z, px = PF.x[k] - C.x, py = PF.y[k] - C.y, pz = PF.z[k] - C.z;
+      const tt = clamp((px * ax + py * ay + pz * az) / Math.max(1e-3, ax * ax + ay * ay + az * az), 0, 1.15);
+      const ex = px - ax * tt, ey = py - ay * tt, ez = pz - az * tt, dl = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      s *= sstep(s * 0.5, s * 1.4 + 3, dl) * sstep(4, 12, Math.sqrt(px * px + py * py + pz * pz));
+    }
+    _p.set(PF.x[k], PF.y[k], PF.z[k]); _q.setFromAxisAngle(UP, PF.rot[k] + u); _s.set(s, s * 0.85, s); _m.compose(_p, _q, _s); puffs.setMatrixAt(k, _m);
+    const a = PF.kind[k] ? C_STEAM0 : C_SMOKE0, b = PF.kind[k] ? C_STEAM1 : C_SMOKE1, uu = PF.kind[k] ? u : Math.min(1, u * 1.3);
+    puffs.setColorAt(k, _col.setRGB(lerp(a[0], b[0], uu), lerp(a[1], b[1], uu), lerp(a[2], b[2], uu)));
+    k++;
+  }
+  puffs.count = PF.n; puffs.instanceMatrix.needsUpdate = true; if (puffs.instanceColor) puffs.instanceColor.needsUpdate = true;
+}
+function updateFx(dt) {
+  const ws = wind.speed, wx = Math.cos(wind.dir) * ws, wz = Math.sin(wind.dir) * ws;
+  let k = 0;
+  while (k < FX.n) {
+    FX.age[k] += dt;
+    if (FX.age[k] >= FX.life[k]) {
+      const l = --FX.n; for (let a = 0; a < 3; a++) { FX.pos[k * 3 + a] = FX.pos[l * 3 + a]; FX.vel[k * 3 + a] = FX.vel[l * 3 + a]; FX.base[k * 3 + a] = FX.base[l * 3 + a]; }
+      FX.age[k] = FX.age[l]; FX.life[k] = FX.life[l]; FX.kind[k] = FX.kind[l]; continue;
+    }
+    const kd = FX.kind[k], o = k * 3;
+    if (kd === 0) { FX.vel[o] += (wx * 0.6 - FX.vel[o]) * dt * 0.8; FX.vel[o + 2] += (wz * 0.6 - FX.vel[o + 2]) * dt * 0.8; FX.vel[o + 1] += (1.2 - FX.vel[o + 1]) * dt * 0.6; }
+    else if (kd === 1) { FX.vel[o + 1] -= 16 * dt; FX.vel[o] *= 1 - dt * 1.5; FX.vel[o + 2] *= 1 - dt * 1.5; }
+    else { FX.vel[o + 1] -= 11 * dt; }
+    FX.pos[o] += FX.vel[o] * dt; FX.pos[o + 1] += FX.vel[o + 1] * dt; FX.pos[o + 2] += FX.vel[o + 2] * dt;
+    const u = FX.age[k] / FX.life[k];
+    if (kd === 1) { const gy = groundAt(FX.pos[o], FX.pos[o + 2]); if (FX.pos[o + 1] < gy) { FX.pos[o + 1] = gy; FX.vel[o + 1] = 0; } }
+    const fl = kd === 1 ? 1 : (0.7 + 0.3 * Math.sin(FX.age[k] * 30 + k)) * (1 - u * 0.6);
+    FX.col[o] = FX.base[o] * fl; FX.col[o + 1] = FX.base[o + 1] * fl * (kd === 1 ? 1 : 1 - u * 0.5); FX.col[o + 2] = FX.base[o + 2] * fl;
+    k++;
+  }
+  FX.g.setDrawRange(0, FX.n); FX.g.attributes.position.needsUpdate = true; FX.g.attributes.color.needsUpdate = true;
+}
+function updateDrops(dt) {
+  let k = 0;
+  while (k < DR.n) {
+    const o = k * 3;
+    DR.vel[o + 1] -= G_WATER * dt; DR.vel[o] *= 1 - dt * 0.25; DR.vel[o + 2] *= 1 - dt * 0.25;
+    DR.pos[o] += DR.vel[o] * dt; DR.pos[o + 1] += DR.vel[o + 1] * dt; DR.pos[o + 2] += DR.vel[o + 2] * dt;
+    const x = DR.pos[o], z = DR.pos[o + 2], gy = groundAt(x, z);
+    if (DR.pos[o + 1] <= gy || DR.pos[o + 1] < -80) {
+      if (gy > -50) {
+        soakAt(x, z, 1.7 * Math.sqrt(CFG.bucket));
+        const vx = DR.vel[o], vz = DR.vel[o + 2], hit = Math.min(1.6, -DR.vel[o + 1] / 18);
+        for (let q = 0; q < 2; q++) { const a = Math.random() * TAU, sp = (4 + Math.random() * 6) * hit; addFx(x, gy + 0.2, z, Math.cos(a) * sp + vx * 0.3, (2.5 + Math.random() * 3.5) * hit, Math.sin(a) * sp + vz * 0.3, 0.45 + Math.random() * 0.35, 1, C_SPLASH); }
+        if (Math.random() < 0.12) addPuff(x, gy + 0.6, z, 1, 0.6, 1.8, 1.2, 1.2);
+      }
+      const l = --DR.n; for (let a = 0; a < 3; a++) { DR.pos[o + a] = DR.pos[l * 3 + a]; DR.vel[o + a] = DR.vel[l * 3 + a]; }
+      continue;
+    }
+    // streak trails behind the head along the velocity
+    const s = o * 2, L = 0.055;
+    DR.seg[s] = x; DR.seg[s + 1] = DR.pos[o + 1]; DR.seg[s + 2] = z;
+    DR.seg[s + 3] = x - DR.vel[o] * L; DR.seg[s + 4] = DR.pos[o + 1] - DR.vel[o + 1] * L; DR.seg[s + 5] = z - DR.vel[o + 2] * L;
+    DR.col[s] = C_DROP0[0]; DR.col[s + 1] = C_DROP0[1]; DR.col[s + 2] = C_DROP0[2]; DR.col[s + 3] = C_DROP1[0]; DR.col[s + 4] = C_DROP1[1]; DR.col[s + 5] = C_DROP1[2];
+    k++;
+  }
+  DR.g.setDrawRange(0, DR.n * 2); DR.g.attributes.position.needsUpdate = true; DR.g.attributes.color.needsUpdate = true;
+  DR.hg.setDrawRange(0, DR.n); DR.hg.attributes.position.needsUpdate = true;
+}
+function updateBirds(dt) {
+  const calm = wind.speed < 7 && burnCount < 150;
+  for (const b of birds) {
+    b.a += dt * b.sp * (calm ? 1 : 1.6);
+    const tx = b.cx + Math.cos(b.a) * b.r, tz = b.cz + Math.sin(b.a) * b.r * 0.7, ty = b.y + Math.sin(b.a * 3 + b.ph) * 2 + (calm ? 0 : 14);
+    const nx = b.cx + Math.cos(b.a + 0.05) * b.r, nz = b.cz + Math.sin(b.a + 0.05) * b.r * 0.7;
+    b.g.position.set(tx, lerp(b.g.position.y || ty, ty, Math.min(1, dt)), tz); b.g.rotation.y = Math.atan2(nx - tx, nz - tz);
+    const fl = Math.sin(simNow * 9 + b.ph) * 0.7; b.wl.rotation.z = fl; b.wr.rotation.z = -fl;
+  }
+}
+
+/* ───────── flight + bucket ───────── */
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _fwd = new THREE.Vector3(), _rt = new THREE.Vector3();
+const cmd = { vx: 0, vz: 0, ty: 0, yawTo: null }, mcmd = { vx: 0, vz: 0, ty: 0, yawTo: null }, acmd = { vx: 0, vz: 0, ty: 0, yawTo: null };
+const keys = {};
+const k = c => keys[c] ? 1 : 0;
+function topAround(x, z, rad) {
+  const gx = Math.floor((x + HX) / CELL), gz = Math.floor((z + HZ) / CELL), R = Math.ceil(rad / CELL);
+  let m = -60;
+  for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) { const nx = gx + dx, nz = gz + dz; if (nx < 0 || nz < 0 || nx >= GW || nz >= GH) continue; const i = nz * GW + nx; if (TYP[i] && TOPH[i] > m) m = TOPH[i]; }
+  return m;
+}
+function moveBasis() {
+  // screen-relative forward on the ground plane (chase = the helicopter's nose)
+  if (CAM.mode === 1) { _fwd.set(-Math.sin(heli.yaw), 0, -Math.cos(heli.yaw)); }
+  else {
+    camera.getWorldDirection(_fwd); _fwd.y = 0;
+    if (_fwd.lengthSq() < 0.04) { _fwd.set(0, 1, 0).applyQuaternion(camera.quaternion); _fwd.y = 0; }
+    _fwd.normalize();
+  }
+  _rt.set(-_fwd.z, 0, _fwd.x);
+}
+function manualCommand(dt, out) {
+  const f = (k('KeyW') || k('ArrowUp')) - (k('KeyS') || k('ArrowDown'));
+  const s = (k('KeyD') || k('ArrowRight')) - (k('KeyA') || k('ArrowLeft'));
+  moveBasis();
+  let ix = _fwd.x * f + _rt.x * s, iz = _fwd.z * f + _rt.z * s; const m = Math.hypot(ix, iz); if (m > 1) { ix /= m; iz /= m; }
+  out.vx = ix * MAXS_H; out.vz = iz * MAXS_H;
+  heli.manualTY += ((k('Space')) - (k('ShiftLeft') || k('ShiftRight'))) * 11 * dt;
+  out.ty = heli.manualTY; out.yawTo = null;
+  if (assist.active) assistCommand(dt, out);
+}
+function flyTo(out, x, z, speed) {
+  const dx = x - heli.p.x, dz = z - heli.p.z, d = Math.hypot(dx, dz) || 1;
+  const sp = Math.min(speed, d * 0.75);
+  out.vx = dx / d * sp; out.vz = dz / d * sp; return d;
+}
+function cruiseY(x, z, extra) { const ahead = topAround(x + heli.v.x * 1.2, z + heli.v.z * 1.2, 8); return Math.max(topAround(x, z, 6), ahead) + ROPE + extra + (ai.alt || 0); }
+function chooseDip(tx, tz) {
+  let best = -1, bs = 1e9;
+  for (const i of ISL.dips) { const x = cellX(i), z = cellZ(i); const s = Math.hypot(x - heli.p.x, z - heli.p.z) + 0.6 * Math.hypot(x - tx, z - tz) + hash1(i * 3.3 + ai.seed) * (ai.seed ? 30 : 0); if (s < bs) { bs = s; best = i; } }
+  return best;
+}
+function fillAt(out, dt, i, speed) {
+  const x = cellX(i), z = cellZ(i);
+  const d = flyTo(out, x, z, speed);
+  out.ty = d < 7 ? ISL.lakeY + ROPE - 0.2 : cruiseY(heli.p.x, heli.p.z, 4);
+  if (d < 7 && heli.p.y > out.ty + 4) { out.vx *= 0.3; out.vz *= 0.3; }
+  return d;
+}
+function assistCommand(dt, out) {
+  const i = w2c(assist.x, assist.z);
+  if (assist.fill && i >= 0) {
+    fillAt(out, dt, i, MAXS_H * 0.85);
+    if (heli.water >= 0.995) { assist.active = false; marker.visible = false; heli.manualTY = heli.p.y + 6; toast('Bucket full'); }
+  } else {
+    const d = flyTo(out, assist.x, assist.z, MAXS_H * 0.85);
+    out.ty = Math.max(heli.manualTY, cruiseY(heli.p.x, heli.p.z, 3));
+    if (d < 2.5) { assist.active = false; marker.visible = false; heli.manualTY = heli.p.y; }
+  }
+  heli.manualTY = assist.active ? out.ty : heli.manualTY;
+}
+function bucketOverFire() {
+  const gx = Math.floor((heli.b.x + HX) / CELL), gz = Math.floor((heli.b.z + HZ) / CELL);
+  for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) { const nx = gx + dx, nz = gz + dz; if (nx < 0 || nz < 0 || nx >= GW || nz >= GH) continue; if (ST[nz * GW + nx] === 1) return true; }
+  return false;
+}
+function pickTarget() {
+  let best = null, bs = -1;
+  // spread the crew out: fires another helicopter is already on (or the fire you're flying at) score lower
+  const others = [];
+  for (const c of CRAFTS) {
+    if (c.ai === ai) continue;
+    if (c === PLAYER && !game.autopilot) others.push([c.h.p.x, c.h.p.z]);
+    else if (c.ai.phase === 'attack' && c.ai.aim) others.push([c.ai.aim.x, c.ai.aim.z]);
+  }
+  for (const c of clusters) {
+    const dh = Math.hypot(c.x - heli.p.x, c.z - heli.p.z);
+    let s = Math.sqrt(c.n) * (1 + 70 / (c.threat + 8)) / (1 + dh / 160) * (0.7 + 0.6 * RG());
+    for (const o of others) if (Math.hypot(o[0] - c.x, o[1] - c.z) < 26 + Math.sqrt(c.n) * 1.5) s *= 0.3;
+    if (s > bs) { bs = s; best = c; }
+  }
+  if (!best) return null;
+  let aimI = best.near;
+  if (best.threat > 70 || aimI < 0) {
+    const wx = Math.cos(wind.dir), wz = Math.sin(wind.dir); let m = -1e9;
+    for (const i of best.cells) { const s = (cellX(i) - best.x) * wx + (cellZ(i) - best.z) * wz - Math.hypot(cellX(i) - heli.p.x, cellZ(i) - heli.p.z) * 0.15; if (s > m) { m = s; aimI = i; } }
+  }
+  const ahead = wind.speed > 3 ? 1.6 * CELL : 0, er = (0.6 + RG() * 2.2) * CELL, ea = RG() * TAU;
+  ai.err = [Math.cos(ea) * er, Math.sin(ea) * er];
+  ai.aim = { x: cellX(aimI) + Math.cos(wind.dir) * ahead + ai.err[0], z: cellZ(aimI) + Math.sin(wind.dir) * ahead + ai.err[1], i: aimI };
+  ai.aimT = 0;
+  return best;
+}
+function aiCommand(dt, out) {
+  out.yawTo = null;
+  if (heli.dropping) { out.vx = heli.v.x * 0.92; out.vz = heli.v.z * 0.92; out.ty = heli.ty; return; }
+  if (game.t < 1.2) { out.vx = out.vz = 0; out.ty = heli.p.y + 1; return; }
+  if (heli.water < 0.12 && ai.phase !== 'fill') { ai.phase = 'fill'; ai.dip = -1; }
+  if (ai.phase === 'fill') {
+    if (ai.dip < 0) { const c = clusters[0]; ai.dip = chooseDip(c ? c.x : heli.p.x, c ? c.z : heli.p.z); }
+    if (ai.dip < 0) { out.vx = out.vz = 0; out.ty = heli.p.y; return; }
+    fillAt(out, dt, ai.dip, AI_SPEED);
+    if (heli.water >= 0.99) { ai.phase = 'attack'; ai.target = null; ai.pickT = 0; ai.attackT = 0; }
+    return;
+  }
+  if (!clusters.length) {
+    if (heli.water < 0.98) { ai.phase = 'fill'; ai.dip = -1; return aiCommand(dt, out); }
+    ai.phase = 'idle';
+    const V = ISL.village, vx = (V[0] + 0.5) * CELL - HX, vz = (V[1] + 0.5) * CELL - HZ;
+    ai.loiterA += dt * 0.12;
+    flyTo(out, vx + Math.cos(ai.loiterA) * 46, vz + Math.sin(ai.loiterA) * 34, 9);
+    out.ty = cruiseY(heli.p.x, heli.p.z, 8); return;
+  }
+  ai.phase = 'attack';
+  ai.pickT -= dt; ai.attackT += dt; ai.aimT = (ai.aimT || 0) + dt;
+  if (!ai.target || ai.pickT <= 0 || !ai.aim || (ST[ai.aim.i] !== 1 && ai.aimT > 1.5)) { const prev = ai.aim; ai.target = pickTarget(); ai.pickT = 3 + RG() * 3; if (prev && ai.aim && Math.hypot(prev.x - ai.aim.x, prev.z - ai.aim.z) < 10) ai.aim = { ...ai.aim, x: lerp(prev.x, ai.aim.x, 0.3), z: lerp(prev.z, ai.aim.z, 0.3) }; }
+  if (!ai.aim) return;
+  const A = ai.aim, hb = Math.max(0.5, heli.b.y - 1.6 - groundAt(heli.b.x, heli.b.z)), v0 = 8 * CFG.flow + 2, tf = (-v0 + Math.sqrt(v0 * v0 + 2 * G_WATER * hb)) / G_WATER + 0.12 / CFG.flow;
+  const ix = heli.b.x + heli.bv.x * tf * 0.9, iz = heli.b.z + heli.bv.z * tf * 0.9;
+  const ex = A.x - ix, ez = A.z - iz, err = Math.hypot(ex, ez), dA = Math.hypot(A.x - heli.p.x, A.z - heli.p.z);
+  if (dA > 34) { flyTo(out, A.x, A.z, AI_SPEED); out.ty = cruiseY(heli.p.x, heli.p.z, 6); }
+  else {
+    const sp = Math.min(8.5, err * 0.9 + 1.2);
+    out.vx = ex / (err || 1) * sp; out.vz = ez / (err || 1) * sp;
+    out.ty = Math.max(topAround(A.x, A.z, 5), topAround(heli.p.x, heli.p.z, 5)) + ROPE + 3.2;
+  }
+  if (err < 2.8 + (ai.attackT > 9 ? 3 : 0) && dA < 34 && hb < 18) { if (ai.relT < 0) ai.relT = RG() * 0.35; }
+  if (ai.attackT > 14 && ai.relT < 0 && bucketOverFire()) ai.relT = 0.01;
+  if (ai.relT >= 0) { ai.relT -= dt; if (ai.relT <= 0) { ai.relT = -1; startDrop(); ai.pickT = 0; ai.attackT = 0; } }
+}
+function startDrop() {
+  if (heli.water < 0.04 || heli.dropping) return;
+  heli.dropping = true; if (heli === PLAYER.h) { game.drops++; sfxWhoosh(); } else game.wingDrops = (game.wingDrops || 0) + 1;
+}
+function setAutopilot(on, quiet) {
+  if (on === game.autopilot) return;
+  game.autopilot = on;
+  if (on) { game.apBlend = 0; ai.phase = heli.water > 0.5 ? 'attack' : 'fill'; ai.dip = -1; ai.target = null; assist.active = false; marker.visible = false; if (!quiet) toast('Autopilot on'); }
+  else { heli.manualTY = heli.p.y; if (!quiet) toast(game.apLock ? 'Autopilot off · press P to resume' : 'You have the controls · autopilot returns after 8 s idle'); }
+  $('apBtn').textContent = 'Autopilot: ' + (on ? 'on' : 'off'); $('apBtn').setAttribute('aria-pressed', String(on));
+}
+function takeControl() { lastInput = simNow; if (game.autopilot) setAutopilot(false); }
+function flight(dt) {
+  const isP = heli === PLAYER.h, manual = isP && !game.autopilot;
+  if (isP) {
+    const anyKey = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight'].some(c => keys[c]) || (CAM.mode === 1 && (keys.KeyQ || keys.KeyE));
+    if (anyKey || assist.active) lastInput = simNow;
+    if (!game.autopilot && !game.apLock && simNow - lastInput > 8) { setAutopilot(true, true); toast('Autopilot resumed'); if (game.state === 'end') game.endT = 0; }
+  }
+  if (!isP) aiCommand(dt, cmd);
+  else if (game.autopilot) {
+    game.apBlend = Math.min(1, game.apBlend + dt / 1.6);
+    aiCommand(dt, acmd);
+    const b = game.apBlend * game.apBlend * (3 - 2 * game.apBlend);
+    mcmd.vx = heli.v.x; mcmd.vz = heli.v.z; mcmd.ty = heli.p.y;
+    cmd.vx = lerp(mcmd.vx, acmd.vx, b); cmd.vz = lerp(mcmd.vz, acmd.vz, b); cmd.ty = lerp(mcmd.ty, acmd.ty, b);
+    heli.manualTY = heli.p.y;
+  } else {
+    manualCommand(dt, cmd);
+  }
+  // keep the crew from flying through each other (you steer yourself when you have the controls)
+  if (!manual) for (const o of CRAFTS) {
+    if (o.h === heli) continue;
+    const dx = heli.p.x - o.h.p.x, dz = heli.p.z - o.h.p.z, d = Math.hypot(dx, dz);
+    if (d < 14 && d > 0.01 && Math.abs(heli.p.y - o.h.p.y) < 9) { cmd.vx += dx / d * (14 - d) * 0.9; cmd.vz += dz / d * (14 - d) * 0.9; }
+  }
+  // altitude limits
+  const floor = topAround(heli.p.x, heli.p.z, 1.2) + 1.2;
+  heli.ty = clamp(cmd.ty, floor, 70);
+  if (manual && !assist.active) heli.manualTY = clamp(heli.manualTY, floor, 70);
+  heli.spin = Math.min(1, heli.spin + dt * 0.6);
+  const lift = heli.spin > 0.7 ? 1 : 0;
+  // horizontal
+  const ax = (cmd.vx - heli.v.x) * (1 - Math.exp(-dt * 1.5)), az = (cmd.vz - heli.v.z) * (1 - Math.exp(-dt * 1.5));
+  heli.v.x += ax * lift; heli.v.z += az * lift;
+  const vy = clamp((heli.ty - heli.p.y) * 1.6, -8, 9) * lift;
+  heli.v.y += (vy - heli.v.y) * (1 - Math.exp(-dt * 3));
+  heli.p.addScaledVector(heli.v, dt);
+  if (heli.p.y < floor - 0.2 && lift) { heli.p.y = lerp(heli.p.y, floor, Math.min(1, dt * 6)); }
+  const lim = HX + 30; heli.p.x = clamp(heli.p.x, -lim, lim); heli.p.z = clamp(heli.p.z, -HZ - 30, HZ + 30);
+  // yaw
+  const sp = Math.hypot(heli.v.x, heli.v.z);
+  let yr = 0;
+  if (CAM.mode === 1 && manual && !assist.active) { yr = ((keys.KeyQ ? 1 : 0) - (keys.KeyE ? 1 : 0)) * 1.7; heli.yaw += yr * dt; }
+  else if (sp > 2.5) { const want = Math.atan2(-heli.v.x, -heli.v.z); const ny = angLerp(heli.yaw, want, 1 - Math.exp(-dt * 1.8)); yr = (ny - heli.yaw) / Math.max(dt, 1e-4); heli.yaw = ny; }
+  heli.yawRate = lerp(heli.yawRate, yr, Math.min(1, dt * 5));
+  // tilt into motion
+  const fx = -Math.sin(heli.yaw), fz = -Math.cos(heli.yaw), rx = Math.cos(heli.yaw), rz = -Math.sin(heli.yaw);
+  const accF = (ax * fx + az * fz) / Math.max(dt, 1e-4), accR = (ax * rx + az * rz) / Math.max(dt, 1e-4);
+  const vF = heli.v.x * fx + heli.v.z * fz, vR = heli.v.x * rx + heli.v.z * rz;
+  const tp = clamp(-vF * 0.012 - accF * 0.03, -0.38, 0.38), tr = clamp(-vR * 0.012 - accR * 0.03 - heli.yawRate * 0.12, -0.42, 0.42);
+  heli.pitch = lerp(heli.pitch, tp, Math.min(1, dt * 4)); heli.roll = lerp(heli.roll, tr, Math.min(1, dt * 4));
+  heliG.position.copy(heli.p); heliG.rotation.set(0, heli.yaw, 0); heliG.userData.body.rotation.set(-heli.pitch, 0, heli.roll);
+  rotor.rotation.y += dt * 24 * heli.spin; tailRotor.rotation.x += dt * 40 * heli.spin;
+  // drop stream
+  if (heli.dropping) {
+    const f = CFG.flow, amt = Math.min(heli.water, dt * 3.2 * f); heli.water -= amt;
+    const n = Math.round(amt * 170 * CFG.bucket + Math.random() * 0.5);
+    for (let q = 0; q < n; q++) {
+      const a = Math.random() * TAU, r = Math.random() * 2.6, t = Math.random() * dt;   // spread spawn over the frame so the sheet has no gaps
+      addDrop(heli.b.x + Math.cos(a) * 0.55, heli.b.y - 1.6 - t * 8 * f, heli.b.z + Math.sin(a) * 0.55, heli.bv.x * 0.9 + Math.cos(a) * r, -(6 + Math.random() * 4) * f - 2, heli.bv.z * 0.9 + Math.sin(a) * r);
+    }
+    if (Math.random() < dt * 30) addFx(heli.b.x, heli.b.y - 1.5, heli.b.z, (Math.random() - 0.5) * 6, -2, (Math.random() - 0.5) * 6, 0.35, 1, C_SPRAY);
+    if (heli.water <= 0.001) { heli.water = 0; heli.dropping = false; }
+  }
+}
+function updateBucket(dt) {
+  heliG.updateMatrixWorld(true);
+  heli.anchor.set(0, 0.7, 0.2); heliG.userData.body.localToWorld(heli.anchor);
+  const b = heli.b, A = heli.anchor, prev = _v2.copy(b);
+  heli.bv.y -= 24 * dt; heli.bv.multiplyScalar(1 - dt * 0.35);
+  b.addScaledVector(heli.bv, dt);
+  const gi = w2c(b.x, b.z), water = gi >= 0 && TYP[gi] === T_WATER, wy = gi >= 0 ? topY(gi) : -60;
+  let inW = false;
+  if (water && b.y - 1.6 < wy) {
+    inW = true; b.y = Math.max(b.y, wy - 1.0 + 1.6);
+    heli.bv.multiplyScalar(1 - Math.min(1, dt * 6));
+    if (b.y - 1.6 < wy - 0.25 && !heli.dropping) heli.water = Math.min(1, heli.water + dt / 1.2 * Math.max(0.7, CFG.flow * 0.75));
+  }
+  const gy = (gi >= 0 && TYP[gi] && !water) ? topY(gi) : -60;
+  if (b.y - 1.62 < gy) { b.y = gy + 1.62; heli.bv.x *= 0.6; heli.bv.z *= 0.6; }
+  _v.subVectors(b, A); const d = _v.length();
+  if (d > ROPE) b.copy(A).addScaledVector(_v, ROPE / d);
+  if (dt > 0) heli.bv.subVectors(b, prev).divideScalar(dt);
+  if (inW && !heli.inWater) { if (heli === PLAYER.h) sfxSplash(); for (let q = 0; q < 26; q++) { const a = Math.random() * TAU, sp = 2 + Math.random() * 4; addFx(b.x, wy + 0.2, b.z, Math.cos(a) * sp, 3 + Math.random() * 5, Math.sin(a) * sp, 0.8 + Math.random() * 0.5, 1, C_SPRAY); } }
+  heli.inWater = inW;
+  // pose: hang along the rope
+  bucketG.position.copy(b);
+  _v.subVectors(A, b).normalize(); _q.setFromUnitVectors(UP, _v); bucketG.quaternion.copy(_q);
+  bucketWater.position.y = lerp(-1.55, -0.45, heli.water); bucketWater.visible = heli.water > 0.02; bucketWater.scale.setScalar(lerp(0.85, 1.12, heli.water));
+  // rope with a little sag when slack
+  const p = ropeGeo.attributes.position.array, slack = Math.max(0, ROPE - d) * 0.5;
+  for (let q = 0; q < 12; q++) { const t = q / 11; p[q * 3] = lerp(A.x, b.x, t); p[q * 3 + 1] = lerp(A.y, b.y, t) - Math.sin(t * Math.PI) * slack; p[q * 3 + 2] = lerp(A.z, b.z, t); }
+  ropeGeo.attributes.position.needsUpdate = true;
+}
+
+/* ───────── cameras ───────── */
+const CAM = { mode: 2, yaw: 0.8, pitch: 0.6, tYaw: 0, bYaw: 0, zoom2: 120, zoom3: 1, chaseD: 1, drag: 0, cut: true };
+const view = { size: 120, pitch: 0.6, yaw: 0.8, t: new THREE.Vector3() };
+const director = { t: 7, manualT: -1e9, was: false };
+const camLook = new THREE.Vector3(), snapT = new THREE.Vector3(), _d = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3();
+const focus = new THREE.Vector3();
+let camFov = 60;
+function setCam(m, manual = true) {
+  if (manual) director.manualT = simNow;
+  if (m !== CAM.mode) CAM.cut = true;
+  CAM.mode = m;
+  document.querySelectorAll('[data-cam]').forEach(e => e.setAttribute('aria-pressed', String(+e.dataset.cam === m)));
+}
+function zoomBy(f) { if (CAM.mode === 2) CAM.zoom2 = clamp(CAM.zoom2 * f, 40, 280); else if (CAM.mode === 3) CAM.zoom3 = clamp(CAM.zoom3 * f, 0.35, 1.4); else if (CAM.mode === 1) CAM.chaseD = clamp(CAM.chaseD * f, 0.6, 2.2); }
+function rotateBy(dir) { if (CAM.mode === 2) { CAM.yaw += dir * Math.PI / 8; CAM.drag = 6; } else if (CAM.mode === 3) CAM.tYaw += dir * Math.PI / 8; else if (CAM.mode === 4) CAM.bYaw += dir * Math.PI / 8; }
+function updateDirector(dt) {
+  const active = CFG.director && game.autopilot && simNow - lastInput > 8 && simNow - director.manualT > 30;
+  if (active && !director.was) { setCam(2, false); director.t = 6 + Math.random() * 4; }
+  director.was = active; game.attract = active;
+  if (!active) return;
+  director.t -= dt;
+  if (director.t <= 0) {
+    const pool = [[1, 1.2], [2, 1.6], [3, 1], [4, 0.9]].filter(p => p[0] !== CAM.mode);
+    let s = pool.reduce((a, p) => a + p[1], 0) * Math.random(), m = pool[0][0];
+    for (const p of pool) { s -= p[1]; if (s <= 0) { m = p[0]; break; } }
+    setCam(m, false); director.t = 6 + Math.random() * 4;
+  }
+}
+function updateCamera(dt) {
+  const cut = CAM.cut; CAM.cut = false;
+  const mode = CAM.mode;
+  tactical = mode === 3;
+  if (mode === 1 || mode === 4) {
+    camera = pcam;
+    let pos, look, fov, k;
+    if (mode === 1) {
+      const fx = -Math.sin(heli.yaw), fz = -Math.cos(heli.yaw), D = 19 * CAM.chaseD;
+      _v.set(heli.p.x - fx * D, heli.p.y + 7.5 * CAM.chaseD, heli.p.z - fz * D);
+      _v.y = Math.max(_v.y, groundAt(_v.x, _v.z) + 2.5);
+      _v2.set(heli.p.x + fx * 10, heli.p.y - 1.5, heli.p.z + fz * 10); fov = 60 + Math.hypot(heli.v.x, heli.v.z) * 0.35; k = 5;
+    } else {
+      const yaw = heli.yaw + CAM.bYaw, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+      _v.set(heli.b.x - fx * 6.5, heli.b.y + 3.2, heli.b.z - fz * 6.5);
+      _v2.set(heli.b.x + fx * 8, heli.b.y - 6.5, heli.b.z + fz * 8); fov = 70; k = 9;
+    }
+    const a = cut ? 1 : 1 - Math.exp(-dt * k);
+    pcam.position.lerp(_v, a); camLook.lerp(_v2, cut ? 1 : 1 - Math.exp(-dt * (k + 3)));
+    pcam.lookAt(camLook);
+    camFov = cut ? fov : camFov + (fov - camFov) * Math.min(1, dt * 3);
+    if (Math.abs(pcam.fov - camFov) > 0.05) { pcam.fov = camFov; pcam.updateProjectionMatrix(); }
+    snapT.copy(camLook);
+  } else {
+    camera = ocam;
+    let tSize, tPitch, tYaw;
+    const aspect = Math.max(1, VW()) / Math.max(1, VH());
+    if (mode === 2) {
+      const c = ai.target && clusters.includes(ai.target) ? ai.target : clusters.reduce((m, c) => (!m || c.n > m.n ? c : m), null);
+      if (c) focus.set(lerp(heli.p.x, c.x, 0.4), heli.p.y * 0.4, lerp(heli.p.z, c.z, 0.4)); else focus.set(heli.p.x, heli.p.y * 0.5, heli.p.z);
+      if (CAM.drag <= 0) CAM.yaw += dt * 0.05;
+      tSize = CAM.zoom2; tPitch = CAM.pitch; tYaw = CAM.yaw;
+    } else {
+      focus.set(0, 2, 0);
+      tSize = Math.max(GH * CELL * 1.1, GW * CELL * 1.06 / aspect) * CAM.zoom3; tPitch = 1.42; tYaw = CAM.tYaw;
+      if (CAM.zoom3 < 0.95) focus.set(heli.p.x * (1 - CAM.zoom3), 2, heli.p.z * (1 - CAM.zoom3));
+    }
+    CAM.drag -= dt;
+    const a = cut ? 1 : 1 - Math.exp(-dt * 4);
+    view.size += (tSize - view.size) * (cut ? 1 : 1 - Math.exp(-dt * 5));
+    view.pitch += (tPitch - view.pitch) * a;
+    view.yaw = cut ? tYaw : angLerp(view.yaw, tYaw, 1 - Math.exp(-dt * 6));
+    if (cut) view.t.copy(focus); else view.t.lerp(focus, 1 - Math.exp(-dt * (mode === 3 ? 3 : 2.2)));
+    const h = view.size;
+    ocam.left = -h * aspect / 2; ocam.right = h * aspect / 2; ocam.top = h / 2; ocam.bottom = -h / 2; ocam.updateProjectionMatrix();
+    const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+    _d.set(Math.sin(view.yaw) * cp, sp, Math.cos(view.yaw) * cp);
+    _r.crossVectors(UP, _d).normalize(); _u.crossVectors(_d, _r);
+    const texel = h / rtH, a1 = view.t.dot(_r), c1 = view.t.dot(_u);
+    snapT.copy(view.t).addScaledVector(_r, Math.round(a1 / texel) * texel - a1).addScaledVector(_u, Math.round(c1 / texel) * texel - c1);
+    ocam.position.copy(snapT).addScaledVector(_d, 850); ocam.up.set(0, 1, 0); ocam.lookAt(snapT);
+  }
+  dome.position.copy(camera.position);
+  sunDisc.visible = camera === pcam; sunDisc.position.copy(camera.position).addScaledVector(SUN_DIR, 1100); sunDisc.lookAt(camera.position);
+}
+function updateSky(dt) {
+  const target = clamp(burnCount / 380, 0, 1) * 0.75 + DIFF[game.diff].gloom;
+  smokeAmt += (target - smokeAmt) * Math.min(1, dt * 0.5);
+  const s = clamp(smokeAmt, 0, 0.85), f = flash;
+  domeMat.color.setRGB(1, 1, 1).lerp(LIGHT.dark, s); if (f > 0) domeMat.color.lerp(_col.setRGB(1.4, 1.4, 1.5), f * 0.6);
+  sun.intensity = LIGHT.sunI * (1 - s * 0.5) + f * 1.5; hemi.intensity = LIGHT.hI * (1 - s * 0.25) + f * 1.2;
+  sun.color.copy(LIGHT.sun).lerp(LIGHT.burn, s * 0.6);
+  scene.fog.color.copy(SKY.hor).lerp(SKY.smoke, s);
+  const iso = camera === ocam;
+  scene.fog.near = iso ? 900 : 160; scene.fog.far = iso ? 1900 : 700 - s * 250;
+  scene.background.copy(scene.fog.color);
+  document.documentElement.style.setProperty('--bg', '#' + scene.background.getHexString());
+}
+function renderFrame() {
+  if (VW() && VH() && (Math.ceil(VW() / opt.ps) !== rtW || Math.ceil(VH() / opt.ps) !== rtH)) resize();
+  if (CFG.raw) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
+  renderer.setRenderTarget(rt); renderer.render(scene, camera); renderer.setRenderTarget(null);
+  const u = postMat.uniforms, isO = camera === ocam;
+  u.ortho.value = isO ? 1 : 0; u.near.value = camera.near; u.far.value = camera.far;
+  u.outline.value = CFG.outline ? 1 : 0; u.dither.value = CFG.dither ? 1 : 0;
+  u.thr.value = isO ? 5.0 / (rtH / view.size) + 0.3 : 1.0;
+  renderer.render(postScene, postCam);
+}
+
+/* ───────── audio (all synthesized) ───────── */
+const snd = { muted: false };
+let AC = null, master = null, noiseBuf = null; const A = {};
+function initAudio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; return; }
+  master = AC.createGain(); master.gain.value = snd.muted ? 0 : 0.6; master.connect(AC.destination);
+  noiseBuf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const loop = (type, f, Q) => { const s = AC.createBufferSource(); s.buffer = noiseBuf; s.loop = true; const fl = AC.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = Q; const g = AC.createGain(); g.gain.value = 0; s.connect(fl); fl.connect(g); g.connect(master); s.start(0, Math.random() * 1.5); return { s, f: fl, g }; };
+  A.thump = loop('lowpass', 150, 0.9); A.chop = loop('bandpass', 750, 1.4); A.roar = loop('lowpass', 420, 0.5); A.crack = loop('bandpass', 2800, 1.2); A.wind = loop('bandpass', 520, 0.6);
+  const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 190; const of = AC.createBiquadFilter(); of.type = 'lowpass'; of.frequency.value = 700; const og = AC.createGain(); og.gain.value = 0; o.connect(of); of.connect(og); og.connect(master); o.start(); A.whine = { o, f: of, g: og };
+  A.nextThump = AC.currentTime + 0.05; A.nextPop = AC.currentTime + 0.2; A.nextBird = AC.currentTime + 2; A.nextHiss = 0;
+  A.lastCam = new THREE.Vector3().copy(camera.position); A.lastHeli = new THREE.Vector3().copy(heli.p);
+}
+function burst({ type = 'lowpass', f = 1000, f2 = 0, Q = 0.7, dur = 0.5, peak = 0.3, at = 0, attack = 0.01 }) {
+  if (!AC || snd.muted) return;
+  const t = AC.currentTime + at, s = AC.createBufferSource(); s.buffer = noiseBuf; s.loop = true;
+  const fl = AC.createBiquadFilter(); fl.type = type; fl.frequency.setValueAtTime(f, t); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + dur); fl.Q.value = Q;
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(fl); fl.connect(g); g.connect(master); s.start(t, Math.random() * 1.2); s.stop(t + dur + 0.05);
+}
+const sfxWhoosh = () => { burst({ f: 2600, f2: 260, Q: 0.6, dur: 1.2, peak: 0.32, attack: 0.08 }); };
+const sfxSplash = () => { burst({ type: 'bandpass', f: 900, f2: 380, Q: 0.8, dur: 0.45, peak: 0.42 }); burst({ f: 220, dur: 0.3, peak: 0.25 }); };
+const sfxThud = () => { burst({ f: 140, f2: 60, dur: 1.4, peak: 0.5, attack: 0.02 }); burst({ type: 'bandpass', f: 1600, dur: 0.6, peak: 0.12 }); };
+function sfxThunder(delay) { burst({ type: 'highpass', f: 1800, dur: 0.25, peak: 0.3, at: delay * 0.3 }); burst({ f: 180, f2: 70, dur: 3.4, peak: 0.75, at: delay, attack: 0.08 }); burst({ f: 90, dur: 2.4, peak: 0.5, at: delay + 0.3, attack: 0.3 }); }
+function chirp(at) {
+  if (!AC || snd.muted) return;
+  const t = AC.currentTime + at, o = AC.createOscillator(), g = AC.createGain(); o.type = 'sine';
+  const f0 = 2600 + Math.random() * 1400; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 1.45, t + 0.05); o.frequency.exponentialRampToValueAtTime(f0 * 0.9, t + 0.11);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.05, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.16);
+}
+function updateAudio(dt) {
+  if (!AC || !master) return;
+  const t = AC.currentTime;
+  master.gain.setTargetAtTime(snd.muted ? 0 : 0.6, t, 0.05);
+  // rotor with a doppler-ish rate from the radial speed between camera and helicopter
+  const camV = _v.subVectors(camera.position, A.lastCam).divideScalar(Math.max(dt, 1e-3)); A.lastCam.copy(camera.position);
+  const rel = _v2.subVectors(heli.p, camera.position), dist = Math.max(1, rel.length()); rel.divideScalar(dist);
+  const vr = (heli.v.x - camV.x) * rel.x + (heli.v.y - camV.y) * rel.y + (heli.v.z - camV.z) * rel.z;
+  const dop = clamp(60 / (60 + vr), 0.72, 1.35), spd = Math.hypot(heli.v.x, heli.v.z);
+  const audDist = camera === ocam ? Math.max(20, view.size * 0.45) : dist;
+  const vol = clamp(30 / (audDist + 6), 0.1, 1) * heli.spin;
+  const rate = (5.4 + spd * 0.075) * dop * (0.5 + heli.spin * 0.5);
+  if (A.nextThump < t) A.nextThump = t;
+  while (A.nextThump < t + 0.12) {
+    const tt = A.nextThump, g = A.thump.g.gain, g2 = A.chop.g.gain;
+    g.setValueAtTime(0.0001, tt); g.linearRampToValueAtTime(0.55 * vol, tt + 0.012); g.exponentialRampToValueAtTime(0.0006, tt + 0.13);
+    g2.setValueAtTime(0.0001, tt); g2.linearRampToValueAtTime(0.13 * vol, tt + 0.008); g2.exponentialRampToValueAtTime(0.0006, tt + 0.07);
+    A.nextThump = tt + 1 / rate;
+  }
+  A.chop.f.frequency.setTargetAtTime(650 * dop + spd * 12, t, 0.1);
+  A.whine.o.frequency.setTargetAtTime((185 + spd * 2.4) * dop, t, 0.1); A.whine.g.gain.setTargetAtTime(0.018 * vol, t, 0.1);
+  // fire near the camera's focus
+  const roar = Math.min(0.32, fireNear * 0.0045);
+  A.roar.g.gain.setTargetAtTime(roar, t, 0.3);
+  const popRate = Math.min(45, fireNear * 0.5);
+  if (A.nextPop < t) A.nextPop = t;
+  while (popRate > 0.3 && A.nextPop < t + 0.1) {
+    const tt = A.nextPop, g = A.crack.g.gain, pk = 0.05 + Math.random() * 0.14;
+    g.setValueAtTime(0.0001, tt); g.linearRampToValueAtTime(pk, tt + 0.003); g.exponentialRampToValueAtTime(0.0001, tt + 0.02 + Math.random() * 0.04);
+    A.nextPop = tt + (-Math.log(1 - Math.random() * 0.999) / popRate) + 0.012;
+  }
+  if (popRate <= 0.3) A.nextPop = t + 0.2;
+  // wind
+  const ws = wind.speed;
+  A.wind.g.gain.setTargetAtTime(0.012 + ws * 0.008 * (0.8 + 0.2 * Math.sin(simNow * 0.7)), t, 0.4);
+  A.wind.f.frequency.setTargetAtTime(380 + ws * 28 + Math.sin(simNow * 0.4) * 80, t, 0.5);
+  // hiss when water lands on fire
+  if (hissAmt > 0 && t > A.nextHiss) { burst({ type: 'highpass', f: 3200, dur: 0.7, peak: Math.min(0.32, 0.04 + hissAmt * 0.012), attack: 0.03 }); hissAmt = 0; A.nextHiss = t + 0.18; }
+  // birds when it's calm
+  if (ws < 5 && burnCount < 25 && t > A.nextBird) { const n = 2 + Math.floor(Math.random() * 3); for (let q = 0; q < n; q++) chirp(q * (0.12 + Math.random() * 0.08)); A.nextBird = t + 2 + Math.random() * 5; }
+}
+
+/* ───────── HUD ───────── */
+let toastTimer = 0;
+function toast(msg, warn = false) {
+  const el = $('toast'); el.textContent = msg; el.classList.toggle('warn', warn); el.classList.add('show'); clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+let hudT = 0, fps = 60, fpsN = 0, fpsT = 0;
+function computeFireNear() {
+  let s = 0; const fx = snapT.x, fz = snapT.z, R = camera === ocam ? Math.max(40, view.size * 0.5) : 60;
+  for (let n = 0; n < burnList.length; n += 2) { const i = burnList[n], dx = cellX(i) - fx, dz = cellZ(i) - fz; s += 2 / (1 + (dx * dx + dz * dz) / (R * R)); }
+  fireNear = s;
+}
+function updateHud(dt) {
+  hudT -= dt; if (hudT > 0) return; hudT = 0.12;
+  computeFireNear();
+  const saved = game.housesTotal - game.housesLost;
+  $('sForest').textContent = Math.round(game.forestSaved * 100) + '%';
+  $('sHouses').textContent = saved + '/' + game.housesTotal;
+  $('sFires').textContent = clusters.length;
+  $('sBolts').textContent = game.strikesLeft;
+  $('stHouses').className = 'stat' + (game.housesLost ? (game.housesLost >= game.housesTotal * 0.35 ? ' bad' : ' warn') : '');
+  $('stFires').className = 'stat' + (clusters.length ? ' warn' : '');
+  $('stForest').className = 'stat' + (game.forestSaved < 0.6 ? ' bad' : game.forestSaved < 0.9 ? ' warn' : '');
+  $('wfill').style.width = (heli.water * 100).toFixed(1) + '%';
+  $('waterTxt').textContent = heli.dropping ? 'Dropping' : heli.inWater && heli.water < 0.99 ? 'Filling ' + Math.round(heli.water * 100) + '%' : heli.water > 0.99 ? (bucketOverFire() ? 'Over fire · F' : 'Full') : heli.water > 0.02 ? Math.round(heli.water * 100) + '%' : 'Empty';
+  // wind arrow in screen space
+  _v.set(heli.p.x, 0, heli.p.z).project(camera); _v2.set(heli.p.x + Math.cos(wind.dir) * 10, 0, heli.p.z + Math.sin(wind.dir) * 10).project(camera);
+  let ang = Math.atan2(_v2.x - _v.x, _v2.y - _v.y) * 180 / Math.PI; if (!isFinite(ang)) ang = 0;
+  $('windArrow').style.transform = 'rotate(' + ang.toFixed(1) + 'deg)';
+  $('windSpd').textContent = Math.round(wind.speed * 3.6);
+  if (game.state === 'end' && game.endShown) {
+    const left = Math.max(0, 4 - game.endT);
+    $('auto').textContent = game.autopilot ? 'Autopilot · next round in ' + Math.ceil(left) : '';
+  }
+  syncMenu();
+}
+function showEnd() {
+  game.endShown = true;
+  const saved = game.housesTotal - game.housesLost, villageLost = game.result === 'lost';
+  $('endTitle').textContent = villageLost ? 'Village lost' : saved === game.housesTotal ? 'Village saved' : 'Village saved, mostly';
+  $('endSub').textContent = villageLost ? 'The fire took most of the houses.' : 'Every fire on the island is out.';
+  $('eForest').textContent = Math.round(game.forestSaved * 100) + '%';
+  $('eHouses').textContent = saved + '/' + game.housesTotal;
+  $('eDrops').textContent = game.drops + (game.wingDrops || 0);
+  $('eTime').textContent = fmtTime(game.t);
+  $('end').classList.add('show');
+}
+function roundLogic(dt) {
+  if (game.state === 'play') {
+    if (game.housesLost >= Math.ceil(game.housesTotal * 0.6)) { game.state = 'end'; game.result = 'lost'; game.endT = 0; showEnd(); }
+    else if ((game.strikesLeft <= 0 || (!CFG.lightning && game.hadFire)) && burnCount === 0 && game.t > 6) { game.state = 'end'; game.result = 'saved'; game.endT = 0; showEnd(); }
+  } else {
+    game.endT += dt;
+    if (game.autopilot && game.endT >= 4) newRound();
+  }
+}
+
+/* ───────── input ───────── */
+const raycaster = new THREE.Raycaster(), _ndc = new THREE.Vector2();
+const FLIGHT = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'ShiftLeft', 'ShiftRight'];
+addEventListener('keydown', e => {
+  initAudio();
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (FLIGHT.includes(e.code)) e.preventDefault();
+  if (e.repeat) { keys[e.code] = true; return; }
+  keys[e.code] = true;
+  if (FLIGHT.includes(e.code)) { takeControl(); if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code) && assist.active) { assist.active = false; marker.visible = false; } }
+  if (e.code === 'KeyQ' || e.code === 'KeyE') { if (CAM.mode === 1) takeControl(); else rotateBy(e.code === 'KeyQ' ? -1 : 1); }
+  if (e.code === 'KeyF') { takeControl(); startDrop(); }
+  if (e.code === 'KeyP') { if (game.autopilot) { game.apLock = true; setAutopilot(false); } else { game.apLock = false; setAutopilot(true); } }
+  if (e.code === 'KeyM') toggleMute();
+  if (e.code === 'KeyO') setMenu(!document.body.classList.contains('menu'));
+  if (e.code === 'Escape' && document.body.classList.contains('menu')) setMenu(false);
+  if (/^Digit[1-4]$/.test(e.code)) setCam(+e.code[5]);
+  if (e.code === 'Equal' || e.code === 'NumpadAdd') zoomBy(1 / 1.15);
+  if (e.code === 'Minus' || e.code === 'NumpadSubtract') zoomBy(1.15);
+  if (e.code === 'Enter' && game.state === 'end') newRound();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const c in keys) keys[c] = false; });
+let ptr = null;
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('pointerdown', e => { initAudio(); ptr = { x: e.clientX, y: e.clientY, btn: e.button, moved: 0, type: e.pointerType, alt: e.altKey }; try { canvas.setPointerCapture(e.pointerId); } catch (_) {} });
+canvas.addEventListener('pointermove', e => {
+  if (!ptr) return;
+  const dx = e.clientX - ptr.x, dy = e.clientY - ptr.y; ptr.x = e.clientX; ptr.y = e.clientY; ptr.moved += Math.abs(dx) + Math.abs(dy);
+  const rot = ptr.btn === 2 || ptr.alt || (ptr.type === 'touch' && ptr.moved > 10);
+  if (!rot || CAM.mode === 1) return;
+  if (CAM.mode === 2) { CAM.yaw -= dx * 0.006; CAM.pitch = clamp(CAM.pitch + dy * 0.004, 0.3, 1.25); CAM.drag = 6; }
+  else if (CAM.mode === 3) CAM.tYaw -= dx * 0.006; else CAM.bYaw -= dx * 0.006;
+  director.manualT = simNow;
+});
+canvas.addEventListener('pointerup', e => { if (ptr && ptr.btn === 0 && !ptr.alt && ptr.moved < 8) clickAt(e.clientX, e.clientY); ptr = null; });
+canvas.addEventListener('pointercancel', () => { ptr = null; });
+canvas.addEventListener('wheel', e => { e.preventDefault(); zoomBy(e.deltaY > 0 ? 1.1 : 1 / 1.1); }, { passive: false });
+function clickAt(cx, cy) {
+  takeControl();
+  if (heli.water > 0.04 && !heli.dropping && bucketOverFire()) { startDrop(); return; }
+  if (!tops) return;
+  const rc = canvas.getBoundingClientRect(); _ndc.set((cx - rc.left) / rc.width * 2 - 1, -((cy - rc.top) / rc.height) * 2 + 1);
+  raycaster.setFromCamera(_ndc, camera);
+  const hit = raycaster.intersectObject(tops, false)[0];
+  if (!hit) return;
+  const i = w2c(hit.point.x, hit.point.z);
+  assist.active = true; assist.x = hit.point.x; assist.z = hit.point.z; assist.fill = i >= 0 && TYP[i] === T_WATER;
+  marker.position.set(hit.point.x, hit.point.y, hit.point.z); marker.visible = true;
+  toast(assist.fill ? 'Flying to the water to fill' : 'Flying there');
+}
+function toggleMute() { snd.muted = !snd.muted; $('mute').setAttribute('aria-pressed', String(!snd.muted)); toast(snd.muted ? 'Sound off' : 'Sound on'); initAudio(); }
+$('mute').onclick = () => toggleMute();
+$('apBtn').onclick = () => { if (game.autopilot) { game.apLock = true; setAutopilot(false); } else { game.apLock = false; setAutopilot(true); } };
+document.querySelectorAll('[data-cam]').forEach(b => { b.onclick = () => setCam(+b.dataset.cam); });
+document.querySelectorAll('[data-diff]').forEach(b => { b.onclick = () => { setDiff(b.dataset.diff); newRound(undefined, b.dataset.diff); toast(b.textContent + ' · new round'); }; });
+function setDiff(d) { game.diff = d; document.querySelectorAll('[data-diff]').forEach(e => e.setAttribute('aria-pressed', String(e.dataset.diff === d))); }
+$('again').onclick = () => newRound();
+document.querySelectorAll('button').forEach(b => b.addEventListener('click', () => b.blur()));
+
+/* ───────── rain shower (menu) ───────── */
+const rain = { t: 0 };
+function updateRain(dt) {
+  if (rain.t <= 0) return;
+  rain.t -= dt;
+  const n = Math.min(DR.max - DR.n, Math.round(dt * 260));
+  for (let q = 0; q < n; q++) addDrop((Math.random() - 0.5) * GW * CELL, 60 + Math.random() * 20, (Math.random() - 0.5) * GH * CELL, wind.speed * Math.cos(wind.dir) * 0.4, -30 - Math.random() * 10, wind.speed * Math.sin(wind.dir) * 0.4);
+  // the shower soaks a random slice of the island each frame and puts fires out
+  const k = Math.round(NC * dt * 0.35);
+  for (let q = 0; q < k; q++) { const i = Math.floor(Math.random() * NC); if (TYP[i] && TYP[i] !== T_WATER) { const was = ST[i] === 1; soakCell(i, 22); if (was) hissAmt++; } }
+}
+
+/* ───────── scene menu ───────── */
+function setMenu(open, save = true) {
+  document.body.classList.toggle('menu', open);
+  $('menuBtn').setAttribute('aria-pressed', String(open)); $('menu').setAttribute('aria-hidden', String(!open));
+  if (save) { try { localStorage.setItem('ffi:menu', open ? '1' : '0'); } catch (_) {} }
+  requestAnimationFrame(resize);
+}
+const pressSet = (sel, attr, v) => document.querySelectorAll(sel).forEach(e => e.setAttribute('aria-pressed', String(e.dataset[attr] === String(v))));
+function bindRange(id, fn, fmt) {
+  const el = $(id), out = $('v' + id.slice(1));
+  const show = () => { if (out) out.textContent = fmt(+el.value); };
+  el.addEventListener('input', () => { fn(+el.value); show(); });
+  show(); return { el, show };
+}
+const RANGES = {};
+function initMenu() {
+  $('menuBtn').onclick = () => setMenu(!document.body.classList.contains('menu'));
+  $('menuClose').onclick = () => setMenu(false);
+  document.querySelectorAll('[data-spd]').forEach(b => { b.onclick = () => { CFG.speed = +b.dataset.spd; pressSet('[data-spd]', 'spd', CFG.speed); toast('Sim speed ' + CFG.speed + '×'); }; });
+  document.querySelectorAll('[data-tod]').forEach(b => { b.onclick = () => { applyTod(b.dataset.tod); toast(b.textContent + ' light'); }; });
+  $('mNew').onclick = () => { newRound(); toast('New island'); };
+  $('mPause').onclick = () => { game.paused = !game.paused; toast(game.paused ? 'Paused' : 'Resumed'); };
+  $('mAuto').onclick = () => $('apBtn').onclick();
+  $('mDirector').onclick = () => { CFG.director = !CFG.director; toast(CFG.director ? 'Auto camera cuts on' : 'Auto camera cuts off'); };
+  $('mStrike').onclick = () => { const i = pickStrikeCell(); if (i >= 0) strike(i); };
+  $('mSpark').onclick = () => { const i = pickStrikeCell(); if (i >= 0 && igniteCell(i)) toast('A new fire starts'); };
+  $('mRain').onclick = () => { rain.t = 5; toast('Rain shower'); };
+  $('mRegrow').onclick = () => { for (let i = 0; i < NC; i++) if (ST[i] === 2) AGE[i] = ASH + REGROW + 1; toast('Burn scars regrow'); };
+  $('mFill').onclick = () => { heli.water = 1; toast('Bucket full'); };
+  $('mDrop').onclick = () => { takeControl(); startDrop(); };
+  RANGES.spread = bindRange('cSpread', v => CFG.spread = v, v => v.toFixed(2) + '×');
+  RANGES.regrow = bindRange('cRegrow', v => CFG.regrow = v, v => v ? v.toFixed(1) + '×' : 'off');
+  RANGES.windDir = bindRange('cWindDir', v => { wind.locked = true; $('cWindShift').checked = false; wind.dir = wind.baseDir = v * Math.PI / 180; }, v => Math.round(v) + '°');
+  RANGES.windSpd = bindRange('cWindSpd', v => { wind.locked = true; $('cWindShift').checked = false; wind.speed = wind.baseSpeed = v; }, v => Math.round(v * 3.6) + ' km/h');
+  RANGES.flow = bindRange('cFlow', v => CFG.flow = v, v => v.toFixed(2) + '×');
+  RANGES.bucket = bindRange('cBucket', v => { CFG.bucket = v; for (const c of CRAFTS) c.bk.g.scale.set(Math.sqrt(v), 1, Math.sqrt(v)); }, v => v.toFixed(2) + '×');
+  RANGES.rope = bindRange('cRope', v => ROPE = v, v => v.toFixed(1) + ' m');
+  RANGES.top = bindRange('cTop', v => { MAXS_H = v; AI_SPEED = v * 0.78; }, v => Math.round(v * 3.6) + ' km/h');
+  RANGES.rot = bindRange('cRot', v => { const r = v * Math.PI / 180; if (CAM.mode === 3) CAM.tYaw = r; else if (CAM.mode === 4) CAM.bYaw = r; else { CAM.yaw = r; CAM.drag = 1e9; } director.manualT = simNow; }, v => Math.round(v) + '°');
+  RANGES.tilt = bindRange('cTilt', v => { CAM.pitch = v * Math.PI / 180; director.manualT = simNow; }, v => Math.round(v) + '°');
+  RANGES.zoom = bindRange('cZoom', v => { CAM.zoom2 = 120 / v; CAM.zoom3 = clamp(1 / v, 0.35, 1.4); CAM.chaseD = clamp(1 / v, 0.6, 2.2); }, v => v.toFixed(2) + '×');
+  RANGES.px = bindRange('cPx', v => { opt.ps = v; resize(); }, v => v + 'px');
+  const chk = (id, fn) => { const el = $(id); el.onchange = () => fn(el.checked); };
+  chk('cLightning', v => { CFG.lightning = v; toast(v ? 'Lightning on' : 'Lightning off'); });
+  chk('cEmbers', v => CFG.embers = v);
+  chk('cSmoke', v => CFG.smoke = v);
+  chk('cTint', v => CFG.tint = v);
+  chk('cWindShift', v => { wind.locked = !v; if (v) { wind.baseDir = wind.dir; wind.baseSpeed = wind.speed; } });
+  chk('cShadows', v => { CFG.shadows = v; sun.castShadow = v; });
+  chk('cClouds', v => CFG.clouds = v);
+  chk('cBirds', v => CFG.birds = v);
+  chk('cSound', v => { if (snd.muted === v) toggleMute(); });
+  chk('cOutline', v => CFG.outline = v);
+  chk('cDither', v => CFG.dither = v);
+  chk('cRaw', v => CFG.raw = v);
+  document.querySelectorAll('[data-wing]').forEach(b => { b.onclick = () => { CFG.wingAuto = false; setWingmen(+b.dataset.wing); toast(+b.dataset.wing ? b.dataset.wing + ' wingm' + (+b.dataset.wing > 1 ? 'en' : 'an') + ' joining' : 'Wingmen sent home'); }; });
+  let open = innerWidth >= 1280 && !CLEAN;
+  try { const s = localStorage.getItem('ffi:menu'); if (s !== null) open = s === '1'; } catch (_) {}
+  if (params.has('menu')) open = params.get('menu') === '1';
+  setMenu(open, false);
+}
+function syncMenu() {
+  if (!document.body.classList.contains('menu')) return;
+  const active = document.activeElement;
+  const setR = (r, v) => { if (r && r.el !== active) { r.el.value = v; r.show(); } };
+  $('mRound').textContent = game.round; $('mSeed').textContent = ISL.seed; $('mState').textContent = game.paused ? 'paused' : game.state === 'end' ? (game.result === 'lost' ? 'village lost' : 'fire out') : 'in play';
+  $('mTime').textContent = fmtTime(game.t); $('mDrops').textContent = game.drops + (game.wingDrops ? ' + ' + game.wingDrops + ' crew' : ''); $('mStrikes').textContent = CFG.lightning ? game.strikesLeft : 'off'; $('mFps').textContent = Math.round(fps);
+  $('mPause').setAttribute('aria-pressed', String(game.paused)); $('mAuto').setAttribute('aria-pressed', String(game.autopilot)); $('mDirector').setAttribute('aria-pressed', String(CFG.director));
+  $('gBurn').textContent = burnCount; $('gBurnBar').style.width = Math.min(100, burnCount / 4) + '%';
+  $('gForest').textContent = Math.round(game.forestSaved * 100) + '%'; $('gForestBar').style.width = game.forestSaved * 100 + '%';
+  const saved = game.housesTotal - game.housesLost; $('gHouses').textContent = saved + '/' + game.housesTotal; $('gHousesBar').style.width = (game.housesTotal ? saved / game.housesTotal * 100 : 0) + '%';
+  const sp = Math.hypot(heli.v.x, heli.v.z), alt = heli.p.y - groundAt(heli.p.x, heli.p.z);
+  $('gWater').textContent = Math.round(heli.water * 100) + '%'; $('gWaterBar').style.width = heli.water * 100 + '%';
+  $('gSpeed').textContent = Math.round(sp * 3.6) + ' km/h'; $('gSpeedBar').style.width = Math.min(100, sp / 34 * 100) + '%';
+  $('gAlt').textContent = Math.round(alt) + ' m'; $('gAltBar').style.width = clamp(alt / 50 * 100, 0, 100) + '%';
+  setR(RANGES.windDir, ((wind.dir * 180 / Math.PI) % 360 + 360) % 360); setR(RANGES.windSpd, wind.speed);
+  $('cWindShift').checked = !wind.locked;
+  const rotNow = CAM.mode === 3 ? CAM.tYaw : CAM.mode === 4 ? CAM.bYaw : CAM.yaw;
+  setR(RANGES.rot, ((rotNow * 180 / Math.PI) % 360 + 360) % 360); setR(RANGES.tilt, clamp(CAM.pitch * 180 / Math.PI, 17, 72));
+  $('cSound').checked = !snd.muted;
+}
+
+/* ───────── main loop ───────── */
+function step(dt) {
+  simNow += dt;
+  if (game.state === 'play') game.t += dt;
+  updateWind(dt);
+  fireAcc += dt;
+  while (fireAcc >= TICK) { fireAcc -= TICK; fireTick(TICK); }
+  updateLightning(dt);
+  flight(dt);
+  updateBucket(dt);
+  for (const w of WING) { use(w); flight(dt); updateBucket(dt); }
+  use(PLAYER);
+  updateDrops(dt);
+  updateBurningVisuals(dt);
+  updatePuffs(dt);
+  updateFx(dt);
+  rotorWash(dt);
+  updateRain(dt);
+  for (const b of birds) b.g.visible = CFG.birds;
+  if (CFG.birds) updateBirds(dt);
+  clouds.visible = CFG.clouds; clouds.rotation.y += dt * 0.004;
+  puffs.visible = CFG.smoke;
+  updateDirector(dt);
+  updateCamera(dt);
+  updateSky(dt);
+  roundLogic(dt);
+  updateHud(dt);
+  updateAudio(dt);
+}
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
+  if (window.__freeze) return;
+  fpsN++; fpsT += dt; if (fpsT > 0.5) { fps = fpsN / fpsT; fpsN = 0; fpsT = 0; }
+  if (game.paused) { updateCamera(dt); updateHud(dt); renderFrame(); return; }
+  for (let q = 0; q < CFG.speed; q++) step(dt);
+  renderFrame();
+}
+
+/* ───────── testing + capture hooks ───────── */
+window.__fire = {
+  igniteAt(x, z) { return igniteCell(Math.round(z) * GW + Math.round(x)); },
+  setWind(dir, speed) { wind.locked = true; wind.dir = wind.baseDir = dir * Math.PI / 180; wind.speed = wind.baseSpeed = Math.max(0, speed); return { dir, speed }; },
+  setPaused(v) { game.paused = !!v; return game.paused; },
+  tick(ms = 16.67, render = true) { const n = Math.max(1, Math.round(ms / (1000 / 60))); for (let q = 0; q < n; q++) step(1 / 60); if (render) renderFrame(); return this.stats(); },
+  shot(type = 'image/png') {
+    renderFrame();
+    const w = Math.max(1, VW()), h = Math.max(1, VH()), c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(canvas, 0, 0, rtW * opt.ps, rtH * opt.ps);
+    return c.toDataURL(type, 0.92);
+  },
+  stats() {
+    return { fps: Math.round(fps), round: game.round, seed: ISL.seed, state: game.state, result: game.result, difficulty: game.diff, time: +game.t.toFixed(2),
+      burning: burnCount, fires: clusters.length, forestSaved: +game.forestSaved.toFixed(3), houses: game.housesTotal - game.housesLost, housesTotal: game.housesTotal,
+      water: +heli.water.toFixed(2), dropping: heli.dropping, drops: game.drops, strikesLeft: game.strikesLeft,
+      wind: { dir: +(wind.dir * 180 / Math.PI).toFixed(1), speed: +wind.speed.toFixed(2) }, heli: { x: +heli.p.x.toFixed(1), y: +heli.p.y.toFixed(1), z: +heli.p.z.toFixed(1) },
+      camera: CAM.mode, autopilot: game.autopilot, attract: game.attract, aiPhase: ai.phase, wet: WET.reduce((a, v) => a + (v > 0 ? 1 : 0), 0), puffs: PF.n, flames: flames.count, drops3d: DR.n, wingmen: WING.length, wingDrops: game.wingDrops || 0 };
+  },
+  newRound(seed, diff) { if (diff) setDiff(diff); newRound(seed, diff); return this.stats(); },
+  setWingmen(n) { CFG.wingAuto = false; setWingmen(n); return WING.length; },
+  crew() { return CRAFTS.map((c, k) => ({ k, phase: c.ai.phase, water: +c.h.water.toFixed(2), x: +c.h.p.x.toFixed(1), y: +c.h.p.y.toFixed(1), z: +c.h.p.z.toFixed(1), aim: c.ai.aim ? [Math.round(c.ai.aim.x), Math.round(c.ai.aim.z)] : null })); },
+  setCam(m) { setCam(m); return m; },
+  setAutopilot(v) { game.apLock = !v; setAutopilot(!!v, true); return game.autopilot; },
+  drop() { startDrop(); return heli.dropping; },
+  fill() { heli.water = 1; return 1; },
+  soak(x, z, r = 3) { return soakAt(cellX(Math.round(z) * GW + Math.round(x)), cellZ(Math.round(z) * GW + Math.round(x)), r); },
+  strike() { const i = pickStrikeCell(); strike(i); return i >= 0 ? [i % GW, Math.floor(i / GW)] : null; },
+  village() { return { cell: ISL.village, buildings: ISL.buildings.map(b => ({ kind: b.kind, lost: b.lost, x: b.x, z: b.z })) }; },
+  grid: { GW, GH, CELL, cellX, cellZ },
+  state: { game, heli, wind, CAM, ai, ISL },
+};
+
+setDiff(game.diff);
+applyTod(params.get('tod') || 'golden');
+initMenu();
+newRound(params.has('seed') ? +params.get('seed') : undefined);
+setCam(2, false); CAM.cut = true;
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
