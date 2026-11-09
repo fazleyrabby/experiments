@@ -329,7 +329,8 @@ const postMat = new THREE.ShaderMaterial({
     const float B[16] = float[16](0.,8.,2.,10., 12.,4.,14.,6., 3.,11.,1.,9., 15.,7.,13.,5.);
     void main(){
       vec3 col = texture2D(tColor, vUv).rgb;
-      float z = lin(texture2D(tDepth, vUv).x);
+      float dRaw = texture2D(tDepth, vUv).x;
+      float z = lin(dRaw);
       float e = 0.0;
       e = max(e, lin(texture2D(tDepth, vUv + vec2(texel.x, 0.)).x) - z);
       e = max(e, lin(texture2D(tDepth, vUv - vec2(texel.x, 0.)).x) - z);
@@ -339,7 +340,8 @@ const postMat = new THREE.ShaderMaterial({
       float t = ortho > 0.5 ? thr : thr * z * 0.06;
       if (outline > 0.5 && e > t) ok.x *= 0.62;
       ivec2 pc = ivec2(mod(gl_FragCoord.xy, 4.0));
-      if (dither > 0.5) ok.x += (B[pc.x + pc.y*4] / 16.0 - 0.47) * 0.05;
+      // the sky stays flat: a fine dither on a big empty area turns into a moiré checkerboard when the frame is scaled down
+      if (dither > 0.5 && dRaw < 0.99999) ok.x += (B[pc.x + pc.y*4] / 16.0 - 0.47) * 0.05;
       float best = 1e9; int bi = 0;
       for (int i = 0; i < 90; i++) { vec3 d = palOk[i] - ok; float k = dot(d, d); if (k < best) { best = k; bi = i; } }
       gl_FragColor = vec4(pow(pal[bi], vec3(1.0/2.2)), 1.0);
