@@ -300,3 +300,6 @@ highland-express/video
 /rts
 /stillwater-diorama
 storm-at-sea/.capture
+
+# hk-tram: Blender build scripts and the dev server stay local
+hk-tram/tools
