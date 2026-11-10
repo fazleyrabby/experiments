@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="叮叮 — a Hong Kong double-decker tram rolling through a neon rainstorm, drawn in seven art styles you can switch live: dither, woodblock, comic halftone, blueprint, thermal and Game Boy.">
+<meta name="theme-color" content="#07050d">
+<title>叮叮 — Hong Kong Tram in Seven Styles</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2307050d'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-size='34' fill='%23ff2e88' font-family='sans-serif' font-weight='800'%3E%E5%8F%AE%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="./styles.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+</script>
+</head>
+<body data-style="real">
+<div id="stage"></div>
+
+<header class="top">
+  <div class="brand">
+    <span class="brand-zh">叮叮</span>
+    <span class="brand-en"><b>DING DING</b><i>Hong Kong tram · seven ways to see it</i></span>
+  </div>
+  <div class="top-actions">
+    <button class="pill" id="btn-sound" type="button" aria-pressed="false">Sound off</button>
+    <button class="pill" id="btn-photo" type="button" title="Save a frame (P)">Save frame</button>
+    <button class="pill rec" id="btn-rec" type="button" title="Record a 20s style tour">● Record tour</button>
+  </div>
+</header>
+
+<div class="split-tags" id="split-tags" hidden><span id="tag-l"></span><span id="tag-r"></span></div>
+<div class="handle" id="handle" hidden><span></span></div>
+
+<div class="sfx" id="sfx" aria-hidden="true">DING! DING!</div>
+
+<!-- per-style overlays -->
+<div class="ov ov-ukiyo" aria-hidden="true"><div class="seal">叮<br>叮</div><div class="cartouche">香港電車<br>夜雨之圖</div></div>
+<div class="ov ov-blueprint" aria-hidden="true">
+  <svg class="dim" viewBox="0 0 400 80" preserveAspectRatio="none"><path d="M10 40h380M10 28v24M390 28v24M10 40l10-5v10zM390 40l-10-5v10z" /><text x="200" y="30" text-anchor="middle">9 200 mm</text></svg>
+  <div class="titleblock"><b>TRAMWAY No. 120</b><span>DOUBLE-DECK · 2 AXLE BOGIES · 1 067 GAUGE</span><span>SCALE 1:50 · SHEET 1 / 1</span></div>
+</div>
+<div class="ov ov-thermal" aria-hidden="true"><div class="cross"></div><div class="read"><b id="t-max">MAX 41.3°C</b><span id="t-min">MIN 12.0°C</span><em>● REC</em></div></div>
+<div class="ov ov-gameboy" aria-hidden="true"><div class="gbtag">TRAM·BOY</div></div>
+
+<footer class="dock">
+  <div class="styles" id="styles" role="tablist" aria-label="Art style"></div>
+  <div class="controls">
+    <div class="seg" id="seg-cam" role="group" aria-label="Camera">
+      <button type="button" data-cam="cinematic" class="on">Cinematic</button>
+      <button type="button" data-cam="orbit">Orbit</button>
+    </div>
+    <button class="pill" id="btn-pause" type="button">Pause</button>
+    <div class="seg" id="seg-speed" role="group" aria-label="Speed">
+      <button type="button" data-speed="0.5">½×</button>
+      <button type="button" data-speed="1" class="on">1×</button>
+      <button type="button" data-speed="2">2×</button>
+    </div>
+    <button class="pill bell" id="btn-bell" type="button" title="Ring the bell (B)">🔔 Ding</button>
+    <button class="pill" id="btn-split" type="button" aria-pressed="false" title="Compare two styles side by side (S)">Compare</button>
+    <button class="pill" id="btn-auto" type="button" aria-pressed="false" title="Cycle styles automatically (A)">Auto</button>
+  </div>
+  <p class="hint" id="hint">1–7 styles · drag to orbit · scroll to zoom · B bell · Space pause</p>
+</footer>
+
+<div class="loading" id="loading">叮叮<small>Laying the tracks…</small></div>
+<div class="error" id="error" hidden></div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
