@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="River Ghat Morning — a living pixel-art painting of a riverside ghat in Bangladesh at dawn, with a fully synthesised soundscape.">
+<meta name="theme-color" content="#120e14">
+<title>River Ghat Morning</title>
+<style>
+  :root {
+    --ink: #f4eee6;
+    --ink-dim: #c2b4a4;
+    --glass: rgba(24, 16, 14, .68);
+    --line: rgba(255, 230, 205, .16);
+    --leaf: #ffb36b;
+    --leaf-deep: #c9742e;
+    --rain: #9db8ee;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #0e0a0c;
+    color: var(--ink);
+    font: 13px/1.3 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    display: grid;
+    place-items: center;
+  }
+  #stage { position: relative; display: grid; place-items: center; width: 100vw; height: 100vh; height: 100dvh; }
+  canvas#scene {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+    background: #1a1418;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.04), 0 30px 80px rgba(0,0,0,.55);
+  }
+  body.fs canvas#scene { box-shadow: none; }
+
+  /* ---- dock ---- */
+  #dock {
+    position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    display: grid; gap: 10px; justify-items: center;
+    padding: 12px 14px 12px;
+    max-width: min(940px, calc(100vw - 20px));
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    backdrop-filter: blur(14px) saturate(1.2);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.4);
+    transition: opacity .6s ease, transform .6s ease;
+    z-index: 5;
+  }
+  body:not(.live) #dock { opacity: 0; pointer-events: none; transform: translate(-50%, 12px); }
+  body.idle #dock { opacity: 0; pointer-events: none; transform: translate(-50%, 10px); }
+  body.idle { cursor: none; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: center; }
+  .moods { gap: 6px; }
+
+  button {
+    font: inherit; color: var(--ink); background: rgba(255,255,255,.05);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 7px 12px; cursor: pointer;
+    transition: background .2s, border-color .2s, transform .1s;
+  }
+  button:hover { background: rgba(255,255,255,.11); }
+  button:active { transform: translateY(1px); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--leaf); outline-offset: 2px; }
+  button[aria-pressed="true"].chip { background: rgba(255,197,107,.16); border-color: rgba(255,197,107,.55); color: #fff4dc; }
+  .chip { padding: 6px 11px; font-size: 12.5px; letter-spacing: .01em; }
+  .icon { width: 36px; height: 34px; padding: 0; display: grid; place-items: center; }
+  .icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .icon .on, .icon .off { display: none; }
+  button[aria-pressed="true"] .on { display: block; }
+  button[aria-pressed="false"] .off { display: block; }
+  #play[aria-pressed="true"] .off { display: none; }
+  #play[aria-pressed="true"] .on { display: block; }
+  #play[aria-pressed="false"] .on { display: none; }
+  #play[aria-pressed="false"] .off { display: block; }
+  #sound[aria-pressed="true"] .off { display: none; }
+  #sound[aria-pressed="false"] .on { display: none; }
+  #sound[aria-pressed="false"] .off { display: block; }
+
+  label.ctl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: center; min-width: 118px; flex: 1 1 118px; max-width: 190px; }
+  label.ctl span.n { color: var(--ink-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .09em; }
+  label.ctl output { justify-self: end; color: var(--ink); font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; }
+  label.ctl input { grid-column: 1 / -1; }
+  .grp { display: flex; gap: 8px; align-items: center; }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; margin: 0; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, var(--leaf) var(--p, 50%), rgba(255,255,255,.16) var(--p, 50%)); }
+  input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: rgba(255,255,255,.16); }
+  input[type=range]::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--leaf); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; background: #fff6e4; border: 2px solid var(--leaf-deep); box-shadow: 0 1px 6px rgba(0,0,0,.5); }
+  input[type=range]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: #fff6e4; border: 2px solid var(--leaf-deep); }
+    #vol { width: 92px; }
+
+  #mix { display: grid; grid-template-columns: repeat(3, minmax(88px, 1fr)); gap: 8px 16px; width: 100%; padding-top: 10px; border-top: 1px solid var(--line); }
+  #mix[hidden] { display: none; }
+  #mix label { display: grid; gap: 2px; font-size: 11px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: .08em; }
+
+  .hint { position: fixed; left: 14px; bottom: 12px; color: rgba(226,234,252,.45); font-size: 11px; letter-spacing: .06em; transition: opacity .6s; }
+  body.idle .hint, body:not(.live) .hint { opacity: 0; }
+  #scale { font-variant-numeric: tabular-nums; }
+
+  /* ---- intro ---- */
+  #intro {
+    position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; text-align: center;
+    background:
+      radial-gradient(ellipse at 50% 40%, rgba(30,18,16,.3), rgba(10,7,8,.88) 70%);
+    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+    transition: opacity 1.2s ease, backdrop-filter 1.2s ease;
+  }
+  #intro.gone { opacity: 0; pointer-events: none; }
+  .card { max-width: 560px; padding: 24px; }
+  .card .bn { font: 500 20px/1.2 "Noto Sans Bengali", "Kohinoor Bangla", "Bangla Sangam MN", "Nirmala UI", sans-serif; color: var(--leaf); letter-spacing: .02em; margin-bottom: 10px; }
+  #auto[aria-pressed="true"] { background: rgba(255,179,107,.18); border-color: rgba(255,179,107,.55); }
+  .card h1 { margin: 0 0 12px; font: 600 clamp(30px, 6vw, 52px)/1.04 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; letter-spacing: -.01em; color: #f4f7ff; text-wrap: balance; }
+  .card p { margin: 0 auto 26px; max-width: 44ch; color: var(--ink-dim); font-size: 14.5px; line-height: 1.55; text-wrap: pretty; }
+  .cta { display: inline-flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .cta button { padding: 12px 20px; font-size: 14px; border-radius: 12px; }
+  .cta .primary { background: var(--leaf); color: #2a1a06; border-color: transparent; font-weight: 600; }
+  .cta .primary:hover { background: #ffd690; }
+  .small { margin-top: 18px; font-size: 11.5px; color: rgba(226,234,252,.5); letter-spacing: .04em; }
+  #loader { display: none; margin-top: 4px; }
+  #intro.loading .cta, #intro.loading .small { display: none; }
+  #intro.loading #loader { display: block; }
+  #loader .bar { width: 240px; height: 3px; background: rgba(255,255,255,.14); border-radius: 3px; margin: 0 auto 12px; overflow: hidden; }
+  #loadbar { height: 100%; width: 4%; background: var(--leaf); transition: width .25s; }
+  #loadmsg { color: var(--ink-dim); font-size: 13px; }
+
+  @media (max-width: 720px) {
+    #dock { padding: 10px; gap: 8px; }
+    label.ctl { min-width: 96px; flex-basis: 96px; }
+    .hint { display: none; }
+    #mix { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) { #dock, #intro { transition-duration: .01s; } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="scene" width="480" height="270" aria-label="Pixel-art riverside ghat in Bangladesh at dawn"></canvas>
+</div>
+
+<div id="dock" role="region" aria-label="Scene controls">
+  <div class="row moods" role="group" aria-label="Moods">
+    <button class="chip" data-mood="predawn" aria-pressed="false" title="1">Before dawn</button>
+    <button class="chip" data-mood="sunrise" aria-pressed="true" title="2">Sunrise mist</button>
+    <button class="chip" data-mood="golden" aria-pressed="false" title="3">Golden hour</button>
+    <button class="chip" data-mood="morning" aria-pressed="false" title="4">Busy morning</button>
+  </div>
+  <div class="row">
+    <button class="icon" id="play" aria-pressed="true" aria-label="Pause" title="Play / pause (space)">
+      <svg viewBox="0 0 24 24"><g class="on"><path d="M8 5v14M16 5v14"/></g><g class="off"><path d="M7 4.5v15l12-7.5z"/></g></svg>
+    </button>
+    <label class="ctl"><span class="n">Time</span><output id="timeVal">05:57</output>
+      <input type="range" id="time" min="290" max="600" value="357" aria-label="Time of day"></label>
+    <button class="icon" id="auto" aria-pressed="false" aria-label="Let the morning drift" title="Let the morning drift by">
+      <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/></svg>
+    </button>
+    <label class="ctl"><span class="n">Mist</span><output id="mistVal">Thick</output>
+      <input type="range" id="mist" min="0" max="100" value="80" aria-label="Mist"></label>
+    <div class="grp">
+      <button class="icon" id="sound" aria-pressed="true" aria-label="Mute" title="Sound (M)">
+        <svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><g class="on"><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/></g><g class="off"><path d="M16 9.5l5 5M21 9.5l-5 5"/></g></svg>
+      </button>
+      <input type="range" id="vol" min="0" max="100" value="80" aria-label="Master volume">
+      <button class="chip" id="mixBtn" aria-expanded="false" aria-controls="mix">Mix</button>
+    </div>
+    <button class="icon" id="fs" aria-label="Fullscreen" title="Fullscreen (F)">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
+  </div>
+  <div id="mix" hidden>
+    <label>River<input type="range" data-mix="water" min="0" max="100" value="100"></label>
+    <label>Village<input type="range" data-mix="village" min="0" max="100" value="100"></label>
+    <label>Birds<input type="range" data-mix="birds" min="0" max="100" value="100"></label>
+  </div>
+</div>
+
+<div class="hint">space · pause &nbsp; ←→ time &nbsp; ↑↓ mist &nbsp; 1–4 moods &nbsp; H horn &nbsp; <span id="scale"></span></div>
+
+<div id="intro">
+  <div class="card">
+    <div class="bn">নদীর ঘাট</div>
+    <h1>River Ghat Morning</h1>
+    <p>Brick steps down to a wide river, somewhere in Bangladesh. The tea stall is lit, mist lifts off the water, a launch sounds its horn and the ghat wakes up. Everything you see and hear is drawn and synthesised live.</p>
+    <div class="cta">
+      <button class="primary" id="enterSound">Enter with sound</button>
+      <button id="enterQuiet">Enter silently</button>
+    </div>
+    <div class="small">Headphones recommended</div>
+    <div id="loader"><div class="bar"><div id="loadbar"></div></div><div id="loadmsg">Listening to the river…</div></div>
+  </div>
+</div>
+
+<script>
+  // keep range fills in sync for the webkit track gradient
+  const fill = (el) => el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min)) * 100 + '%');
+  document.addEventListener('input', (e) => e.target.matches && e.target.matches('input[type=range]') && fill(e.target));
+  window.addEventListener('DOMContentLoaded', () => document.querySelectorAll('input[type=range]').forEach(fill));
+  setInterval(() => document.querySelectorAll('#time,#mist').forEach(fill), 250);
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
