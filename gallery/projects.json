@@ -1,5 +1,11 @@
 [
   {
+    "slug": "outpost-siege",
+    "title": "Outpost Siege",
+    "category": "Play",
+    "description": "A first-person firefight at a high-desert outpost. Hold the line against waves of spider robots with a red-dot rifle, real recorded gunfire and footsteps, recoil, reloads and sprinting. All in a single HTML file."
+  },
+  {
     "slug": "hk-tram",
     "title": "Ding Ding: Hong Kong Tram",
     "category": "Worlds",
