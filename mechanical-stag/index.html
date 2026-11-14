@@ -1,0 +1,1436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mechanical Stag</title>
+<meta name="description" content="A clockwork stag built from hundreds of machined parts: titanium armor, brass pistons, carbon ribs and a glowing reactor heart. Explode it into layers, click any part, make it walk, or dissolve it into thousands of tiny gears and bolts.">
+<meta name="theme-color" content="#0b0d10">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0d10'/%3E%3Cpath d='M16 26v-9M16 17l-6-6V5M10 11l-4-2M16 17l6-6V5M22 11l4-2' stroke='%235ef2ff' stroke-width='2.2' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='20' r='2.4' fill='%235ef2ff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:rgba(14,17,21,.74); --panel2:rgba(22,26,32,.9);
+    --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.16);
+    --text:#e7ecf1; --mute:#8b96a3; --acc:#5ef2ff; --brass:#e0a63e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:"IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  #stage,#stage canvas{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:none;outline:none}
+  #stage canvas{cursor:crosshair}
+  .vignette{position:fixed;inset:0;pointer-events:none;background:radial-gradient(120% 90% at 50% 45%,transparent 55%,rgba(0,0,0,.55) 100%)}
+  .mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+  .hud{position:fixed;z-index:3;transition:opacity .35s}
+  body.boot .hud{opacity:0}
+  body.capture .hud,body.capture #labels,body.capture #leaders,body.capture .vignette,body.capture .toast{display:none}
+  .glass{background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);border-radius:14px}
+
+  .title{left:20px;top:18px;max-width:min(360px,calc(100vw - 40px));pointer-events:none}
+  .kicker{font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.14em;color:var(--acc);display:flex;align-items:center;gap:8px;text-transform:uppercase}
+  .kicker i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 10px var(--acc);animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .title h1{margin:10px 0 6px;font-weight:600;font-size:30px;letter-spacing:-.02em;line-height:1}
+  .title p{margin:0;color:var(--mute);font-size:13.5px;line-height:1.45}
+
+  .layers{right:20px;top:18px;padding:10px;display:flex;flex-direction:column;gap:4px;min-width:178px}
+  .layers h2{margin:2px 6px 6px;font:500 10.5px/1 "IBM Plex Mono",monospace;letter-spacing:.14em;color:var(--mute);text-transform:uppercase;display:flex;justify-content:space-between}
+  .chip{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:9px;font-size:13px;color:var(--text);transition:background .15s,opacity .15s}
+  .chip:hover{background:rgba(255,255,255,.05)}
+  .chip:focus-visible{outline:1px solid var(--acc)}
+  .chip .sw{width:10px;height:10px;border-radius:3px;background:var(--c);box-shadow:0 0 0 1px rgba(255,255,255,.2) inset}
+  .chip .n{margin-left:auto;font:400 11px "IBM Plex Mono",monospace;color:var(--mute)}
+  .chip[aria-pressed=false]{opacity:.38}
+  .chip[aria-pressed=false] .sw{background:transparent;box-shadow:0 0 0 1px var(--c) inset}
+  .q{all:unset;cursor:pointer;margin-top:6px;padding:7px 8px;border-radius:9px;border-top:1px solid var(--line);font:500 11px "IBM Plex Mono",monospace;color:var(--mute);letter-spacing:.06em;display:flex;justify-content:space-between}
+  .q b{color:var(--text);font-weight:500}
+
+  .dock{left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:8px;max-width:calc(100vw - 32px);flex-wrap:wrap;justify-content:center}
+  .seg{display:flex;background:rgba(0,0,0,.28);border-radius:10px;padding:3px;gap:2px}
+  .btn{all:unset;cursor:pointer;font:500 12.5px "IBM Plex Sans",sans-serif;color:var(--mute);padding:8px 12px;border-radius:8px;white-space:nowrap;transition:color .15s,background .15s;min-height:18px;text-align:center}
+  .btn:hover{color:var(--text);background:rgba(255,255,255,.05)}
+  .btn:focus-visible{outline:1px solid var(--acc)}
+  .btn.on{color:var(--text);background:rgba(255,255,255,.1)}
+  .btn[disabled]{opacity:.3;pointer-events:none}
+  .btn[hidden]{display:none}
+  .btn.primary{color:#061014;background:var(--acc);font-weight:600}
+  .btn.primary:hover{background:#9af7ff}
+  .slider{display:flex;align-items:center;gap:8px;padding:0 4px;font:500 11px "IBM Plex Mono",monospace;color:var(--mute)}
+  .slider input{width:120px;accent-color:var(--acc)}
+  .slider output{width:34px;text-align:right;color:var(--text)}
+  .sep{width:1px;height:24px;background:var(--line2)}
+
+  .info{left:20px;bottom:88px;width:min(320px,calc(100vw - 40px));padding:14px 16px 14px}
+  .info[hidden]{display:none}
+  .info .k{font:500 10.5px/1 "IBM Plex Mono",monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--c,var(--acc))}
+  .info h3{margin:8px 0 8px;font-size:18px;font-weight:600;letter-spacing:-.01em}
+  .info dl{margin:0;display:grid;grid-template-columns:78px 1fr;gap:5px 10px;font-size:12.5px}
+  .info dt{color:var(--mute);font-family:"IBM Plex Mono",monospace;font-size:11px;padding-top:1px}
+  .info dd{margin:0;line-height:1.4}
+  .info .x{all:unset;cursor:pointer;position:absolute;right:10px;top:9px;color:var(--mute);font-size:16px;padding:2px 6px;border-radius:6px}
+  .info .x:hover{color:var(--text);background:rgba(255,255,255,.06)}
+
+  .hint{left:50%;bottom:76px;transform:translateX(-50%);font:400 11.5px "IBM Plex Mono",monospace;color:var(--mute);white-space:nowrap;pointer-events:none;letter-spacing:.02em}
+  body.has-info .hint{opacity:0}
+
+  #leaders{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:2}
+  #labels{position:fixed;inset:0;pointer-events:none;z-index:2}
+  .lab{position:absolute;left:0;top:0;transform:translate(-50%,-50%);white-space:nowrap;font:500 11px/1.25 "IBM Plex Mono",monospace;color:var(--text);background:rgba(10,12,15,.78);border:1px solid var(--line2);padding:5px 8px;border-radius:7px;opacity:0;transition:opacity .25s}
+  .lab small{display:block;color:var(--mute);font-weight:400;font-size:10px}
+  .lab::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--c);margin-right:6px;vertical-align:1px}
+
+  .toast{position:fixed;left:50%;top:84px;transform:translateX(-50%);z-index:4;font:500 12px "IBM Plex Mono",monospace;letter-spacing:.06em;color:var(--acc);background:var(--panel2);border:1px solid var(--line2);padding:8px 14px;border-radius:999px;opacity:0;transition:opacity .3s;pointer-events:none}
+  .toast.show{opacity:1}
+
+  @media (max-width:760px){
+    .title h1{font-size:24px}
+    .title p{font-size:12.5px}
+    .title{left:16px;top:14px}
+    .title p{display:none}
+    .layers{top:84px;left:16px;right:16px;min-width:0;padding:4px;flex-direction:row;flex-wrap:wrap;justify-content:space-between}
+    .layers h2,.chip .n,.q span{display:none}
+    .chip{padding:6px 7px;font-size:11.5px;gap:6px}
+    .q{margin:0;border:0;padding:6px 7px}
+    .slider{display:none}
+    .hint{display:none}
+    .info{left:16px;bottom:auto;top:136px}
+    .sep{display:none}
+    .dock{bottom:12px;gap:6px}
+    .btn{padding:8px 10px;font-size:12px}
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body class="boot">
+<div id="stage"></div>
+<div class="vignette"></div>
+<svg id="leaders"></svg>
+<div id="labels"></div>
+
+<header class="hud title">
+  <div class="kicker"><i></i>CERV-07 · Online</div>
+  <h1>Mechanical Stag</h1>
+  <p>A clockwork stag built from hundreds of machined parts. Drag to orbit, scroll to zoom, click any part.</p>
+</header>
+
+<aside class="hud layers glass" aria-label="Layers">
+  <h2><span>Layers</span><span id="partCount"></span></h2>
+  <button class="chip" data-layer="armor" aria-pressed="true" style="--c:#cfd6dd"><span class="sw"></span>Armor<span class="n" data-n="armor"></span></button>
+  <button class="chip" data-layer="muscle" aria-pressed="true" style="--c:#e0a63e"><span class="sw"></span>Actuators<span class="n" data-n="muscle"></span></button>
+  <button class="chip" data-layer="skeleton" aria-pressed="true" style="--c:#7d8896"><span class="sw"></span>Skeleton<span class="n" data-n="skeleton"></span></button>
+  <button class="chip" data-layer="core" aria-pressed="true" style="--c:#5ef2ff"><span class="sw"></span>Core<span class="n" data-n="core"></span></button>
+  <button class="q" id="quality"><span>RENDER</span><b id="qv">HIGH</b></button>
+</aside>
+
+<div class="hud info glass" id="info" hidden>
+  <button class="x" id="infoX" aria-label="Close">×</button>
+  <div class="k" id="iLayer">Armor</div>
+  <h3 id="iName">Part</h3>
+  <dl>
+    <dt>Material</dt><dd id="iMat"></dd>
+    <dt>Function</dt><dd id="iRole"></dd>
+    <dt>Part no.</dt><dd id="iNo" class="mono"></dd>
+  </dl>
+</div>
+
+<div class="hud hint">drag · orbit &nbsp; scroll · zoom &nbsp; click · inspect &nbsp; E · explode &nbsp; W · walk &nbsp; D · dissolve</div>
+
+<nav class="hud dock glass" aria-label="Controls">
+  <div class="seg" id="modes">
+    <button class="btn on" data-e="0">Assembled</button>
+    <button class="btn" data-e="0.5">Layers</button>
+    <button class="btn" data-e="1">Exploded</button>
+  </div>
+  <label class="slider"><input id="explode" type="range" min="0" max="1" step="0.001" value="0" aria-label="Explode amount"><output id="ev">0%</output></label>
+  <span class="sep"></span>
+  <button class="btn" id="walk">Walk</button>
+  <button class="btn on" id="antlers">Antlers</button>
+  <button class="btn on" id="labelsBtn">Labels</button>
+  <button class="btn primary" id="dissolve">Dissolve</button>
+  <button class="btn" id="drop" hidden>Drop</button>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* ============================== utilities ============================== */
+const $ = s => document.querySelector(s);
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const { lerp, clamp } = THREE.MathUtils;
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const spow = (v, p) => Math.sign(v) * Math.pow(Math.abs(v), p);
+const damp = (a, b, l, dt) => a + (b - a) * (1 - Math.exp(-l * dt));
+const TAU = Math.PI * 2, UP = V(0, 1, 0), ZAX = V(0, 0, 1);
+function rng(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const R = rng(20261114);
+const _a = V(), _b = V(), _c = V(), _d = V(), _e = V(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4();
+
+const coarse = matchMedia('(pointer: coarse)').matches || innerWidth < 760;
+const CAPTURE = new URLSearchParams(location.search).has('capture');
+let HQ = !coarse || CAPTURE;
+if (CAPTURE) document.body.classList.add('capture');
+
+/* ============================== renderer ============================== */
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(CAPTURE ? 1 : Math.min(devicePixelRatio, HQ ? 2 : 1.5));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.localClippingEnabled = true;
+$('#stage').appendChild(renderer.domElement);
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0d10);
+scene.fog = new THREE.Fog(0x0b0d10, 7, 16);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.05, 60);
+const CAM_END = V(2.55, 1.55, 2.85), CAM_START = V(3.9, 2.3, 4.6);
+camera.position.copy(CAM_START);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0.05);
+controls.enableDamping = true; controls.dampingFactor = 0.07;
+controls.minDistance = 0.6; controls.maxDistance = 7.5;
+controls.maxPolarAngle = Math.PI * 0.53;
+controls.zoomSpeed = 0.8;
+let introCam = true;
+controls.addEventListener('start', () => { introCam = false; });
+
+/* lights */
+scene.add(new THREE.HemisphereLight(0xbcd3e6, 0x15110c, 0.35));
+const key = new THREE.DirectionalLight(0xfff3e6, 2.1);
+key.position.set(2.6, 4.6, 2.2);
+key.castShadow = true;
+key.shadow.mapSize.set(HQ ? 2048 : 1024, HQ ? 2048 : 1024);
+Object.assign(key.shadow.camera, { left: -1.7, right: 1.7, top: 2.2, bottom: -1.2, near: 0.5, far: 12 });
+key.shadow.bias = -0.0004; key.shadow.normalBias = 0.015;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x8fd2ff, 2.2); rim.position.set(-3, 2.6, -3.2); scene.add(rim);
+const fill = new THREE.DirectionalLight(0xffd7ad, 0.55); fill.position.set(-2.5, 1.2, 2.5); scene.add(fill);
+
+/* post */
+const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.45, 1.35);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+let gtao = null;
+import('three/addons/postprocessing/GTAOPass.js').then(({ GTAOPass }) => {
+  try {
+    gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+    gtao.output = GTAOPass.OUTPUT.Default;
+    gtao.blendIntensity = 0.85;
+    gtao.updateGtaoMaterial({ radius: 0.12, distanceExponent: 1.4, thickness: 1.2, scale: 1, samples: 12 });
+    gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+    gtao.enabled = HQ;
+    composer.insertPass(gtao, 1);
+  } catch (e) { console.warn('GTAO unavailable', e); gtao = null; }
+}).catch(() => {});
+
+/* ============================== textures ============================== */
+function canvasTex(S, draw, { srgb = false, rep = 1 } = {}) {
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  draw(c.getContext('2d'), S);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); t.anisotropy = maxAniso;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function panelFeatures(g, S, v, mode) {
+  const dark = mode === 'bump' ? 'rgb(36,36,36)' : 'rgb(215,215,215)';
+  g.fillStyle = dark; g.strokeStyle = dark;
+  if (v === 0) {
+    for (const [x, y] of [[0.13, 0.13], [0.87, 0.13], [0.13, 0.87], [0.87, 0.87]]) { g.beginPath(); g.arc(x * S, y * S, 7, 0, TAU); g.fill(); }
+  } else if (v === 1) {
+    for (let i = 0; i < 6; i++) { const x = S * 0.6, y = S * (0.28 + i * 0.085); g.beginPath(); g.roundRect(x, y, S * 0.26, S * 0.035, S * 0.017); g.fill(); }
+  } else if (v === 2) {
+    g.lineWidth = 2.2; const r = 13;
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 4; j++) {
+      const cx = S * 0.2 + i * r * 1.75 + (j % 2) * r * 0.87, cy = S * 0.62 + j * r * 1.5;
+      g.beginPath(); for (let k = 0; k < 6; k++) { const a = k / 6 * TAU + Math.PI / 6; g[k ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * r * 0.82, cy + Math.sin(a) * r * 0.82); } g.closePath(); g.stroke();
+    }
+  } else if (v === 3) {
+    g.font = `600 ${S * 0.085}px "IBM Plex Mono", monospace`; g.textBaseline = 'middle';
+    g.fillText('CERV-07', S * 0.16, S * 0.36);
+    g.font = `500 ${S * 0.036}px "IBM Plex Mono", monospace`;
+    g.fillText('MK.IV  TI-6AL-4V  LOT 0419', S * 0.16, S * 0.48);
+    for (let i = 0; i < 26; i++) { const w = 1 + (R() * 4 | 0); g.fillRect(S * 0.16 + i * 9, S * 0.58, w, S * 0.07); }
+  }
+}
+function panelMaps(v) {
+  const S = 512;
+  const rough = canvasTex(S, (g) => {
+    g.fillStyle = 'rgb(128,128,128)'; g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 1700; i++) {
+      const y = R() * S, x = R() * S, l = 30 + R() * 280, c = 95 + R() * 70 | 0;
+      g.strokeStyle = `rgba(${c},${c},${c},.35)`; g.lineWidth = 0.6 + R() * 1.4;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + l, y + (R() - 0.5) * 2); g.stroke();
+    }
+    for (let i = 0; i < 26; i++) {
+      const x = R() * S, y = R() * S, a = R() * TAU, l = 10 + R() * 50;
+      g.strokeStyle = 'rgba(55,55,55,.7)'; g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+    }
+    g.strokeStyle = 'rgba(70,70,70,.8)'; g.lineWidth = 12; g.strokeRect(6, 6, S - 12, S - 12);
+    g.strokeStyle = 'rgb(205,205,205)'; g.lineWidth = 6; g.strokeRect(34, 34, S - 68, S - 68);
+    panelFeatures(g, S, v, 'rough');
+  });
+  const bump = canvasTex(S, (g) => {
+    g.fillStyle = 'rgb(128,128,128)'; g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 500; i++) {
+      const y = R() * S, x = R() * S, l = 30 + R() * 200, c = 118 + R() * 20 | 0;
+      g.strokeStyle = `rgba(${c},${c},${c},.5)`; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + l, y); g.stroke();
+    }
+    g.strokeStyle = 'rgb(30,30,30)'; g.lineWidth = 5; g.strokeRect(34, 34, S - 68, S - 68);
+    g.strokeStyle = 'rgb(175,175,175)'; g.lineWidth = 2; g.strokeRect(39, 39, S - 78, S - 78);
+    panelFeatures(g, S, v, 'bump');
+  });
+  return { rough, bump };
+}
+const PANEL = [0, 1, 2, 3].map(panelMaps);
+const carbon = (() => {
+  const draw = (g, S, mode) => {
+    const n = 16, c = S / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      const horiz = (i + j) % 2 === 0;
+      const grd = horiz ? g.createLinearGradient(i * c, 0, i * c + c, 0) : g.createLinearGradient(0, j * c, 0, j * c + c);
+      if (mode === 'map') { grd.addColorStop(0, '#0d0f12'); grd.addColorStop(0.5, '#2c3138'); grd.addColorStop(1, '#0d0f12'); }
+      else { grd.addColorStop(0, '#404040'); grd.addColorStop(0.5, '#c8c8c8'); grd.addColorStop(1, '#404040'); }
+      g.fillStyle = grd; g.fillRect(i * c, j * c, c, c);
+    }
+  };
+  return { map: canvasTex(256, (g, S) => draw(g, S, 'map'), { srgb: true, rep: 3 }), bump: canvasTex(256, (g, S) => draw(g, S, 'bump'), { rep: 3 }) };
+})();
+const floorTex = canvasTex(1024, (g, S) => {
+  g.fillStyle = '#16191d'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 9000; i++) { const c = 18 + R() * 16 | 0; g.fillStyle = `rgba(${c},${c + 2},${c + 5},.6)`; g.fillRect(R() * S, R() * S, 2, 2); }
+  g.strokeStyle = 'rgba(160,190,210,.07)'; g.lineWidth = 1;
+  for (let i = 0; i <= 16; i++) { g.beginPath(); g.moveTo(i * S / 16, 0); g.lineTo(i * S / 16, S); g.stroke(); g.beginPath(); g.moveTo(0, i * S / 16); g.lineTo(S, i * S / 16); g.stroke(); }
+  g.strokeStyle = 'rgba(160,200,220,.16)'; g.lineWidth = 2;
+  for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(i * S / 4, 0); g.lineTo(i * S / 4, S); g.stroke(); g.beginPath(); g.moveTo(0, i * S / 4); g.lineTo(S, i * S / 4); g.stroke(); }
+}, { srgb: true, rep: 3 });
+
+/* ============================== materials ============================== */
+const clipPlane = new THREE.Plane(V(0, -1, 0), 100);
+const CLIP = [clipPlane];
+const ALL_MATS = [];
+function mat(p, clip = true) {
+  const m = new THREE.MeshPhysicalMaterial(p);
+  if (clip) { m.clippingPlanes = CLIP; m.clipShadows = true; }
+  ALL_MATS.push(m);
+  return m;
+}
+const M = {};
+M.armor = PANEL.map((t, i) => mat({ color: 0x9da6b0, metalness: 1, roughness: 0.9, roughnessMap: t.rough, bumpMap: t.bump, bumpScale: 1.6, clearcoat: 0.25, clearcoatRoughness: 0.38, envMapIntensity: 0.8 }));
+M.dark = PANEL.map((t) => mat({ color: 0x353b43, metalness: 0.95, roughness: 0.95, roughnessMap: t.rough, bumpMap: t.bump, bumpScale: 1.6, clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 0.9 }));
+M.pale = mat({ color: 0xe3e7ea, metalness: 0.6, roughness: 0.75, roughnessMap: PANEL[0].rough, bumpMap: PANEL[0].bump, bumpScale: 1.4, clearcoat: 0.4 });
+M.brass = mat({ color: 0xc99a45, metalness: 1, roughness: 0.27, envMapIntensity: 1.25 });
+M.chrome = mat({ color: 0xeef1f4, metalness: 1, roughness: 0.07 });
+M.steel = mat({ color: 0x9aa1a9, metalness: 1, roughness: 0.32 });
+M.gun = mat({ color: 0x2b2f35, metalness: 0.9, roughness: 0.42, clearcoat: 0.3 });
+M.carbon = mat({ color: 0xffffff, map: carbon.map, bumpMap: carbon.bump, bumpScale: 0.8, metalness: 0.35, roughness: 0.48, clearcoat: 0.7, clearcoatRoughness: 0.18 });
+M.rubber = mat({ color: 0x141518, metalness: 0, roughness: 0.82 });
+M.orange = mat({ color: 0xb8521c, metalness: 0.15, roughness: 0.55 });
+M.antler = mat({ color: 0x4b525b, metalness: 1, roughness: 0.3, clearcoat: 0.6, clearcoatRoughness: 0.15 });
+M.glass = mat({ color: 0x0a1418, metalness: 0, roughness: 0.03, clearcoat: 1, transparent: true, opacity: 0.32, depthWrite: false });
+M.eye = mat({ color: 0x041014, emissive: 0x5ef2ff, emissiveIntensity: 0 });
+M.core = mat({ color: 0x041014, emissive: 0x5ef2ff, emissiveIntensity: 0 });
+M.tip = mat({ color: 0x041014, emissive: 0x5ef2ff, emissiveIntensity: 0 });
+M.strip = mat({ color: 0x041014, emissive: 0x5ef2ff, emissiveIntensity: 0 });
+M.conduit = mat({ color: 0x0b2a30, emissive: 0x2bbfd0, emissiveIntensity: 0, roughness: 0.4, metalness: 0.2 });
+const lineMat = new THREE.LineBasicMaterial({ color: 0x5ef2ff, transparent: true, opacity: 0.45, clippingPlanes: CLIP });
+
+/* ============================== geometry helpers ============================== */
+const lathe = (pts, seg = 32) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(Math.max(0, r), y)), seg);
+function normG(g) {
+  const x = g.index ? g.toNonIndexed() : g.clone();
+  if (!x.attributes.normal) x.computeVertexNormals();
+  if (!x.attributes.uv) x.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(x.attributes.position.count * 2), 2));
+  for (const k of Object.keys(x.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') x.deleteAttribute(k);
+  x.morphAttributes = {}; x.clearGroups();
+  return x;
+}
+function comboGeo(entries, nMats) {
+  const by = Array.from({ length: nMats }, () => []);
+  entries.forEach(([g, i]) => by[i].push(normG(g)));
+  const used = [], map = [];
+  by.forEach((l, i) => { if (l.length) { used.push(l.length > 1 ? mergeGeometries(l, false) : l[0]); map.push(i); } });
+  return { geo: used.length > 1 ? mergeGeometries(used, true) : used[0], map };
+}
+function combo(entries, mats) {
+  const { geo, map } = comboGeo(entries, mats.length);
+  const ms = map.map(i => mats[i]);
+  return new THREE.Mesh(geo, ms.length > 1 ? ms : ms[0]);
+}
+const tr = (g, x = 0, y = 0, z = 0) => g.translate(x, y, z);
+
+/* parametric surface frame: point + outward normal */
+function frame(S, u, a) {
+  const e = 1e-4, p = S.p(u, a);
+  const du = S.p(u + e, a).sub(S.p(u - e, a));
+  const da = S.p(u, a + e).sub(S.p(u, a - e));
+  const n = du.cross(da);
+  if (n.lengthSq() < 1e-16 || !isFinite(n.x)) n.copy(p).sub(S.c(u));
+  n.normalize();
+  if (n.dot(_e.copy(p).sub(S.c(u))) < 0) n.negate();
+  return { p, n };
+}
+/* thick curved armor plate with chamfered edges */
+function plateGeo(S, u0, u1, a0, a1, o = {}) {
+  const nu = o.nu ?? 8, na = o.na ?? 8, t = o.t ?? 0.011, b = o.b ?? 0.0045, lift = o.lift ?? 0, cf = o.cf ?? 0.07;
+  const us = [u0], as = [a0];
+  for (let i = 0; i <= nu; i++) us.push(lerp(u0 + (u1 - u0) * cf, u1 - (u1 - u0) * cf, i / nu)); us.push(u1);
+  for (let j = 0; j <= na; j++) as.push(lerp(a0 + (a1 - a0) * cf, a1 - (a1 - a0) * cf, j / na)); as.push(a1);
+  const NU = us.length, NA = as.length, O = (i, j) => i * NA + j;
+  const F = [];
+  for (let i = 0; i < NU; i++) for (let j = 0; j < NA; j++) F.push(frame(S, us[i], as[j]));
+  const isB = (i, j) => i === 0 || j === 0 || i === NU - 1 || j === NA - 1;
+  const pos = [], uv = [], idx = [];
+  const outer = (i, j) => { const f = F[O(i, j)]; return f.p.clone().addScaledVector(f.n, lift + (isB(i, j) ? -b : 0)); };
+  const inner = (i, j) => { const f = F[O(i, j)]; return f.p.clone().addScaledVector(f.n, lift - t); };
+  for (let i = 0; i < NU; i++) for (let j = 0; j < NA; j++) { const v = outer(i, j); pos.push(v.x, v.y, v.z); uv.push((us[i] - u0) / (u1 - u0), (as[j] - a0) / (a1 - a0)); }
+  const base = NU * NA;
+  for (let i = 0; i < NU; i++) for (let j = 0; j < NA; j++) { const v = inner(i, j); pos.push(v.x, v.y, v.z); uv.push((us[i] - u0) / (u1 - u0), (as[j] - a0) / (a1 - a0)); }
+  const ic = NU >> 1, jc = NA >> 1, p0 = outer(ic, jc);
+  const wind = _a.subVectors(outer(ic + 1, jc), p0).cross(_b.subVectors(outer(ic, jc + 1), p0)).dot(F[O(ic, jc)].n) > 0;
+  for (let i = 0; i < NU - 1; i++) for (let j = 0; j < NA - 1; j++) {
+    const a = O(i, j), bb = O(i + 1, j), c = O(i, j + 1), d = O(i + 1, j + 1);
+    if (wind) idx.push(a, bb, c, bb, d, c, base + a, base + c, base + bb, base + bb, base + c, base + d);
+    else idx.push(a, c, bb, bb, c, d, base + a, base + bb, base + c, base + bb, base + d, base + c);
+  }
+  const loop = [];
+  for (let i = 0; i < NU - 1; i++) loop.push([i, 0]);
+  for (let j = 0; j < NA - 1; j++) loop.push([NU - 1, j]);
+  for (let i = NU - 1; i > 0; i--) loop.push([i, NA - 1]);
+  for (let j = NA - 1; j > 0; j--) loop.push([0, j]);
+  for (let k = 0; k < loop.length; k++) {
+    const [i, j] = loop[k], [i2, j2] = loop[(k + 1) % loop.length];
+    const o1 = outer(i, j), o2 = outer(i2, j2), n1 = inner(i, j), n2 = inner(i2, j2);
+    const s = pos.length / 3;
+    for (const v of [o1, o2, n2, n1]) { pos.push(v.x, v.y, v.z); uv.push(0.02, 0.02); }
+    const wn = _a.subVectors(o2, o1).cross(_b.subVectors(n1, o1));
+    if (wn.dot(_c.subVectors(o1, p0)) > 0) idx.push(s, s + 1, s + 3, s + 1, s + 2, s + 3);
+    else idx.push(s, s + 3, s + 1, s + 1, s + 3, s + 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+const RIVET = new THREE.SphereGeometry(0.0042, 10, 5, 0, TAU, 0, Math.PI / 2).scale(1, 0.6, 1);
+function rivetGeos(S, u0, u1, a0, a1, lift, count = 3) {
+  const out = [], iu = (u1 - u0) * 0.13, ia = (a1 - a0) * 0.13, pts = [];
+  for (let k = 0; k <= count; k++) { const f = k / count; pts.push([lerp(u0 + iu, u1 - iu, f), a0 + ia], [lerp(u0 + iu, u1 - iu, f), a1 - ia]); }
+  for (let k = 1; k < count; k++) { const f = k / count; pts.push([u0 + iu, lerp(a0 + ia, a1 - ia, f)], [u1 - iu, lerp(a0 + ia, a1 - ia, f)]); }
+  for (const [u, a] of pts) {
+    const { p, n } = frame(S, u, a);
+    const g = RIVET.clone().applyQuaternion(_q.setFromUnitVectors(UP, n));
+    out.push(tr(g, p.x + n.x * (lift - 0.0005), p.y + n.y * (lift - 0.0005), p.z + n.z * (lift - 0.0005)));
+  }
+  return out;
+}
+function plate(parent, S, u0, u1, a0, a1, o, material, info) {
+  if (a0 > a1) [a0, a1] = [a1, a0];
+  const entries = [[plateGeo(S, u0, u1, a0, a1, o), 0]];
+  if (o.rivets) rivetGeos(S, u0, u1, a0, a1, o.lift ?? 0, o.rivets).forEach(g => entries.push([g, 1]));
+  const mesh = combo(entries, [material, M.steel]);
+  parent.add(mesh);
+  return reg(mesh, info);
+}
+function gearGeo(teeth, rOut, depth, holes = true) {
+  const td = Math.min(rOut * 0.16, 0.012), rRoot = rOut - td, s = TAU / teeth, sh = new THREE.Shape();
+  for (let i = 0; i < teeth; i++) {
+    const a = i * s;
+    [[a, rRoot], [a + s * 0.18, rRoot], [a + s * 0.32, rOut], [a + s * 0.58, rOut], [a + s * 0.72, rRoot]].forEach(([ang, r], k) => {
+      const x = Math.cos(ang) * r, y = Math.sin(ang) * r;
+      if (i === 0 && k === 0) sh.moveTo(x, y); else sh.lineTo(x, y);
+    });
+  }
+  sh.closePath();
+  const hub = rOut * 0.24;
+  const h = new THREE.Path(); h.absarc(0, 0, hub * 0.5, 0, TAU, true); sh.holes.push(h);
+  if (holes && rOut > 0.025) {
+    const n = 5, ro = rRoot * 0.8, rc = (ro + hub) / 2, rr = (ro - hub) / 2 * 0.8;
+    for (let k = 0; k < n; k++) { const p = new THREE.Path(); p.absarc(Math.cos(k / n * TAU) * rc, Math.sin(k / n * TAU) * rc, rr, 0, TAU, true); sh.holes.push(p); }
+  }
+  const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: true, bevelThickness: depth * 0.14, bevelSize: Math.min(depth * 0.14, td * 0.18), bevelSegments: 1, curveSegments: 10 });
+  return g.translate(0, 0, -depth / 2);
+}
+const hubCache = new Map();
+function hubMesh(r, w) {
+  const k = r.toFixed(4) + '|' + w.toFixed(4);
+  if (!hubCache.has(k)) {
+    const prof = [[0, -w / 2], [r * 0.5, -w / 2], [r * 0.56, -w / 2 + 0.0025], [r * 0.9, -w / 2 + 0.0025], [r, -w / 2 + 0.007], [r, w / 2 - 0.007], [r * 0.9, w / 2 - 0.0025], [r * 0.56, w / 2 - 0.0025], [r * 0.5, w / 2], [0, w / 2]];
+    const e = [[lathe(prof, 32).rotateZ(-Math.PI / 2), 0], [new THREE.CylinderGeometry(r * 0.3, r * 0.3, w + 0.01, 18).rotateZ(-Math.PI / 2), 1]];
+    for (let i = 0; i < 6; i++) {
+      const a = i / 6 * TAU;
+      for (const sx of [-1, 1]) e.push([tr(new THREE.CylinderGeometry(0.0034, 0.0034, 0.004, 6).rotateZ(-Math.PI / 2), sx * (w / 2 - 0.0008), Math.cos(a) * r * 0.73, Math.sin(a) * r * 0.73), 2]);
+    }
+    hubCache.set(k, comboGeo(e, 3));
+  }
+  const { geo, map } = hubCache.get(k), all = [M.steel, M.brass, M.gun];
+  const ms = map.map(i => all[i]);
+  return new THREE.Mesh(geo, ms.length > 1 ? ms : ms[0]);
+}
+
+/* ============================== part registry ============================== */
+const parts = [];
+const LAYERS = { armor: true, muscle: true, skeleton: true, core: true };
+const LAYER_NAME = { armor: 'Armor', muscle: 'Actuators', skeleton: 'Skeleton', core: 'Core' };
+const LAYER_COL = { armor: '#cfd6dd', muscle: '#e0a63e', skeleton: '#7d8896', core: '#5ef2ff' };
+const LAYER_MAG = { armor: 0.3, muscle: 0.16, skeleton: 0.07, core: 0.05 };
+let partNo = 100;
+function reg(obj, info = {}) {
+  const p = { obj, name: info.name || 'Part', layer: info.layer || 'armor', mat: info.mat || '', role: info.role || '', key: info.key || null, custom: info.custom || null, home: obj.position.clone(), off: V(), offN: V(), pop: 0, no: `CV7-${(partNo += 7).toString().padStart(4, '0')}` };
+  parts.push(p);
+  obj.traverse(o => { if (o.isMesh) { o.userData.part = p; o.castShadow = true; o.receiveShadow = true; } });
+  return obj;
+}
+const anchor = (parent, x, y, z) => { const o = new THREE.Object3D(); o.position.set(x, y, z); parent.add(o); return o; };
+
+/* ============================== rig hierarchy ============================== */
+const root = new THREE.Group(); scene.add(root);
+const body = new THREE.Group(); root.add(body);
+const rig = new THREE.Group(); root.add(rig);
+const BODYC = V(0, 1.0, 0);
+
+/* ---------- torso surface ---------- */
+const TZ = u => -0.56 + 1.08 * u;
+const TSH = u => Math.pow(Math.max(0, 1 - Math.pow(Math.abs(2 * u - 1), 5)), 0.32);
+const TRX = u => 0.172 * TSH(u) * (1 + 0.1 * Math.sin(Math.PI * u));
+const TRY = u => (0.195 + 0.05 * Math.exp(-Math.pow((u - 0.68) / 0.22, 2))) * TSH(u);
+const TCY = u => 0.99 + 0.05 * u;
+const torsoS = { p: (u, a) => V(TRX(u) * spow(Math.sin(a), 0.8), TCY(u) + TRY(u) * spow(Math.cos(a), 0.85), TZ(u)), c: u => V(0, TCY(u), TZ(u)) };
+const uOfZ = z => (z + 0.56) / 1.08;
+
+/* ---------- torso armor ---------- */
+const TROWS = [[0.012, 0.17], [0.17, 0.33], [0.33, 0.5], [0.5, 0.66], [0.66, 0.82], [0.82, 0.988]];
+TROWS.forEach(([u0, u1], ri) => {
+  const g = 0.0045;
+  plate(body, torsoS, u0 + g, u1 - g, -0.32, 0.32, { nu: 6, na: 5, rivets: 3, lift: 0.003 }, M.dark[ri % 2 ? 0 : 2],
+    { name: `Dorsal plate D${ri + 1}`, layer: 'armor', mat: 'Gunmetal Ti-6Al-4V, riveted', role: 'Shields the spine and the dorsal drive bus', key: ri === 2 ? 'dorsal' : null });
+  for (const s of [1, -1]) {
+    const side = s > 0 ? 'L' : 'R';
+    plate(body, torsoS, u0 + g, u1 - g, s * 0.35, s * 1.19, { nu: 7, na: 6 }, M.armor[ri === 3 && s > 0 ? 3 : (ri + (s > 0 ? 0 : 1)) % 3],
+      { name: `Flank plate ${side}${ri + 1}-U`, layer: 'armor', mat: 'Brushed titanium, clear-coated', role: 'Upper flank skin; takes side impacts' });
+    if (ri !== 2 && ri !== 3) plate(body, torsoS, u0 + g, u1 - g, s * 1.23, s * 2.05, { nu: 7, na: 6 }, M.armor[(ri + 1) % 3],
+      { name: `Flank plate ${side}${ri + 1}-L`, layer: 'armor', mat: 'Brushed titanium, clear-coated', role: 'Lower flank skin over the drivetrain' });
+    if (ri !== 2 && ri !== 3) plate(body, torsoS, u0 + g, u1 - g, s * 2.09, s * 3.1, { nu: 6, na: 5 }, M.dark[1],
+      { name: `Belly plate ${side}${ri + 1}`, layer: 'armor', mat: 'Gunmetal titanium', role: 'Ventral shielding' });
+  }
+});
+/* end caps */
+for (const [u, n] of [[0.016, 'Rear bulkhead'], [0.985, 'Chest bulkhead']]) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), M.dark[0]);
+  m.scale.set(TRX(u) * 0.98, TRY(u) * 0.98, 0.03); m.position.set(0, TCY(u), TZ(u) + (u < 0.5 ? 0.01 : -0.01));
+  body.add(m); reg(m, { name: n, layer: 'armor', mat: 'Gunmetal', role: 'Seals the end of the hull' });
+}
+/* glowing seam strips */
+for (const s of [1, -1]) {
+  const pts = []; for (let i = 0; i <= 24; i++) { const u = lerp(0.18, 0.82, i / 24); const f = frame(torsoS, u, s * 1.21); pts.push(f.p.addScaledVector(f.n, -0.004)); }
+  const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, 0.0032, 6), M.strip);
+  body.add(m); reg(m, { name: 'Light seam', layer: 'core', mat: 'Fused silica light pipe', role: 'Carries status light from the core along the flank' });
+}
+
+/* ---------- skeleton: spine + ribs ---------- */
+const vertebraGeo = (() => {
+  const { geo } = comboGeo([[new RoundedBoxGeometry(0.04, 0.03, 0.036, 2, 0.006), 0], [tr(new RoundedBoxGeometry(0.008, 0.05, 0.022, 1, 0.003), 0, 0.035, -0.004), 0], [new RoundedBoxGeometry(0.088, 0.007, 0.016, 1, 0.003), 0], [tr(new THREE.CylinderGeometry(0.012, 0.012, 0.006, 14), 0, 0, 0).rotateX(Math.PI / 2).translate(0, 0, 0.02), 0]], 1);
+  return geo;
+})();
+{
+  const n = 22, im = new THREE.InstancedMesh(vertebraGeo, M.carbon, n), d = new THREE.Object3D();
+  for (let i = 0; i < n; i++) {
+    const u = lerp(0.05, 0.93, i / (n - 1)), u2 = u + 0.01;
+    const y = TCY(u) + TRY(u) * 0.6, y2 = TCY(u2) + TRY(u2) * 0.6;
+    d.position.set(0, y, TZ(u)); d.rotation.set(-Math.atan2(y2 - y, TZ(u2) - TZ(u)), 0, 0); d.updateMatrix(); im.setMatrixAt(i, d.matrix);
+  }
+  body.add(im); reg(im, { name: 'Dorsal spine', layer: 'skeleton', mat: 'Carbon-fibre composite', role: '22 articulated vertebrae carrying the main data and power bus', key: 'spine' });
+}
+{
+  const ribs = [];
+  const us = []; for (let i = 0; i < 9; i++) us.push(lerp(0.37, 0.83, i / 8));
+  for (const u of us) for (const s of [1, -1]) {
+    const pts = []; for (let k = 0; k <= 20; k++) { const a = s * lerp(0.28, 3.02, k / 20); pts.push(V(TRX(u) * 0.86 * spow(Math.sin(a), 0.8), TCY(u) + TRY(u) * 0.86 * spow(Math.cos(a), 0.85), TZ(u))); }
+    ribs.push([new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 30, 0.0075, 6), 0]);
+  }
+  const keel = []; for (const u of us) keel.push(V(0, TCY(u) - TRY(u) * 0.86, TZ(u)));
+  ribs.push([new THREE.TubeGeometry(new THREE.CatmullRomCurve3(keel), 40, 0.011, 8), 0]);
+  const m = combo(ribs, [M.carbon]); body.add(m);
+  reg(m, { name: 'Rib cage', layer: 'skeleton', mat: 'Carbon-fibre composite', role: '18 ribs and a keel; a crumple cage around the core', key: 'ribs' });
+}
+
+/* ---------- core ---------- */
+const coreG = new THREE.Group(); coreG.position.set(0, 0.975, 0.2); body.add(coreG);
+const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.046, 3), M.core); coreG.add(orb);
+reg(orb, { name: 'Reactor core', layer: 'core', mat: 'Contained plasma in sapphire shell', role: 'Powers every actuator. Pulses with each breath', key: 'core' });
+const lattice = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(0.058, 1)), lineMat); coreG.add(lattice);
+const gimbals = [];
+[[0.075, 0], [0.088, 1], [0.101, 2]].forEach(([r, i]) => {
+  const g = new THREE.Group(); coreG.add(g);
+  const e = [[new THREE.TorusGeometry(r, 0.0042, 8, 72), 0]];
+  for (let k = 0; k < 12; k++) { const a = k / 12 * TAU; e.push([tr(new THREE.BoxGeometry(0.004, 0.004, 0.012), Math.cos(a) * r, Math.sin(a) * r, 0), 1]); }
+  const m = combo(e, [M.brass, M.gun]); g.add(m);
+  reg(m, { name: `Gimbal ring ${'ABC'[i]}`, layer: 'core', mat: 'Polished brass', role: 'Keeps the core field stable while the stag moves' });
+  gimbals.push(g);
+});
+{
+  const cap = [[0, 0.112], [0.05, 0.112], [0.07, 0.106], [0.082, 0.096], [0.084, 0.088], [0.076, 0.084], [0.03, 0.084], [0.03, 0.078], [0, 0.078]];
+  const e = [[lathe(cap, 36), 0], [lathe(cap.map(([r, y]) => [r, -y]).reverse(), 36), 0]];
+  for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + Math.PI / 4; e.push([tr(new THREE.CylinderGeometry(0.005, 0.005, 0.17, 10), Math.cos(a) * 0.112, 0, Math.sin(a) * 0.112), 1]); }
+  const m = combo(e, [M.gun, M.chrome]); coreG.add(m);
+  reg(m, { name: 'Core cage', layer: 'core', mat: 'Gunmetal, chrome posts', role: 'Mounts the core to the rib keel' });
+}
+const coreLight = new THREE.PointLight(0x5ef2ff, 0, 1.1, 1.6); coreG.add(coreLight);
+
+/* ---------- internals: cells, tanks, gearboxes ---------- */
+{
+  const e = [];
+  for (const x of [-0.045, 0.045]) for (const y of [0.85, 0.9]) for (const z of [-0.24, -0.11]) {
+    e.push([tr(new THREE.CylinderGeometry(0.021, 0.021, 0.11, 20).rotateX(Math.PI / 2), x, y, z), 0]);
+    e.push([tr(new THREE.CylinderGeometry(0.0215, 0.0215, 0.018, 20).rotateX(Math.PI / 2), x, y, z), 2]);
+    for (const dz of [-0.058, 0.058]) e.push([tr(new THREE.CylinderGeometry(0.016, 0.019, 0.006, 20).rotateX(Math.PI / 2), x, y, z + dz), 1]);
+  }
+  const m = combo(e, [M.gun, M.brass, M.orange]); body.add(m);
+  reg(m, { name: 'Power cell array', layer: 'skeleton', mat: 'Steel-cased cells, brass terminals', role: '8 cells buffer the core for peak loads (a leap, a sprint)', key: 'cells' });
+}
+{
+  const prof = [[0, -0.09], [0.012, -0.09], [0.024, -0.082], [0.028, -0.068], [0.028, 0.068], [0.024, 0.082], [0.012, 0.09], [0.008, 0.1], [0, 0.1]];
+  const e = [];
+  for (const x of [-0.08, 0.08]) {
+    e.push([tr(lathe(prof, 24).rotateX(Math.PI / 2), x, 0.85, 0.17), 0]);
+    for (const dz of [-0.04, 0.0, 0.04]) e.push([tr(new THREE.TorusGeometry(0.0285, 0.002, 6, 28), x, 0.85, 0.17 + dz), 1]);
+  }
+  const m = combo(e, [M.brass, M.gun]); body.add(m);
+  reg(m, { name: 'Hydraulic accumulators', layer: 'skeleton', mat: 'Spun brass pressure vessels', role: 'Store pressurised fluid for the leg actuators' });
+}
+const gearsAnim = [];
+function gearbox(x, y, z, rBig, name, label) {
+  const g = new THREE.Group(); g.position.set(x, y, z); body.add(g);
+  const big = new THREE.Mesh(gearGeo(22, rBig, 0.012), M.brass); big.geometry.rotateY(Math.PI / 2); g.add(big);
+  const small = new THREE.Mesh(gearGeo(13, rBig * 0.6, 0.012), M.steel); small.geometry.rotateY(Math.PI / 2);
+  small.position.set(0, rBig * 0.62, rBig * 1.25); g.add(small);
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.25, 14).rotateZ(Math.PI / 2), M.chrome); g.add(shaft);
+  const m = new THREE.Group(); [big, small].forEach(o => o.castShadow = true);
+  reg(big, { name, layer: 'skeleton', mat: 'Hobbed brass, 22 teeth', role: label, key: name === 'Hip gearbox' ? 'gear' : null });
+  reg(small, { name: name + ' idler', layer: 'skeleton', mat: 'Hardened steel, 13 teeth', role: 'Reverses drive to the opposite leg' });
+  reg(shaft, { name: name + ' shaft', layer: 'skeleton', mat: 'Chrome-plated steel', role: 'Couples left and right legs' });
+  gearsAnim.push({ big, small, ratio: 22 / 13 });
+  return g;
+}
+gearbox(0, 1.04, -0.36, 0.062, 'Hip gearbox', 'Couples both hind legs so the gait stays in phase');
+gearbox(0, 0.96, 0.34, 0.05, 'Shoulder gearbox', 'Couples both front legs');
+
+/* ---------- legs ---------- */
+const limbS = (y0, len, rx0, rz0, rx1, rz1, zo = 0, t0 = 1, tu = 0.3) => ({
+  p: (u, a) => { const tp = t0 + (1 - t0) * sstep(0, tu, u); return V(lerp(rx0, rx1, u) * tp * spow(Math.sin(a), 0.85), y0 - len * u, zo + lerp(rz0, rz1, u) * (0.4 + 0.6 * tp) * spow(Math.cos(a), 0.85)); },
+  c: u => V(0, y0 - len * u, zo)
+});
+const FRONT = [
+  { n: 'Humerus strut', len: 0.30, rest: 0.42, w: 0.04, d: 0.055 },
+  { n: 'Radius strut', len: 0.34, rest: -0.44, w: 0.032, d: 0.042 },
+  { n: 'Cannon bone', len: 0.26, rest: 0.02, w: 0.024, d: 0.03 },
+  { n: 'Pastern', len: 0.09, rest: -0.38, w: 0.02, d: 0.024 },
+  { n: 'Hoof', len: 0, rest: 0.38 }
+];
+const HIND = [
+  { n: 'Femur strut', len: 0.34, rest: -0.42, w: 0.045, d: 0.06 },
+  { n: 'Tibia strut', len: 0.36, rest: 0.95, w: 0.035, d: 0.045 },
+  { n: 'Cannon bone', len: 0.30, rest: -0.53, w: 0.025, d: 0.03 },
+  { n: 'Pastern', len: 0.09, rest: -0.36, w: 0.02, d: 0.024 },
+  { n: 'Hoof', len: 0, rest: 0.36 }
+];
+const legs = [];
+const toeGeo = new THREE.SphereGeometry(0.026, 18, 10, 0, TAU, 0, Math.PI / 2).scale(0.72, 1.9, 1.25);
+function buildLeg(s, front) {
+  const spec = front ? FRONT : HIND, side = s > 0 ? 'L' : 'R', tag = `${front ? 'F' : 'H'}${side}`;
+  const legName = `${s > 0 ? 'left' : 'right'} ${front ? 'fore' : 'hind'}leg`;
+  const rootG = new THREE.Group(); rootG.scale.x = s;
+  rootG.position.set(s * (front ? 0.15 : 0.14), front ? 1.01 : 1.05, front ? 0.36 : -0.38);
+  body.add(rootG);
+  const J = []; let parent = rootG;
+  spec.forEach((sg, i) => {
+    const j = new THREE.Group(); if (i) j.position.y = -spec[i - 1].len; j.rotation.x = sg.rest; parent.add(j); J.push(j); parent = j;
+    if (sg.len > 0) {
+      const strut = new THREE.Mesh(new RoundedBoxGeometry(sg.w, sg.len - 0.03, sg.d, 2, Math.min(sg.w, sg.d) * 0.3), M.carbon);
+      strut.position.y = -sg.len / 2; j.add(strut);
+      reg(strut, { name: `${sg.n} (${tag})`, layer: 'skeleton', mat: 'Carbon-fibre box section', role: `Main load path of the ${legName}` });
+      if (i < 2) {
+        const e = [];
+        for (const x of [-1, 1]) e.push([tr(new THREE.CylinderGeometry(0.0045, 0.0045, sg.len * 0.78, 10), x * (sg.w / 2 + 0.006), -sg.len / 2, 0), 0]);
+        for (const f of [0.2, 0.5, 0.8]) e.push([tr(new RoundedBoxGeometry(sg.w + 0.022, 0.008, 0.012, 1, 0.003), 0, -sg.len * f, 0), 1]);
+        const m = combo(e, [M.chrome, M.gun]); j.add(m);
+        reg(m, { name: `Guide rails (${tag})`, layer: 'skeleton', mat: 'Chrome rods, gunmetal clamps', role: 'Stiffen the strut against twisting' });
+      }
+      const hr = Math.max(sg.w, sg.d) * (i === 0 ? 0.75 : 0.6);
+      const hub = hubMesh(hr, sg.w + 0.024); j.add(hub);
+      reg(hub, { name: `${['Shoulder', 'Elbow', 'Carpal', 'Fetlock'][i] && front ? ['Shoulder', 'Elbow', 'Carpal', 'Fetlock'][i] : ['Hip', 'Stifle', 'Hock', 'Fetlock'][i]} joint (${tag})`, layer: 'skeleton', mat: 'Machined steel, brass bearing cap', role: 'Sealed roller-bearing joint' });
+    } else {
+      const e = [[tr(toeGeo.clone(), 0.016, -0.057, 0.012), 0], [tr(toeGeo.clone(), -0.016, -0.057, 0.012), 0],
+        [tr(new THREE.TorusGeometry(0.028, 0.0055, 8, 28).rotateX(Math.PI / 2), 0, -0.006, 0.006), 1],
+        [tr(new THREE.SphereGeometry(0.008, 10, 8), 0.012, 0.004, -0.026), 0], [tr(new THREE.SphereGeometry(0.008, 10, 8), -0.012, 0.004, -0.026), 0]];
+      const m = combo(e, [M.gun, M.brass]); j.add(m);
+      reg(m, { name: `Cloven hoof (${tag})`, layer: 'armor', mat: 'Hardened gunmetal, brass coronet', role: 'Split toes spread on landing for grip' });
+      const hub = hubMesh(0.016, 0.034); j.add(hub);
+      reg(hub, { name: `Pastern joint (${tag})`, layer: 'skeleton', mat: 'Machined steel', role: 'Absorbs ground shock' });
+    }
+  });
+  /* shells */
+  if (front) {
+    const sS = limbS(0.13, 0.34, 0.066, 0.096, 0.042, 0.05, 0, 0.4, 0.3);
+    plate(J[0], sS, 0.0, 0.48, -0.5, 1.45, { nu: 7, na: 7 }, M.armor[1], { name: `Scapula plate (${tag})`, layer: 'armor', mat: 'Brushed titanium', role: 'Covers the shoulder drive' });
+    plate(J[0], sS, 0.0, 0.48, 1.49, 2.95, { nu: 7, na: 6 }, M.armor[0], { name: `Scapula plate aft (${tag})`, layer: 'armor', mat: 'Brushed titanium', role: 'Covers the shoulder drive' });
+    plate(J[0], sS, 0.5, 0.78, -0.3, 2.6, { nu: 5, na: 8, rivets: 2 }, M.dark[0], { name: `Humeral band (${tag})`, layer: 'armor', mat: 'Gunmetal titanium', role: 'Clamps the shoulder shell' });
+    const fS = limbS(-0.03, 0.3, 0.03, 0.034, 0.024, 0.026);
+    plate(J[1], fS, 0.08, 0.72, -1.1, 1.1, { nu: 6, na: 5 }, M.armor[2], { name: `Forearm guard (${tag})`, layer: 'armor', mat: 'Brushed titanium', role: 'Protects the radius strut' });
+  } else {
+    const hS = limbS(0.11, 0.4, 0.09, 0.14, 0.05, 0.072, -0.015, 0.35, 0.32);
+    plate(J[0], hS, 0.0, 0.46, 0.12, 1.6, { nu: 8, na: 7, rivets: 3 }, M.armor[3], { name: `Haunch plate (${tag})`, layer: 'armor', mat: 'Brushed titanium, stamped', role: 'Big load-bearing shell over the femur drive', key: s > 0 ? 'haunch' : null });
+    plate(J[0], hS, 0.0, 0.46, 1.64, 3.05, { nu: 8, na: 7 }, M.armor[0], { name: `Rump plate (${tag})`, layer: 'armor', mat: 'Brushed titanium', role: 'Covers the rear of the haunch' });
+    plate(J[0], hS, 0.0, 0.46, -0.65, 0.08, { nu: 8, na: 4 }, M.dark[2], { name: `Flank plate (${tag})`, layer: 'armor', mat: 'Gunmetal titanium', role: 'Front of the haunch' });
+    plate(J[0], hS, 0.48, 0.82, -0.4, 2.9, { nu: 5, na: 8 }, M.armor[1], { name: `Thigh plate (${tag})`, layer: 'armor', mat: 'Brushed titanium', role: 'Covers the lower femur' });
+    const tS = limbS(-0.03, 0.32, 0.034, 0.04, 0.026, 0.028);
+    plate(J[1], tS, 0.06, 0.7, -1.1, 1.1, { nu: 6, na: 5 }, M.armor[2], { name: `Shin guard (${tag})`, layer: 'armor', mat: 'Brushed titanium', role: 'Protects the tibia strut' });
+    /* calcaneus lever behind the hock */
+    const lev = new THREE.Mesh(new RoundedBoxGeometry(0.016, 0.075, 0.016, 1, 0.005), M.gun);
+    lev.position.set(0, 0.028, -0.03); lev.rotation.x = -0.6; J[2].add(lev);
+    reg(lev, { name: `Calcaneus lever (${tag})`, layer: 'skeleton', mat: 'Forged gunmetal', role: 'Lever arm for the Achilles actuator' });
+  }
+  const leg = { s, front, rootG, J, rest: spec.map(x => x.rest), tag };
+  legs.push(leg);
+  return leg;
+}
+const LF = buildLeg(1, true), RF = buildLeg(-1, true), LH = buildLeg(1, false), RH = buildLeg(-1, false);
+LF.ph = 0.25; RF.ph = 0.75; LH.ph = 0; RH.ph = 0.5;
+/* plant hooves on the floor */
+scene.updateMatrixWorld(true);
+for (const leg of legs) {
+  const box = new THREE.Box3().setFromObject(leg.J[4]);
+  leg.rootG.position.y -= box.min.y - 0.001;
+}
+
+/* ---------- neck & head ---------- */
+const neckYaw = new THREE.Group(); neckYaw.position.set(0, 1.12, 0.4); body.add(neckYaw);
+const neckPitch = new THREE.Group(); neckPitch.rotation.x = 0.6; neckYaw.add(neckPitch);
+const NECK_TILT = 0.6;
+const neckS = { p: (u, a) => V(lerp(0.11, 0.066, u) * spow(Math.sin(a), 0.85), -0.1 + 0.6 * u, lerp(0.135, 0.08, u) * spow(Math.cos(a), 0.85) + 0.01 * u), c: u => V(0, -0.1 + 0.6 * u, 0.01 * u) };
+const NROWS = 5;
+for (let i = 0; i < NROWS; i++) {
+  const u0 = lerp(0.14, 0.97, i / NROWS) + 0.004, u1 = lerp(0.14, 0.97, (i + 1) / NROWS) - 0.004, lift = (i % 2) * 0.003;
+  plate(neckPitch, neckS, u0, u1, -0.7, 0.7, { nu: 4, na: 6, lift }, M.dark[i % 3], { name: `Throat plate N${i + 1}`, layer: 'armor', mat: 'Gunmetal titanium', role: 'Overlapping scales let the neck flex' });
+  for (const s of [1, -1]) plate(neckPitch, neckS, u0, u1, s * 0.73, s * 2.45, { nu: 4, na: 8, lift }, M.armor[(i + (s > 0 ? 0 : 2)) % 3], { name: `Neck scale ${s > 0 ? 'L' : 'R'}${i + 1}`, layer: 'armor', mat: 'Brushed titanium', role: 'Overlapping scales let the neck flex' });
+}
+{
+  const im = new THREE.InstancedMesh(vertebraGeo, M.carbon, 8), d = new THREE.Object3D();
+  for (let i = 0; i < 8; i++) { d.position.set(0, lerp(-0.04, 0.45, i / 7), -0.035); d.rotation.set(-Math.PI / 2, 0, 0); d.scale.setScalar(0.8); d.updateMatrix(); im.setMatrixAt(i, d.matrix); }
+  neckPitch.add(im); reg(im, { name: 'Cervical spine', layer: 'skeleton', mat: 'Carbon-fibre composite', role: '8 vertebrae, each with ±12° of travel' });
+  const fs = new THREE.Shape(); fs.moveTo(0, 0); fs.lineTo(0.05, 0.012); fs.quadraticCurveTo(0.064, 0.032, 0.036, 0.05); fs.lineTo(0, 0.062); fs.closePath();
+  const fin = new THREE.ExtrudeGeometry(fs, { depth: 0.004, bevelEnabled: true, bevelThickness: 0.0012, bevelSize: 0.0012, bevelSegments: 1 }).translate(0, 0, -0.002).rotateY(Math.PI / 2);
+  const e = [];
+  for (let i = 0; i < 8; i++) { const u = lerp(0.12, 0.92, i / 7); const p = neckS.p(u, Math.PI); e.push([fin.clone().scale(1, 1, 1).translate(0, p.y, p.z + 0.012), 0]); }
+  const m = combo(e, [M.dark[1]]); neckPitch.add(m);
+  reg(m, { name: 'Mane fins', layer: 'armor', mat: 'Gunmetal titanium blades', role: 'Heat sinks for the cervical drive' });
+}
+const headYaw = new THREE.Group(); headYaw.position.set(0, 0.47, 0); neckPitch.add(headYaw);
+const headPitch = new THREE.Group(); headPitch.rotation.x = 0.3; headYaw.add(headPitch);
+{
+  const hub = hubMesh(0.03, 0.07); headYaw.add(hub);
+  reg(hub, { name: 'Atlas joint', layer: 'skeleton', mat: 'Machined steel', role: 'Two-axis joint that aims the head' });
+}
+const HZ = u => -0.07 + 0.42 * u;
+const HSH = u => { const a = Math.min(1, u / 0.13), b = Math.min(1, (1 - u) / 0.07); return Math.sqrt(Math.max(0, 1 - (1 - a) * (1 - a))) * Math.sqrt(Math.max(0, 1 - (1 - b) * (1 - b))); };
+const HRX = u => lerp(0.066, 0.03, Math.pow(u, 1.1)) * Math.max(0.15, HSH(u));
+const HRY = u => lerp(0.074, 0.034, Math.pow(u, 0.9)) * Math.max(0.15, HSH(u));
+const HCY = u => 0.025 - 0.035 * u;
+const headS = { p: (u, a) => V(HRX(u) * spow(Math.sin(a), 0.8), HCY(u) + HRY(u) * spow(Math.cos(a), 0.85), HZ(u)), c: u => V(0, HCY(u), HZ(u)) };
+plate(headPitch, headS, 0.03, 0.56, -0.62, 0.62, { nu: 8, na: 6, lift: 0.002 }, M.armor[3], { name: 'Crown plate', layer: 'armor', mat: 'Brushed titanium, serial-stamped', role: 'Protects the main processor' });
+for (const s of [1, -1]) plate(headPitch, headS, 0.1, 0.8, s * 0.65, s * 1.86, { nu: 8, na: 6 }, M.armor[s > 0 ? 0 : 1], { name: `Cheek plate ${s > 0 ? 'L' : 'R'}`, layer: 'armor', mat: 'Brushed titanium', role: 'Houses the optical sensor' });
+plate(headPitch, headS, 0.58, 0.985, -0.66, 0.66, { nu: 6, na: 6, rivets: 2 }, M.dark[0], { name: 'Nasal ridge', layer: 'armor', mat: 'Gunmetal titanium', role: 'Covers the olfactory sensor array' });
+plate(headPitch, headS, 0.08, 0.95, 1.9, TAU - 1.9, { nu: 8, na: 8 }, M.dark[2], { name: 'Mandible', layer: 'armor', mat: 'Gunmetal titanium', role: 'Lower jaw shell' });
+{
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), M.gun); m.scale.set(0.026, 0.024, 0.018); m.position.set(0, HCY(0.97), HZ(0.97) - 0.002);
+  headPitch.add(m); reg(m, { name: 'Muzzle sensor', layer: 'armor', mat: 'Gunmetal', role: 'Chemical sensor: smells the air' });
+  const e = []; for (const x of [-0.011, 0.011]) e.push([tr(new THREE.CapsuleGeometry(0.004, 0.01, 4, 8).rotateZ(0.5 * Math.sign(x)), x, HCY(0.97) - 0.006, HZ(0.97) + 0.024), 0]);
+  const n = combo(e, [M.rubber]); headPitch.add(n); reg(n, { name: 'Nostril vents', layer: 'armor', mat: 'Rubber seals', role: 'Air intake for the muzzle sensor' });
+  const back = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), M.gun); back.scale.set(0.055, 0.06, 0.03); back.position.set(0, HCY(0.02), HZ(0.02));
+  headPitch.add(back); reg(back, { name: 'Occipital cap', layer: 'armor', mat: 'Gunmetal', role: 'Closes the back of the skull' });
+}
+/* left-side features, mirrored for the right */
+const eyes = [], ears = [], antlerHinges = [];
+const ANTLER = { len: 0.13, r0: 0.019, r1: 0.016, rest: [-0.62, 0.15, -0.72], fold: [-1.5, 0, -0.16], kids: [
+  { at: 0.5, len: 0.13, r0: 0.011, r1: 0.005, rest: [1.55, 0.2, 0.35], fold: [0.12, 0, 0], kids: [] },
+  { len: 0.15, r0: 0.016, r1: 0.013, rest: [0.42, 0, 0.32], fold: [0, 0, 0], kids: [
+    { at: 0.75, len: 0.15, r0: 0.01, r1: 0.0045, rest: [1.1, 0.25, -0.15], fold: [0.12, 0, 0], kids: [] },
+    { len: 0.14, r0: 0.013, r1: 0.011, rest: [0.36, 0, 0.3], fold: [0, 0, 0], kids: [
+      { at: 0.8, len: 0.14, r0: 0.009, r1: 0.004, rest: [0.95, -0.2, -0.35], fold: [0.12, 0, 0], kids: [] },
+      { len: 0.12, r0: 0.011, r1: 0.008, rest: [0.3, 0, 0.25], fold: [0, 0, 0], kids: [
+        { len: 0.1, r0: 0.008, r1: 0.0035, rest: [0.75, 0.45, -0.3], fold: [0.1, 0, 0], kids: [] },
+        { len: 0.1, r0: 0.008, r1: 0.0035, rest: [-0.35, -0.35, 0.45], fold: [-0.1, 0, 0], kids: [] },
+        { len: 0.08, r0: 0.007, r1: 0.003, rest: [0.15, 0.2, -0.7], fold: [0, 0, 0], kids: [] }
+      ] }
+    ] }
+  ] }
+] };
+function antlerEntries(len, r0, r1, tip) {
+  const m1 = lerp(r0, r1, 0.6);
+  const e = [[lathe([[0, 0], [r0 * 0.9, 0], [r0, len * 0.06], [r0, len * 0.2], [r0 * 0.84, len * 0.23], [r0 * 0.97, len * 0.26], [m1, len * 0.6], [m1 * 0.86, len * 0.63], [m1 * 0.97, len * 0.66], [r1, len * 0.94], [r1 * 0.55, len], [0, len]], 18), 0],
+    [new THREE.SphereGeometry(r0 * 1.04, 14, 10), 1], [new THREE.CylinderGeometry(r0 * 0.34, r0 * 0.34, r0 * 2.7, 10).rotateZ(Math.PI / 2), 1]];
+  if (tip) e.push([tr(new THREE.SphereGeometry(r1 * 1.25, 12, 8), 0, len, 0), 2]);
+  return e;
+}
+let antlerDepthMax = 0;
+function buildAntler(parent, node, depth, isRight) {
+  const h = new THREE.Group(); parent.add(h);
+  h.userData = { node, depth }; antlerHinges.push(h); antlerDepthMax = Math.max(antlerDepthMax, depth);
+  const m = combo(antlerEntries(node.len, node.r0, node.r1, !node.kids.length), [M.antler, M.brass, M.tip]); h.add(m);
+  reg(m, { name: depth === 0 ? `Antler beam (${isRight ? 'R' : 'L'})` : node.at ? 'Antler tine' : 'Antler beam segment', layer: 'armor', mat: 'Dark titanium, brass knuckles', role: 'Folding sensor array; each tip is an RF antenna', key: depth === 0 && !isRight ? 'antler' : null });
+  node.kids.forEach(k => { const c = buildAntler(h, k, depth + 1, isRight); c.position.y = node.len * (k.at ?? 1); });
+  return h;
+}
+for (const s of [1, -1]) {
+  const side = new THREE.Group(); side.scale.x = s; headPitch.add(side);
+  /* eye */
+  const ef = frame(headS, 0.33, 1.0);
+  const eye = new THREE.Group(); eye.position.copy(ef.p).addScaledVector(ef.n, 0.002); eye.quaternion.setFromUnitVectors(ZAX, ef.n); side.add(eye);
+  const housing = combo([[lathe([[0.0185, -0.01], [0.025, -0.01], [0.027, -0.005], [0.027, 0.002], [0.023, 0.006], [0.0188, 0.006], [0.0188, 0.0]], 36).rotateX(Math.PI / 2), 0],
+    [tr(new THREE.TorusGeometry(0.0225, 0.0016, 6, 40), 0, 0, 0.0055), 1]], [M.gun, M.brass]);
+  eye.add(housing); reg(housing, { name: `Optical sensor housing (${s > 0 ? 'L' : 'R'})`, layer: 'armor', mat: 'Gunmetal, brass bezel', role: 'Holds the lens and aperture' });
+  const glass = new THREE.Mesh(new THREE.SphereGeometry(0.0188, 28, 12, 0, TAU, 0, Math.PI / 2).rotateX(Math.PI / 2).scale(1, 1, 0.55), M.glass); eye.add(glass);
+  const iris = new THREE.Group(); iris.position.z = 0.0015; eye.add(iris);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.0055, 0.0165, 40), M.eye); iris.add(ring);
+  reg(ring, { name: `Optical sensor (${s > 0 ? 'L' : 'R'})`, layer: 'core', mat: 'Sapphire lens, emissive iris', role: 'Stereo vision; tracks your cursor', key: s > 0 ? 'eye' : null });
+  const blades = [];
+  for (let k = 0; k < 7; k++) { const bl = new THREE.Mesh(new THREE.BoxGeometry(0.013, 0.0035, 0.0007), M.gun); const holder = new THREE.Group(); holder.rotation.z = k / 7 * TAU; holder.add(bl); iris.add(holder); blades.push(bl); }
+  eyes.push({ iris, blades, glass });
+  /* ear */
+  const af = frame(headS, 0.13, 0.62);
+  const earP = new THREE.Group(); earP.position.copy(af.p); earP.rotation.set(-0.3, 0, -1.0); side.add(earP);
+  const swivel = new THREE.Group(); earP.add(swivel);
+  const es = new THREE.Shape(); es.moveTo(-0.022, 0); es.bezierCurveTo(-0.042, 0.05, -0.02, 0.1, 0, 0.14); es.bezierCurveTo(0.02, 0.1, 0.042, 0.05, 0.022, 0); es.closePath();
+  const outerE = new THREE.ExtrudeGeometry(es, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.002, bevelSize: 0.002, bevelSegments: 2 }).translate(0, 0, -0.006);
+  const innerE = new THREE.ExtrudeGeometry(es, { depth: 0.002, bevelEnabled: false }).scale(0.72, 0.76, 1).translate(0, 0.012, 0.001);
+  const earM = combo([[outerE, 0], [innerE, 1], [tr(new THREE.CylinderGeometry(0.004, 0.004, 0.004, 12).rotateX(Math.PI / 2), 0, 0.045, 0.003), 2], [tr(new THREE.CylinderGeometry(0.009, 0.011, 0.02, 14), 0, -0.004, -0.003), 3]], [M.armor[0], M.dark[0], M.eye, M.gun]);
+  swivel.add(earM); reg(earM, { name: `Audio fin (${s > 0 ? 'L' : 'R'})`, layer: 'armor', mat: 'Titanium shell, damped liner', role: 'Directional microphone; swivels toward sound' });
+  ears.push(swivel);
+  /* antler */
+  const pf = frame(headS, 0.2, 0.33);
+  const ped = new THREE.Group(); ped.position.copy(pf.p); side.add(ped);
+  const pedM = combo([[new THREE.CylinderGeometry(0.019, 0.024, 0.02, 20), 0], [tr(gearGeo(16, 0.028, 0.006, false).rotateX(Math.PI / 2), 0, -0.004, 0), 1]], [M.gun, M.brass]);
+  ped.add(pedM); reg(pedM, { name: `Pedicle drive (${s > 0 ? 'L' : 'R'})`, layer: 'skeleton', mat: 'Gunmetal, brass ring gear', role: 'Motor that folds and raises the antler' });
+  const ar = buildAntler(ped, ANTLER, 0, s < 0); ar.position.y = 0.006;
+  eyes[eyes.length - 1].ped = pedM;
+}
+
+/* ---------- tail ---------- */
+const tailP = new THREE.Group(); tailP.position.set(0, TCY(0.02) + 0.07, -0.56); tailP.rotation.x = 0.55; body.add(tailP);
+{
+  const hub = hubMesh(0.016, 0.03); tailP.add(hub); reg(hub, { name: 'Tail joint', layer: 'skeleton', mat: 'Machined steel', role: 'Flicks the tail' });
+  const ts = new THREE.Shape(); ts.moveTo(-0.03, 0); ts.bezierCurveTo(-0.045, -0.05, -0.02, -0.1, 0, -0.12); ts.bezierCurveTo(0.02, -0.1, 0.045, -0.05, 0.03, 0); ts.closePath();
+  const m = combo([[new THREE.ExtrudeGeometry(ts, { depth: 0.01, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 2 }).translate(0, -0.01, -0.005).rotateX(-0.25), 0]], [M.pale]);
+  tailP.add(m); reg(m, { name: 'Tail flag', layer: 'armor', mat: 'Pale ceramic-coated titanium', role: 'Signals alarm to the herd' });
+}
+
+/* ============================== actuators & cables ============================== */
+const pistons = [], cables = [];
+class Piston {
+  constructor(a, b, { r = 0.013, name = 'Actuator', key = null, role = 'Hydraulic linear actuator', body: bodyMat = M.gun } = {}) {
+    this.a = a; this.b = b;
+    scene.updateMatrixWorld(true);
+    const L0 = a.getWorldPosition(_a).distanceTo(b.getWorldPosition(_b));
+    this.Lr = L0 * 0.62; const Lb = L0 * 0.55;
+    this.g = new THREE.Group(); rig.add(this.g);
+    const eyelet = new THREE.TorusGeometry(r * 0.9, r * 0.34, 8, 18).rotateY(Math.PI / 2);
+    const prof = [[0, -0.004], [r * 1.25, -0.004], [r * 1.25, 0.012], [r * 1.02, 0.016], [r * 1.02, Lb * 0.3], [r * 1.14, Lb * 0.3 + 0.003], [r * 1.14, Lb * 0.3 + 0.01], [r * 1.02, Lb * 0.3 + 0.013], [r * 1.02, Lb - 0.014], [r * 1.22, Lb - 0.01], [r * 1.22, Lb], [r * 0.62, Lb + 0.002], [r * 0.5, Lb + 0.006], [0, Lb + 0.006]];
+    this.barrel = combo([[lathe(prof, 26), 0], [eyelet.clone(), 1], [new THREE.CylinderGeometry(r * 0.38, r * 0.38, 0.012, 10).rotateX(Math.PI / 2).translate(0, Lb * 0.7, r * 1.2), 2]], [bodyMat, M.steel, M.brass]);
+    this.rod = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.46, r * 0.46, this.Lr, 16), M.chrome);
+    this.end = combo([[eyelet.clone(), 0], [tr(new THREE.CylinderGeometry(r * 0.62, r * 0.5, r * 1.2, 14), 0, -r * 1.2, 0), 1]], [M.steel, M.brass]);
+    this.g.add(this.barrel, this.rod, this.end);
+    this.off = V();
+    this.part = reg(this.g, { name, layer: 'muscle', mat: 'Gunmetal barrel, chrome rod', role, key, custom: this });
+  }
+  ends(A, B) {
+    this.a.getWorldPosition(A); this.b.getWorldPosition(B); rig.worldToLocal(A); rig.worldToLocal(B);
+    A.add(this.off); B.add(this.off);
+  }
+  update() {
+    const A = _a, B = _b; this.ends(A, B);
+    _d.subVectors(B, A); const L = _d.length(); _d.divideScalar(L || 1);
+    this.g.position.copy(A); this.g.quaternion.setFromUnitVectors(UP, _d);
+    this.rod.position.y = L - this.Lr / 2; this.end.position.y = L;
+  }
+}
+class Cable {
+  constructor(anchors, { r = 0.0055, mat: m = M.rubber, seg = 30, rad = 6, sag = 0.015, name = 'Hydraulic line', key = null, layer = 'muscle', role = 'Carries pressurised fluid to the actuators', matName = 'Braided rubber hose' } = {}) {
+    Object.assign(this, { an: anchors, r, seg, rad, sag });
+    const nv = (seg + 1) * (rad + 1);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
+    const idx = [];
+    for (let i = 0; i < seg; i++) for (let j = 0; j < rad; j++) { const a = i * (rad + 1) + j, b = a + rad + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+    g.setIndex(idx);
+    this.mesh = new THREE.Mesh(g, m); this.mesh.frustumCulled = false; rig.add(this.mesh);
+    this.curve = new THREE.CatmullRomCurve3(anchors.map(() => V()), false, 'centripetal');
+    this.off = V(); this.mid = V();
+    this.part = reg(this.mesh, { name, layer, mat: matName, role, key, custom: this });
+  }
+  update() {
+    const n = this.an.length;
+    this.an.forEach((o, i) => {
+      const p = this.curve.points[i]; o.getWorldPosition(p); rig.worldToLocal(p); p.add(this.off);
+      if (i > 0 && i < n - 1) p.y -= this.sag;
+    });
+    const pos = this.mesh.geometry.attributes.position.array, nor = this.mesh.geometry.attributes.normal.array;
+    const P = _a, T = _b, N = _c, B = _d; let k = 0;
+    for (let i = 0; i <= this.seg; i++) {
+      const t = i / this.seg; this.curve.getPoint(t, P); this.curve.getTangent(t, T);
+      if (i === 0) { N.set(1, 0, 0); if (Math.abs(T.x) > 0.9) N.set(0, 0, 1); }
+      N.addScaledVector(T, -N.dot(T)).normalize(); B.crossVectors(T, N);
+      for (let j = 0; j <= this.rad; j++) {
+        const a = j / this.rad * TAU, cs = Math.cos(a), sn = Math.sin(a);
+        const nx = N.x * cs + B.x * sn, ny = N.y * cs + B.y * sn, nz = N.z * cs + B.z * sn;
+        pos[k] = P.x + nx * this.r; pos[k + 1] = P.y + ny * this.r; pos[k + 2] = P.z + nz * this.r;
+        nor[k] = nx; nor[k + 1] = ny; nor[k + 2] = nz; k += 3;
+      }
+      if (i === this.seg >> 1) this.mid.copy(P);
+    }
+    this.mesh.geometry.attributes.position.needsUpdate = true; this.mesh.geometry.attributes.normal.needsUpdate = true;
+    this.mesh.geometry.computeBoundingSphere();
+  }
+}
+for (const L of legs) {
+  const s = L.s, J = L.J, tag = L.tag;
+  if (L.front) {
+    pistons.push(new Piston(anchor(J[0], 0, -0.05, -0.05), anchor(J[1], 0, -0.08, -0.03), { r: 0.012, name: `Elbow actuator (${tag})`, role: 'Extends the elbow: the push-off stroke' }));
+    pistons.push(new Piston(anchor(J[1], 0, -0.1, 0.03), anchor(J[2], 0, -0.07, 0.022), { r: 0.009, name: `Carpal actuator (${tag})`, role: 'Folds the knee on the forward swing' }));
+    pistons.push(new Piston(anchor(body, s * 0.1, 1.12, 0.22), anchor(J[0], 0, -0.13, 0.04), { r: 0.012, name: `Shoulder actuator (${tag})`, role: 'Swings the foreleg forward' }));
+  } else {
+    pistons.push(new Piston(anchor(J[0], 0, -0.1, 0.06), anchor(J[1], 0, -0.09, 0.035), { r: 0.013, name: `Stifle actuator (${tag})`, role: 'Straightens the knee under load', key: s > 0 ? 'stifle' : null }));
+    pistons.push(new Piston(anchor(J[1], 0, -0.07, -0.04), anchor(J[2], 0, 0.058, -0.052), { r: 0.012, name: `Achilles actuator (${tag})`, role: 'Drives the hock: the jump and the kick', key: s > 0 ? 'achilles' : null, body: M.brass }));
+    pistons.push(new Piston(anchor(body, s * 0.1, 0.94, -0.18), anchor(J[0], 0, -0.13, 0.05), { r: 0.013, name: `Hip actuator (${tag})`, role: 'Pulls the hind leg forward' }));
+  }
+  const ox = 0.036;
+  cables.push(new Cable([anchor(body, s * 0.08, 1.12, L.front ? 0.3 : -0.3), anchor(J[0], ox, -0.06, -0.035), anchor(J[1], ox * 0.8, -0.12, -0.03), anchor(J[2], ox * 0.6, -0.04, -0.02)], { mat: M.orange, name: `Hydraulic line (${tag})`, key: L.s > 0 && !L.front ? 'cable' : null }));
+  cables.push(new Cable([anchor(body, s * 0.06, 1.1, L.front ? 0.32 : -0.32), anchor(J[0], ox, -0.08, 0.035), anchor(J[1], ox * 0.8, -0.1, 0.028), anchor(J[2], ox * 0.6, -0.08, 0.02)], { r: 0.0045, name: `Return line (${tag})`, role: 'Returns fluid to the accumulators' }));
+  cables.push(new Cable([anchor(coreG, s * 0.05, -0.05, L.front ? 0.04 : -0.04), anchor(body, s * 0.1, 0.92, L.front ? 0.28 : -0.2), anchor(J[0], 0, 0.0, 0)], { r: 0.0045, mat: M.conduit, layer: 'core', name: `Power conduit (${tag})`, role: 'Feeds power from the core to the joint motor', matName: 'Shielded glow conduit', sag: 0.02 }));
+}
+for (const s of [1, -1]) pistons.push(new Piston(anchor(body, s * 0.05, 1.17, 0.28), anchor(neckPitch, s * 0.045, 0.3, -0.06), { r: 0.012, name: `Neck lift actuator (${s > 0 ? 'L' : 'R'})`, role: 'Raises and lowers the neck', body: M.brass }));
+cables.push(new Cable([anchor(coreG, 0, 0.06, 0.04), anchor(neckPitch, 0, 0.02, 0.0), anchor(neckPitch, 0, 0.25, -0.01), anchor(headPitch, 0, -0.01, -0.03)], { r: 0.006, mat: M.conduit, layer: 'core', name: 'Spinal power conduit', role: 'Powers the head, eyes and antlers', matName: 'Shielded glow conduit', sag: 0 }));
+for (const s of [1, -1]) cables.push(new Cable([anchor(body, s * 0.04, 1.16, 0.33), anchor(neckPitch, s * 0.05, 0.15, -0.055), anchor(neckPitch, s * 0.04, 0.4, -0.05), anchor(headPitch, s * 0.03, 0.0, -0.05)], { r: 0.004, name: `Neck hydraulic line (${s > 0 ? 'L' : 'R'})`, sag: 0.005 }));
+
+/* ============================== floor ============================== */
+{
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(2.4, 120), new THREE.MeshStandardMaterial({ color: 0x9aa3ad, map: floorTex, roughness: 0.78, metalness: 0.25 }));
+  disc.rotation.x = -Math.PI / 2; disc.receiveShadow = true; scene.add(disc);
+  const ring = new THREE.Mesh(lathe([[2.4, 0], [2.4, 0.012], [2.43, 0.018], [2.5, 0.018], [2.52, 0.006], [2.52, -0.01]], 160), new THREE.MeshStandardMaterial({ color: 0x3a4048, metalness: 1, roughness: 0.35 }));
+  ring.receiveShadow = true; scene.add(ring);
+  const ticks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.008, 0.002, 0.05), new THREE.MeshBasicMaterial({ color: 0x5ef2ff, transparent: true, opacity: 0.5 }), 72);
+  const d = new THREE.Object3D();
+  for (let i = 0; i < 72; i++) { const a = i / 72 * TAU; d.position.set(Math.cos(a) * 2.465, 0.019, Math.sin(a) * 2.465); d.rotation.set(0, -a + Math.PI / 2, 0); d.scale.set(1, 1, i % 6 ? 0.5 : 1); d.updateMatrix(); ticks.setMatrixAt(i, d.matrix); }
+  scene.add(ticks);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x0c0e11, roughness: 1 }));
+  ground.rotation.x = -Math.PI / 2; ground.position.y = -0.012; scene.add(ground);
+}
+
+/* ============================== explode directions ============================== */
+scene.updateMatrixWorld(true);
+function isUnder(o, g) { for (; o; o = o.parent) if (o === g) return true; return false; }
+function projectOnLine(c, origin, dir) { return origin.clone().addScaledVector(dir, _e.subVectors(c, origin).dot(dir)); }
+/* every part flies away from the axis of its own body region: a cleaner exploded diagram */
+function regionRef(p, c) {
+  const o = p.custom ? (p.custom.b || p.custom.an[p.custom.an.length - 1]) : p.obj;
+  if (isUnder(o, headPitch)) return headPitch.localToWorld(V(0, 0.0, 0.12));
+  if (isUnder(o, neckPitch)) return projectOnLine(c, neckPitch.getWorldPosition(V()), V(0, 1, 0).transformDirection(neckPitch.matrixWorld));
+  for (const L of legs) if (isUnder(o, L.rootG)) {
+    let j = o; while (j && !L.J.includes(j)) j = j.parent;
+    j = j || L.J[0];
+    return projectOnLine(c, j.getWorldPosition(V()), V(0, -1, 0).transformDirection(j.matrixWorld));
+  }
+  const u = clamp(uOfZ(c.z), 0.08, 0.92);
+  return V(0, TCY(u), clamp(c.z, -0.42, 0.4));
+}
+const _box = new THREE.Box3(), _m3 = new THREE.Matrix3();
+const layerCount = { armor: 0, muscle: 0, skeleton: 0, core: 0 };
+for (const p of parts) {
+  layerCount[p.layer]++;
+  let c;
+  if (p.custom instanceof Piston) { p.custom.ends(_a, _b); c = _a.add(_b).multiplyScalar(0.5); rig.localToWorld(c); }
+  else if (p.custom instanceof Cable) { p.custom.update(); c = rig.localToWorld(p.custom.mid.clone()); }
+  else c = _box.setFromObject(p.obj).getCenter(V());
+  p.center = c.clone();
+  const dir = c.clone().sub(regionRef(p, c));
+  dir.y += 0.012;
+  if (dir.lengthSq() < 1e-6) dir.set(0, 1, 0);
+  dir.normalize();
+  const leg = legs.find(L => isUnder(p.custom ? (p.custom.b || p.custom.an[p.custom.an.length - 1]) : p.obj, L.rootG));
+  const w = dir.multiplyScalar(LAYER_MAG[p.layer]);
+  if (leg && p.layer !== 'armor') w.x += leg.s * 0.05;
+  if (!p.custom) {
+    _m.copy(p.obj.parent.matrixWorld).invert(); _m3.setFromMatrix4(_m);
+    w.applyMatrix3(_m3);
+  }
+  p.off.copy(w); p.offN.copy(w).normalize();
+}
+$('#partCount').textContent = parts.length + ' parts';
+document.querySelectorAll('[data-n]').forEach(el => el.textContent = layerCount[el.dataset.n]);
+
+/* ============================== swarm (dissolve) ============================== */
+const SW = { state: 'off', N: 0, h: 100, meshes: [] };
+function swarmSetup() {
+  const N = HQ ? 12000 : 5200;
+  const per = Math.ceil(N / 3);
+  const bolt = mergeGeometries([normG(new THREE.CylinderGeometry(0.0024, 0.0024, 0.017, 8)), normG(tr(new THREE.CylinderGeometry(0.0052, 0.0052, 0.0038, 6), 0, 0.0085, 0))]);
+  const geos = [gearGeo(9, 0.0105, 0.0035, false), new THREE.CylinderGeometry(0.0072, 0.0072, 0.0042, 6), bolt];
+  const mats = [new THREE.MeshStandardMaterial({ color: 0xb98c3e, metalness: 1, roughness: 0.42, envMapIntensity: 0.75 }), new THREE.MeshStandardMaterial({ color: 0x9aa2ab, metalness: 1, roughness: 0.45, envMapIntensity: 0.7 }), new THREE.MeshStandardMaterial({ color: 0x3a3f46, metalness: 0.9, roughness: 0.5 })];
+  SW.meshes.forEach(m => { scene.remove(m); m.dispose(); });
+  SW.meshes = geos.map((g, i) => { const m = new THREE.InstancedMesh(g, mats[i], per); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.castShadow = true; m.frustumCulled = false; m.visible = false; scene.add(m); return m; });
+  Object.assign(SW, { N, pos: new Float32Array(N * 3), vel: new Float32Array(N * 3), home: new Float32Array(N * 3), nrm: new Float32Array(N * 3), rot: new Float32Array(N * 3), rv: new Float32Array(N * 3), sc: new Float32Array(N), act: new Uint8Array(N), done: new Float32Array(N) });
+  for (let i = 0; i < N; i++) { SW.sc[i] = 0.7 + R() * 0.75; for (let k = 0; k < 3; k++) { SW.rot[i * 3 + k] = R() * TAU; SW.rv[i * 3 + k] = (R() - 0.5) * 8; } }
+}
+swarmSetup();
+function sampleStag() {
+  scene.updateMatrixWorld(true);
+  const meshes = [], cum = [], ref = []; let total = 0;
+  root.traverseVisible(o => {
+    if (!o.isMesh || o.isInstancedMesh || !o.userData.part || o.material === M.glass) return;
+    const pa = o.geometry.attributes.position, ix = o.geometry.index, w = new Float32Array(pa.count * 3);
+    for (let i = 0; i < pa.count; i++) { _a.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld); w[i * 3] = _a.x; w[i * 3 + 1] = _a.y; w[i * 3 + 2] = _a.z; }
+    const mi = meshes.length; meshes.push({ w, ix });
+    const tc = (ix ? ix.count : pa.count) / 3;
+    for (let t = 0; t < tc; t++) {
+      const i0 = ix ? ix.getX(t * 3) : t * 3, i1 = ix ? ix.getX(t * 3 + 1) : t * 3 + 1, i2 = ix ? ix.getX(t * 3 + 2) : t * 3 + 2;
+      _a.fromArray(w, i0 * 3); _b.fromArray(w, i1 * 3); _c.fromArray(w, i2 * 3);
+      total += _d.subVectors(_b, _a).cross(_e.subVectors(_c, _a)).length() * 0.5;
+      cum.push(total); ref.push(mi, t);
+    }
+  });
+  let top = -1e9, bot = 1e9;
+  for (let i = 0; i < SW.N; i++) {
+    const r = R() * total; let lo = 0, hi = cum.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cum[mid] < r) lo = mid + 1; else hi = mid; }
+    const { w, ix } = meshes[ref[lo * 2]], t = ref[lo * 2 + 1];
+    const i0 = ix ? ix.getX(t * 3) : t * 3, i1 = ix ? ix.getX(t * 3 + 1) : t * 3 + 1, i2 = ix ? ix.getX(t * 3 + 2) : t * 3 + 2;
+    _a.fromArray(w, i0 * 3); _b.fromArray(w, i1 * 3); _c.fromArray(w, i2 * 3);
+    let r1 = R(), r2 = R(); if (r1 + r2 > 1) { r1 = 1 - r1; r2 = 1 - r2; }
+    _d.subVectors(_b, _a); _e.subVectors(_c, _a);
+    const p = _a.clone().addScaledVector(_d, r1).addScaledVector(_e, r2);
+    const n = _d.cross(_e).normalize(); if (n.dot(_b.subVectors(p, BODYC)) < 0) n.negate();
+    p.toArray(SW.home, i * 3); n.toArray(SW.nrm, i * 3);
+    top = Math.max(top, p.y); bot = Math.min(bot, p.y);
+  }
+  SW.top = top + 0.02; SW.bot = bot - 0.02;
+}
+const _dm = new THREE.Object3D();
+function swarmUpdate(dt, t) {
+  if (SW.state === 'off') return;
+  const { pos, vel, home, nrm, rot, rv, act, sc, N } = SW;
+  const span = SW.top - SW.bot;
+  if (SW.state === 'dissolve') { SW.h -= dt * span / 2.0; if (SW.h < SW.bot) { SW.state = 'swarm'; ui.swarmReady(); } }
+  if (SW.state === 'assemble') SW.h += dt * span / 2.6;
+  clipPlane.constant = SW.state === 'assemble' || SW.state === 'dissolve' ? SW.h : -10;
+  let ro = null, rd = null;
+  if (pointer.in && (SW.state === 'swarm' || SW.state === 'dissolve')) { raycaster.setFromCamera(pointer.ndc, camera); ro = raycaster.ray.origin; rd = raycaster.ray.direction; }
+  const RR = pointer.down ? 0.34 : 0.17, PUSH = pointer.down ? 26 : 9;
+  let alive = 0;
+  const per = SW.meshes[0].count;
+  for (let i = 0; i < N; i++) {
+    const i3 = i * 3;
+    const hx = home[i3], hy = home[i3 + 1], hz = home[i3 + 2];
+    if (SW.state === 'dissolve' && !act[i] && hy > SW.h) {
+      act[i] = 1; pos[i3] = hx; pos[i3 + 1] = hy; pos[i3 + 2] = hz;
+      const k = 0.35 + R() * 0.6;
+      vel[i3] = nrm[i3] * k + (R() - 0.5) * 0.3; vel[i3 + 1] = nrm[i3 + 1] * k + R() * 0.25; vel[i3 + 2] = nrm[i3 + 2] * k + (R() - 0.5) * 0.3;
+    }
+    const mi = i % 3, ii = (i / 3) | 0;
+    if (!act[i]) { _dm.position.set(0, -50, 0); _dm.scale.setScalar(0); _dm.updateMatrix(); SW.meshes[mi].setMatrixAt(ii, _dm.matrix); continue; }
+    alive++;
+    let tx, ty, tz, k, c, g = 0;
+    const s = sc[i];
+    if (SW.state === 'drop') { k = 0; c = 0.35; g = -9.8; }
+    else if (SW.state === 'assemble') {
+      if (hy < SW.h) { tx = hx; ty = hy; tz = hz; k = 70; c = 16.7; SW.done[i] += dt; }
+      else { const o = 0.07 + 0.03 * Math.sin(t * 2 + i); tx = hx + nrm[i3] * o; ty = hy + nrm[i3 + 1] * o; tz = hz + nrm[i3 + 2] * o; k = 9; c = 4.5; }
+    } else {
+      const o = 0.018 + 0.012 * Math.sin(t * 1.4 + i * 0.37);
+      tx = hx + nrm[i3] * o; ty = hy + nrm[i3 + 1] * o; tz = hz + nrm[i3 + 2] * o; k = 13; c = 3.4;
+    }
+    let ax = 0, ay = g, az = 0;
+    if (k) { ax += (tx - pos[i3]) * k; ay += (ty - pos[i3 + 1]) * k; az += (tz - pos[i3 + 2]) * k; }
+    ax -= vel[i3] * c; ay -= vel[i3 + 1] * c; az -= vel[i3 + 2] * c;
+    if (ro) {
+      const dx = pos[i3] - ro.x, dy = pos[i3 + 1] - ro.y, dz = pos[i3 + 2] - ro.z;
+      const along = dx * rd.x + dy * rd.y + dz * rd.z;
+      const px = dx - rd.x * along, py = dy - rd.y * along, pz = dz - rd.z * along;
+      const d2 = px * px + py * py + pz * pz;
+      if (d2 < RR * RR) { const d = Math.sqrt(d2) + 1e-4, f = PUSH * Math.pow(1 - d / RR, 2) / d * 6; ax += px * f; ay += py * f; az += pz * f; }
+    }
+    vel[i3] += ax * dt; vel[i3 + 1] += ay * dt; vel[i3 + 2] += az * dt;
+    pos[i3] += vel[i3] * dt; pos[i3 + 1] += vel[i3 + 1] * dt; pos[i3 + 2] += vel[i3 + 2] * dt;
+    let spin = 1;
+    if (SW.state === 'drop') {
+      const fl = 0.004 * s;
+      if (pos[i3 + 1] < fl) { pos[i3 + 1] = fl; if (vel[i3 + 1] < 0) vel[i3 + 1] *= -0.28; vel[i3] *= 0.86; vel[i3 + 2] *= 0.86; spin = 0.2; }
+      const rr = Math.hypot(pos[i3], pos[i3 + 2]); if (rr > 2.35) { pos[i3] *= 2.35 / rr; pos[i3 + 2] *= 2.35 / rr; vel[i3] *= -0.3; vel[i3 + 2] *= -0.3; }
+    }
+    if (SW.state === 'assemble' && hy < SW.h) spin = Math.max(0, 1 - SW.done[i] * 3);
+    const sp = Math.min(1.5, Math.hypot(vel[i3], vel[i3 + 1], vel[i3 + 2]) * 2 + 0.25) * spin;
+    rot[i3] += rv[i3] * dt * sp; rot[i3 + 1] += rv[i3 + 1] * dt * sp; rot[i3 + 2] += rv[i3 + 2] * dt * sp;
+    let scl = s;
+    if (SW.state === 'assemble' && hy < SW.h) {
+      const dd = Math.hypot(tx - pos[i3], ty - pos[i3 + 1], tz - pos[i3 + 2]);
+      if (dd < 0.006 || SW.done[i] > 0.7) { act[i] = 0; scl = 0; }
+      else scl = s * Math.min(1, dd * 30 + 0.2);
+    }
+    _dm.position.set(pos[i3], pos[i3 + 1], pos[i3 + 2]); _dm.rotation.set(rot[i3], rot[i3 + 1], rot[i3 + 2]); _dm.scale.setScalar(scl); _dm.updateMatrix();
+    SW.meshes[mi].setMatrixAt(ii, _dm.matrix);
+  }
+  SW.meshes.forEach(m => m.instanceMatrix.needsUpdate = true);
+  if (SW.state === 'assemble' && SW.h > SW.top && alive === 0) {
+    SW.state = 'off'; clipPlane.constant = 100; SW.meshes.forEach(m => m.visible = false); ui.swarmDone(); reboot();
+  }
+}
+function startDissolve() {
+  if (SW.state !== 'off') return;
+  select(null);
+  sampleStag();
+  SW.act.fill(0); SW.done.fill(0); SW.h = SW.top; SW.state = 'dissolve';
+  SW.meshes.forEach(m => m.visible = true);
+  walking = false; ui.sync();
+}
+function startAssemble() {
+  if (SW.state !== 'swarm' && SW.state !== 'drop') return;
+  SW.done.fill(0); SW.h = SW.bot; SW.state = 'assemble';
+}
+function startDrop() {
+  if (SW.state !== 'swarm') return;
+  SW.state = 'drop';
+  for (let i = 0; i < SW.N; i++) { const i3 = i * 3; SW.vel[i3] += (R() - 0.5) * 0.6; SW.vel[i3 + 1] += R() * 0.6; SW.vel[i3 + 2] += (R() - 0.5) * 0.6; }
+}
+
+/* ============================== interaction ============================== */
+const raycaster = new THREE.Raycaster();
+const pointer = { ndc: new THREE.Vector2(), in: false, down: false, x: 0, y: 0, t: 0, moved: 0, last: performance.now() };
+const cv = renderer.domElement;
+cv.addEventListener('pointermove', e => {
+  pointer.ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); pointer.in = true; pointer.last = performance.now();
+  if (pointer.down) pointer.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
+});
+cv.addEventListener('pointerleave', () => { pointer.in = false; pointer.down = false; });
+cv.addEventListener('pointerdown', e => { pointer.down = true; pointer.moved = 0; pointer.t = performance.now(); pointer.ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); pointer.in = true; });
+cv.addEventListener('pointerup', e => {
+  pointer.down = false;
+  if (pointer.moved < 6 && performance.now() - pointer.t < 450 && SW.state === 'off') pick(e);
+  if (e.pointerType !== 'mouse') pointer.in = false;
+});
+function visibleChain(o) { for (; o; o = o.parent) if (!o.visible) return false; return true; }
+function pick(e) {
+  raycaster.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
+  const hits = raycaster.intersectObject(root, true).filter(h => h.object.userData.part && visibleChain(h.object) && h.object.material !== M.glass);
+  select(hits.length ? hits[0].object.userData.part : null);
+}
+const hlCache = new Map();
+function hl(m) {
+  if (!hlCache.has(m)) { const c = m.clone(); c.emissive = new THREE.Color(0x1c6d78); c.emissiveIntensity = Math.max(0.9, m.emissiveIntensity || 0); c.clippingPlanes = CLIP; hlCache.set(m, c); }
+  return hlCache.get(m);
+}
+let selected = null;
+function select(p) {
+  if (selected) selected.obj.traverse(o => { if (o.isMesh && o.userData.orig) { o.material = o.userData.orig; delete o.userData.orig; } });
+  selected = p;
+  const info = $('#info');
+  if (!p) { info.hidden = true; document.body.classList.remove('has-info'); return; }
+  p.obj.traverse(o => { if (o.isMesh) { o.userData.orig = o.material; o.material = Array.isArray(o.material) ? o.material.map(hl) : hl(o.material); } });
+  info.hidden = false; document.body.classList.add('has-info');
+  info.style.setProperty('--c', LAYER_COL[p.layer]);
+  $('#iLayer').textContent = LAYER_NAME[p.layer] + ' layer';
+  $('#iName').textContent = p.name; $('#iMat').textContent = p.mat; $('#iRole').textContent = p.role; $('#iNo').textContent = p.no;
+}
+$('#infoX').onclick = () => select(null);
+
+/* ============================== labels ============================== */
+const LABELS = [
+  ['dorsal', 'Dorsal armor', 'riveted gunmetal'], ['haunch', 'Haunch shell', 'load-bearing Ti'], ['stifle', 'Stifle actuator', 'hydraulic'],
+  ['achilles', 'Achilles actuator', 'brass barrel'], ['ribs', 'Rib cage', 'carbon fibre'], ['core', 'Reactor core', 'power source'],
+  ['antler', 'Antler array', 'folding antenna'], ['eye', 'Optical sensor', 'stereo vision'], ['gear', 'Hip gearbox', '22T brass'],
+  ['cable', 'Hydraulic line', 'braided hose'], ['cells', 'Power cells', '8× buffer'], ['spine', 'Dorsal spine', '22 vertebrae']
+].map(([k, t, s]) => {
+  const p = parts.find(x => x.key === k); if (!p) return null;
+  const el = document.createElement('div'); el.className = 'lab'; el.style.setProperty('--c', LAYER_COL[p.layer]);
+  el.innerHTML = `${t}<small>${s}</small>`; $('#labels').appendChild(el);
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('stroke', 'rgba(231,236,241,.35)'); line.setAttribute('stroke-width', '1'); $('#leaders').appendChild(line);
+  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); dot.setAttribute('r', '2.5'); dot.setAttribute('fill', LAYER_COL[p.layer]); $('#leaders').appendChild(dot);
+  return { p, el, line, dot, o: 0 };
+}).filter(Boolean);
+const _sc = V();
+function partWorldCenter(p, out) {
+  if (p.custom instanceof Piston) { p.custom.ends(_a, _b); return rig.localToWorld(out.copy(_a).add(_b).multiplyScalar(0.5)); }
+  if (p.custom instanceof Cable) return rig.localToWorld(out.copy(p.custom.mid));
+  const o = p.obj;
+  if (o.isInstancedMesh) { if (!o.geometry.boundingSphere) o.computeBoundingSphere?.(); }
+  const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
+  const bs = o.isInstancedMesh ? (o.boundingSphere || g.boundingSphere) : g.boundingSphere;
+  return o.localToWorld(out.copy(bs.center));
+}
+function updateLabels(show) {
+  const W = innerWidth, H = innerHeight;
+  _sc.copy(BODYC).applyMatrix4(root.matrixWorld).project(camera);
+  const cx = (_sc.x * 0.5 + 0.5) * W, cy = (-_sc.y * 0.5 + 0.5) * H;
+  for (const L of LABELS) {
+    const vis = show && L.p.obj.visible && LAYERS[L.p.layer];
+    L.o = vis ? 1 : 0; L.el.style.opacity = L.o;
+    L.line.style.opacity = L.dot.style.opacity = L.o;
+    if (!vis) continue;
+    partWorldCenter(L.p, _a).project(camera);
+    if (_a.z > 1) { L.el.style.opacity = 0; L.line.style.opacity = L.dot.style.opacity = 0; continue; }
+    const x = (_a.x * 0.5 + 0.5) * W, y = (-_a.y * 0.5 + 0.5) * H;
+    let dx = x - cx, dy = y - cy; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+    L.ax = x; L.ay = y; L.lx = x + dx * 80; L.ly = y + dy * 52;
+  }
+  const on = LABELS.filter(L => L.o && L.el.style.opacity !== '0');
+  for (let it = 0; it < 6; it++) for (let i = 0; i < on.length; i++) for (let j = i + 1; j < on.length; j++) {
+    const A = on[i], B = on[j], dx = B.lx - A.lx, dy = B.ly - A.ly;
+    if (Math.abs(dx) < 130 && Math.abs(dy) < 36) { const push = (36 - Math.abs(dy)) / 2 * (dy < 0 ? -1 : 1); A.ly -= push; B.ly += push; }
+  }
+  for (const L of on) {
+    L.el.style.transform = `translate(${L.lx}px,${L.ly}px) translate(-50%,-50%)`;
+    L.line.setAttribute('x1', L.ax); L.line.setAttribute('y1', L.ay); L.line.setAttribute('x2', L.lx); L.line.setAttribute('y2', L.ly);
+    L.dot.setAttribute('cx', L.ax); L.dot.setAttribute('cy', L.ay);
+  }
+}
+
+/* ============================== UI ============================== */
+let explode = 0, explodeT = 0, walking = false, walkW = 0, antlerT = 1, antlerK = 0, labelsOn = true, dragging = false;
+const slider = $('#explode');
+const ui = {
+  sync() {
+    document.querySelectorAll('#modes .btn').forEach(b => b.classList.toggle('on', Math.abs(+b.dataset.e - explodeT) < 0.01));
+    $('#walk').classList.toggle('on', walking);
+    $('#antlers').classList.toggle('on', antlerT > 0.5);
+    $('#labelsBtn').classList.toggle('on', labelsOn);
+    const busy = SW.state !== 'off';
+    $('#walk').disabled = busy;
+    const d = $('#dissolve');
+    d.textContent = SW.state === 'off' ? 'Dissolve' : SW.state === 'dissolve' ? 'Dissolving…' : SW.state === 'assemble' ? 'Rebuilding…' : 'Reassemble';
+    d.disabled = SW.state === 'dissolve' || SW.state === 'assemble';
+    $('#drop').hidden = !(SW.state === 'swarm');
+  },
+  swarmReady() { ui.sync(); toast('Swarm mode · sweep the cursor through it · hold to blast'); },
+  swarmDone() { ui.sync(); }
+};
+document.querySelectorAll('#modes .btn').forEach(b => b.onclick = () => { explodeT = +b.dataset.e; ui.sync(); });
+slider.addEventListener('input', () => { explodeT = +slider.value; dragging = true; ui.sync(); });
+slider.addEventListener('change', () => { dragging = false; });
+$('#walk').onclick = () => { if (SW.state !== 'off') return; walking = !walking; ui.sync(); };
+$('#antlers').onclick = () => { antlerT = antlerT > 0.5 ? 0 : 1; ui.sync(); };
+$('#labelsBtn').onclick = () => { labelsOn = !labelsOn; ui.sync(); };
+$('#dissolve').onclick = () => { if (SW.state === 'off') startDissolve(); else startAssemble(); ui.sync(); };
+$('#drop').onclick = () => { startDrop(); ui.sync(); };
+document.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+  const l = c.dataset.layer; LAYERS[l] = !LAYERS[l]; c.setAttribute('aria-pressed', LAYERS[l]);
+  for (const p of parts) if (p.layer === l) p.obj.visible = LAYERS[l];
+  if (l === 'core') lattice.visible = LAYERS[l];
+  if (selected && !LAYERS[selected.layer]) select(null);
+});
+function applyQuality() {
+  renderer.setPixelRatio(Math.min(devicePixelRatio, HQ ? 2 : 1.25));
+  composer.setPixelRatio?.(renderer.getPixelRatio());
+  onResize();
+  if (gtao) gtao.enabled = HQ;
+  bloom.strength = HQ ? 0.55 : 0.45;
+  $('#qv').textContent = HQ ? 'HIGH' : 'FAST';
+}
+$('#quality').onclick = () => { HQ = !HQ; applyQuality(); if (SW.state === 'off') swarmSetup(); };
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const k = e.key.toLowerCase();
+  if (k === 'e') { explodeT = explodeT < 0.25 ? 0.5 : explodeT < 0.75 ? 1 : 0; ui.sync(); }
+  else if (k === 'w') $('#walk').click();
+  else if (k === 'd') $('#dissolve').click();
+  else if (k === 'a') $('#antlers').click();
+  else if (k === 'l') $('#labelsBtn').click();
+  else if (k === 'escape') select(null);
+});
+let toastT = 0;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3200); }
+let fitK = 1;
+function onResize() {
+  const asp = innerWidth / innerHeight;
+  camera.aspect = asp; camera.fov = asp < 1 ? 42 : 32;
+  fitK = asp < 1 ? clamp(0.92 / asp, 1, 2.1) : 1;
+  controls.maxDistance = 7.5 * fitK;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+  if (gtao) gtao.setSize(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio());
+}
+addEventListener('resize', onResize);
+ui.sync();
+
+/* ============================== animation ============================== */
+const clock = new THREE.Clock();
+let lookOv = null;
+let T = 0, bootT = 0, booted = 0, phase = 0, blinkAt = 2.5, blinkT = -1, look = { yaw: 0, pitch: 0 }, idleLook = { yaw: 0, pitch: 0, next: 0 }, tailFlick = -1, earT = [0, 0];
+let flickT = -1;
+function reboot() { flickT = 0; }
+const lookPlane = new THREE.Plane(), _hp = V(), _cd = V();
+const lerpEuler = (h, f, r, k) => h.rotation.set(lerp(f[0], r[0], k), lerp(f[1], r[1], k), lerp(f[2], r[2], k));
+function layerK(layer, e) {
+  if (layer === 'armor') return sstep(0, 0.45, e);
+  if (layer === 'muscle') return sstep(0.22, 0.68, e);
+  if (layer === 'skeleton') return sstep(0.5, 1, e);
+  return sstep(0.6, 1, e);
+}
+function animate(fixed) {
+  const dt = fixed ?? Math.min(clock.getDelta(), 1 / 30);
+  T += dt; bootT += dt;
+
+  /* boot sequence */
+  const bt = bootT;
+  const coreOn = sstep(0.3, 1.2, bt), eyeOn = bt < 1.3 ? 0 : bt < 1.9 ? (Math.sin(bt * 60) > 0 ? 1 : 0.1) : 1;
+  let flick = 1; if (flickT >= 0) { flickT += dt; flick = flickT < 0.7 ? (Math.sin(flickT * 70) > 0 ? 1 : 0.15) : 1; if (flickT > 0.7) flickT = -1; }
+  if (bt > 0.8) document.body.classList.remove('boot');
+  if (introCam) { const k = sstep(0, 3.4, T); camera.position.lerpVectors(CAM_START, CAM_END, 1 - Math.pow(1 - k, 3)).sub(controls.target).multiplyScalar(fitK).add(controls.target); if (k >= 1) introCam = false; }
+
+  /* breathing */
+  const breath = Math.sin(T * 1.55);
+  M.core.emissiveIntensity = coreOn * (3.2 + 0.9 * breath);
+  coreLight.intensity = coreOn * (1.4 + 0.4 * breath);
+  M.strip.emissiveIntensity = coreOn * (1.6 + 0.6 * Math.sin(T * 1.55 - 0.8));
+  M.conduit.emissiveIntensity = coreOn * (0.9 + 0.35 * Math.sin(T * 1.55 - 0.4));
+  M.tip.emissiveIntensity = sstep(0.6, 1, antlerK) * eyeOn * (2.4 + 0.8 * Math.sin(T * 3.1));
+  M.eye.emissiveIntensity = eyeOn * 3.2 * flick;
+  lineMat.opacity = coreOn * (0.35 + 0.2 * breath);
+  gimbals[0].rotation.x += dt * 0.9; gimbals[1].rotation.y += dt * 1.3; gimbals[2].rotation.z -= dt * 0.7; gimbals[2].rotation.x += dt * 0.3;
+  orb.rotation.y += dt * 0.4; lattice.rotation.y -= dt * 0.25; lattice.rotation.x += dt * 0.12;
+
+  /* look target */
+  let yawT = 0, pitchT = 0;
+  const idle = !pointer.in || performance.now() - pointer.last > 4500;
+  if (!idle && SW.state === 'off') {
+    headYaw.getWorldPosition(_hp); camera.getWorldDirection(_cd);
+    lookPlane.setFromNormalAndCoplanarPoint(_cd.negate(), _hp);
+    raycaster.setFromCamera(pointer.ndc, camera);
+    if (raycaster.ray.intersectPlane(lookPlane, _a)) {
+      root.worldToLocal(_a); _a.sub(neckYaw.position);
+      yawT = clamp(Math.atan2(_a.x, Math.max(0.05, _a.z)), -1.0, 1.0);
+      pitchT = clamp(Math.atan2(_a.y - 0.42, Math.hypot(_a.x, _a.z)), -0.55, 0.45);
+    }
+  } else {
+    if (T > idleLook.next) { idleLook.yaw = (R() - 0.5) * 1.1; idleLook.pitch = (R() - 0.6) * 0.4; idleLook.next = T + 2.5 + R() * 3; }
+    yawT = idleLook.yaw; pitchT = idleLook.pitch;
+  }
+  if (lookOv) { yawT = lookOv.yaw; pitchT = lookOv.pitch; }
+  look.yaw = damp(look.yaw, yawT, 3.2, dt); look.pitch = damp(look.pitch, pitchT, 3.2, dt);
+  const bootHead = 0.5 * (1 - sstep(0.7, 2.6, bt));
+  neckYaw.rotation.y = look.yaw * 0.45;
+  neckPitch.rotation.x = NECK_TILT - look.pitch * 0.45 + bootHead + 0.012 * breath;
+  headYaw.rotation.set(-neckPitch.rotation.x, look.yaw * 0.55, 0);
+  headPitch.rotation.x = 0.32 - look.pitch * 0.55 + bootHead * 0.4;
+
+  /* gait */
+  walkW = damp(walkW, walking ? 1 : 0, 2.6, dt);
+  phase += dt / 1.15 * walkW;
+  for (const L of legs) {
+    const ph = (phase + L.ph) * TAU, sw = Math.sin(ph), lift = Math.pow(Math.max(0, sw), 1.2) * walkW, c = Math.cos(ph) * walkW;
+    const idleShift = 0.025 * Math.sin(T * 0.45 + L.ph * 7) * (1 - walkW);
+    const d = L.front ? [0.32 * c + idleShift, -0.22 * lift, 1.15 * lift, 0.45 * lift, 0.2 * lift] : [0.3 * c + idleShift, 0.38 * lift, -0.75 * lift, 0.32 * lift, 0.15 * lift];
+    L.J.forEach((j, i) => j.rotation.x = L.rest[i] + d[i]);
+  }
+  root.position.y = (0.012 * Math.sin(phase * TAU * 2)) * walkW - 0.004 * (1 + breath) * 0.5;
+  root.position.x = 0.006 * Math.sin(T * 0.45) * (1 - walkW);
+  body.rotation.z = 0.012 * Math.sin(phase * TAU) * walkW;
+  floorTex.offset.y -= dt * 0.62 * walkW / (4.8 / 3);
+  for (const gb of gearsAnim) { const a = (LH.J[0].rotation.x - LH.rest[0]) * 4 + T * 0.6; gb.big.rotation.x = a; gb.small.rotation.x = -a * gb.ratio; }
+
+  /* tail, ears, blink */
+  if (tailFlick < 0 && R() < dt * 0.25) tailFlick = 0;
+  let tf = 0; if (tailFlick >= 0) { tailFlick += dt; tf = Math.sin(tailFlick * 22) * Math.exp(-tailFlick * 4); if (tailFlick > 1.2) tailFlick = -1; }
+  tailP.rotation.x = 0.55 - 0.5 * Math.abs(tf) - 0.12 * walkW * Math.abs(Math.sin(phase * TAU));
+  ears.forEach((e, i) => {
+    const s = i === 0 ? 1 : -1;
+    if (R() < dt * 0.3) earT[i] = (R() - 0.5) * 1.2;
+    const toward = clamp(-look.yaw * s * 0.8, -0.6, 0.6);
+    e.rotation.y = damp(e.rotation.y, earT[i] * 0.6 + toward, 6, dt);
+    e.rotation.x = damp(e.rotation.x, -0.15 * Math.abs(earT[i]), 6, dt);
+  });
+  if (T > blinkAt) { blinkT = 0; blinkAt = T + 2.5 + R() * 4; }
+  let blink = 1; if (blinkT >= 0) { blinkT += dt; blink = Math.abs(Math.cos(Math.min(1, blinkT / 0.18) * Math.PI)); if (blinkT > 0.18) blinkT = -1; }
+  const aperture = 0.5 + 0.5 * Math.sin(T * 0.7);
+  for (const e of eyes) {
+    e.iris.scale.set(1, Math.max(0.06, blink), 1);
+    e.blades.forEach(b => { b.position.set(0, lerp(0.0168, 0.0108, aperture), 0.0004); });
+    e.ped.rotation.y = antlerK * 3.5;
+  }
+
+  /* antlers */
+  antlerK = damp(antlerK, bt > 1.5 ? antlerT : 0, 1.5, dt);
+  if (Math.abs(antlerK - antlerT) < 0.001) antlerK = antlerT;
+  for (const h of antlerHinges) {
+    const { node, depth } = h.userData;
+    const k = sstep(0, 1, antlerK * (1 + antlerDepthMax * 0.22) - depth * 0.22);
+    lerpEuler(h, node.fold, node.rest, k);
+  }
+
+  /* explode */
+  if (SW.state !== 'off') explodeT = 0;
+  explode = damp(explode, explodeT, 3.2, dt);
+  if (!dragging) slider.value = explode.toFixed(3);
+  $('#ev').textContent = Math.round(explode * 100) + '%';
+  for (const p of parts) {
+    p.pop = damp(p.pop, p === selected ? 1 : 0, 8, dt);
+    const k = layerK(p.layer, explode);
+    if (p.custom) p.custom.off.copy(p.off).multiplyScalar(k).addScaledVector(p.offN, 0.1 * p.pop);
+    else p.obj.position.copy(p.home).addScaledVector(p.off, k).addScaledVector(p.offN, 0.1 * p.pop);
+  }
+
+  controls.update();
+  scene.updateMatrixWorld();
+  for (const p of pistons) p.update();
+  for (const c of cables) c.update();
+  swarmUpdate(dt, T);
+  updateLabels(labelsOn && explode > 0.28 && SW.state === 'off');
+  composer.render();
+  if (fixed === undefined) requestAnimationFrame(loop);
+}
+let loopErr = false;
+function loop() {
+  try { animate(); }
+  catch (err) { if (!loopErr) { loopErr = true; console.error('[stag] frame error', err); } requestAnimationFrame(loop); }
+}
+/* scripted-render hooks for tools/capture.js; only exposed in ?capture mode */
+if (CAPTURE) window.STAG = {
+  step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) animate(dt); },
+  parts, SW, camera, controls, renderer, pointer, LABELS, LAYER_COL, LAYER_NAME, headPitch,
+  get antlerK() { return antlerK; }, get explode() { return explode; }, get selected() { return selected; }, get gtao() { return gtao; },
+  set lookOv(v) { lookOv = v; },
+  setExplode(v) { explodeT = v; ui.sync(); }, setWalk(b) { walking = b; ui.sync(); }, setAntlers(v) { antlerT = v; ui.sync(); }, setLabels(b) { labelsOn = b; ui.sync(); },
+  dissolve: startDissolve, assemble: startAssemble, drop: startDrop, select,
+  restart() { T = 0; bootT = 0; booted = 0; antlerK = 0; explode = explodeT = 0; introCam = false; walking = false; walkW = 0; phase = 0; blinkAt = 2.5; idleLook.next = 0; select(null); ui.sync(); },
+  ready: true
+};
+onResize();
+if (!CAPTURE) requestAnimationFrame(loop);
+</script>
+</body>
+</html>
