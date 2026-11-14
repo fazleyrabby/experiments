@@ -1,5 +1,11 @@
 [
   {
+    "slug": "mechanical-stag",
+    "title": "Mechanical Stag",
+    "category": "Objects",
+    "description": "A clockwork stag built from 206 machined parts: titanium armor, brass pistons, carbon ribs and a glowing reactor heart. Explode it layer by layer, click any part to see what it does, make it walk, or dissolve it into 12,000 tiny gears and bolts and watch them fly home."
+  },
+  {
     "slug": "chai-corner",
     "title": "Chai Corner",
     "category": "Worlds",
