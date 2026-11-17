@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Desk Grand Prix</title>
+<meta name="description" content="1:64 die-cast cars racing across a sunlit desk: a procedurally modelled Countach LP400 and three rivals on orange toy track, over a mug hairpin and a jump off a stack of books. Every model and texture is generated in code.">
+<meta name="theme-color" content="#14110e">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314110e'/%3E%3Cpath d='M5 21l4-6h11l4 3h3v3z' fill='%23ff6a10'/%3E%3Ccircle cx='10' cy='21.5' r='2.6' fill='%23f3efe6'/%3E%3Ccircle cx='23' cy='21.5' r='2.6' fill='%23f3efe6'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100,500;100,700;100,800;100,900;125,900&family=Caveat:wght@500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #f4f0e8; --mute: rgba(244,240,232,.62); --chip: rgba(20,17,14,.52); --chip2: rgba(20,17,14,.78);
+    --line: rgba(244,240,232,.16); --accent: #ff6a10; --accent2: #ffb23a; --good: #9be22d;
+    --display: "Archivo", "Arial Black", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #14110e; overflow: hidden; color: var(--ink); }
+  body { font: 500 13px/1.4 var(--display); -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
+  #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; outline: none; }
+  .hud { position: fixed; z-index: 3; transition: opacity .35s ease; }
+  body.clean .hud, body.clean .panel, body.clean #touch { opacity: 0 !important; pointer-events: none !important; }
+  .glass { background: var(--chip); border: 1px solid var(--line); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); border-radius: 14px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  /* top bar */
+  #back { left: max(16px, env(safe-area-inset-left)); top: max(14px, env(safe-area-inset-top)); color: var(--ink); text-decoration: none; padding: 7px 12px; border-radius: 999px; font-weight: 600; }
+  #tools { right: max(16px, env(safe-area-inset-right)); top: max(14px, env(safe-area-inset-top)); display: flex; gap: 6px; }
+  #tools button { padding: 7px 12px; border-radius: 999px; font-weight: 600; font-size: 12px; letter-spacing: .02em; display: inline-flex; align-items: center; gap: 6px; }
+  #tools button[aria-pressed="true"] { background: rgba(255,106,16,.85); border-color: transparent; }
+  #recDot { width: 8px; height: 8px; border-radius: 50%; background: #ff3b2f; display: inline-block; }
+  body.recording #recBtn { background: rgba(255,59,47,.9); border-color: transparent; }
+  body.recording #recDot { background: #fff; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+
+  /* race hud */
+  #raceHud { left: max(16px, env(safe-area-inset-left)); top: calc(max(14px, env(safe-area-inset-top)) + 50px); font-variant-numeric: tabular-nums; opacity: 0; }
+  body.racing #raceHud, body.racing #dash, body.racing #mapWrap { opacity: 1; }
+  #pos { font: 900 54px/0.9 var(--display); font-stretch: 125%; letter-spacing: -.02em; }
+  #pos small { font-size: 22px; opacity: .6; margin-left: 2px; }
+  #lapLine { margin-top: 6px; font: 600 13px var(--mono); }
+  #lapLine b { font-weight: 700; color: var(--accent2); }
+  #times { margin-top: 8px; font: 500 12px/1.6 var(--mono); color: var(--mute); }
+  #times span { color: var(--ink); }
+  #dash { right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); text-align: right; font-variant-numeric: tabular-nums; opacity: 0; }
+  #speed { font: 900 64px/.85 var(--display); font-stretch: 125%; letter-spacing: -.03em; }
+  #unit { font: 600 11px var(--mono); color: var(--mute); letter-spacing: .08em; margin-top: 6px; }
+  #gearRow { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+  #gear { font: 700 18px var(--mono); min-width: 1.2em; text-align: center; }
+  #rev { width: 170px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; }
+  #revFill { height: 100%; width: 0; background: linear-gradient(90deg, #fff 0 68%, var(--accent2) 68% 86%, #ff3b2f 86%); border-radius: 3px; }
+  #mapWrap { left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom)); padding: 8px; opacity: 0; }
+  #map { display: block; width: 200px; height: 104px; }
+  #board { margin-top: 10px; font: 600 12px/1.75 var(--mono); }
+  #board div { display: flex; gap: 8px; align-items: center; }
+  #board i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  #board .me { color: var(--accent2); }
+
+  /* countdown lights */
+  #lights { left: 50%; top: 16%; transform: translateX(-50%); display: flex; gap: 12px; padding: 12px 16px; opacity: 0; pointer-events: none; }
+  #lights.on { opacity: 1; }
+  #lights span { width: 30px; height: 30px; border-radius: 50%; background: #2a0c0a; box-shadow: inset 0 0 0 2px rgba(0,0,0,.4); transition: background .08s; }
+  #lights span.lit { background: #ff2d1f; box-shadow: 0 0 18px #ff2d1f, inset 0 0 6px rgba(255,255,255,.4); }
+  #lights.go span { background: var(--good); box-shadow: 0 0 18px var(--good); }
+  #toast { left: 50%; top: 27%; transform: translateX(-50%); font: 900 30px var(--display); font-stretch: 125%; letter-spacing: .01em; opacity: 0; transition: opacity .35s ease, transform .35s ease; pointer-events: none; text-align: center; text-shadow: 0 2px 20px rgba(0,0,0,.45); }
+  #toast small { display: block; font: 600 13px var(--mono); opacity: .8; margin-top: 4px; letter-spacing: .04em; }
+  #toast.on { opacity: 1; transform: translateX(-50%) translateY(-6px); }
+
+  /* panels */
+  .panel { position: fixed; z-index: 4; transition: opacity .45s ease, transform .45s ease; }
+  .panel[hidden] { display: block; opacity: 0; pointer-events: none; transform: translateY(8px); }
+  #title { left: max(28px, env(safe-area-inset-left)); bottom: max(28px, env(safe-area-inset-bottom)); width: min(430px, calc(100vw - 32px)); padding: 22px 22px 18px; }
+  #title .kicker { font: 600 11px var(--mono); letter-spacing: .14em; color: var(--accent2); text-transform: uppercase; }
+  #title h1 { margin: 8px 0 4px; font: 900 46px/.92 var(--display); font-stretch: 125%; letter-spacing: -.015em; text-wrap: balance; }
+  #title p { margin: 8px 0 0; color: var(--mute); font-size: 13.5px; line-height: 1.5; max-width: 40ch; }
+  .carcard { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .carcard b { display: block; font: 800 16px var(--display); letter-spacing: .01em; }
+  .carcard span { font: 500 11px var(--mono); color: var(--mute); }
+  #paints { display: flex; gap: 6px; flex-wrap: wrap; }
+  #paints button { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; padding: 0; box-shadow: inset 0 -5px 8px rgba(0,0,0,.35), inset 0 3px 6px rgba(255,255,255,.35); }
+  #paints button[aria-pressed="true"] { border-color: var(--ink); }
+  .row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .btn { padding: 11px 18px; border-radius: 12px; border: 1px solid var(--line); background: rgba(244,240,232,.08); font-weight: 700; letter-spacing: .01em; }
+  .btn.primary { background: var(--accent); border-color: transparent; color: #1a0d04; font-weight: 800; }
+  .btn.primary:hover { background: #ff7d2c; }
+  .btn:hover { background: rgba(244,240,232,.16); }
+  .keys { margin-top: 14px; font: 500 11px/1.7 var(--mono); color: var(--mute); }
+  .keys kbd { font: 600 10.5px var(--mono); color: var(--ink); background: rgba(244,240,232,.1); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+  #results { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); padding: 22px; }
+  #results[hidden] { transform: translate(-50%, -46%); }
+  #results h2 { margin: 0; font: 900 34px var(--display); font-stretch: 125%; }
+  #results .sub { color: var(--mute); margin-top: 4px; font: 500 12px var(--mono); }
+  #resultRows { margin-top: 14px; font: 600 13px/1 var(--mono); }
+  #resultRows div { display: grid; grid-template-columns: 28px 12px 1fr auto auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+  #resultRows div.me { color: var(--accent2); }
+  #resultRows i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  #resultRows em { font-style: normal; color: var(--mute); font-weight: 500; }
+  #photoBar { left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 10px 14px; }
+  #photoBar label { font: 600 11px var(--mono); color: var(--mute); display: flex; align-items: center; gap: 8px; }
+  #photoBar input { accent-color: var(--accent); width: 120px; }
+  #photoBar .hint { font: 500 11px var(--mono); color: var(--mute); }
+
+  #loader { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: radial-gradient(120% 90% at 50% 40%, #241c15, #0f0c0a); transition: opacity 1s ease; }
+  #loader.done { opacity: 0; pointer-events: none; }
+  #loader .in { width: min(320px, 80vw); text-align: center; }
+  #loader h2 { margin: 0 0 4px; font: 900 22px var(--display); font-stretch: 125%; }
+  #loadStatus { color: var(--mute); font: 500 12px var(--mono); }
+  #loadBar { margin-top: 14px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; }
+  #loadFill { height: 100%; width: 0; background: var(--accent); transition: width .3s ease; }
+
+  #touch { display: none; }
+  @media (pointer: coarse) {
+    .keys { display: none; }
+    body.racing #touch { display: block; }
+    #touch button { position: fixed; z-index: 3; width: 76px; height: 76px; border-radius: 50%; border: 1px solid var(--line); background: var(--chip); color: var(--ink); font: 700 13px var(--display); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); touch-action: none; }
+    #tL { left: max(18px, env(safe-area-inset-left)); bottom: max(28px, env(safe-area-inset-bottom)); }
+    #tR { left: calc(max(18px, env(safe-area-inset-left)) + 90px); bottom: max(28px, env(safe-area-inset-bottom)); }
+    #tB { right: calc(max(18px, env(safe-area-inset-right)) + 90px); bottom: max(150px, calc(env(safe-area-inset-bottom) + 130px)); }
+    #tG { right: max(18px, env(safe-area-inset-right)); bottom: max(150px, calc(env(safe-area-inset-bottom) + 130px)); }
+    #mapWrap { display: none; }
+    #speed { font-size: 42px; }
+    #rev { width: 110px; }
+  }
+  @media (max-width: 560px) {
+    #title { left: 16px; right: 16px; bottom: 16px; width: auto; padding: 18px; }
+    #title h1 { font-size: 36px; }
+    #tools button span.lbl { display: none; }
+    #pos { font-size: 40px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .panel, #loader, #toast, .hud { transition: none; } }
+</style>
+</head>
+<body>
+<canvas id="stage" tabindex="0" aria-label="Die-cast toy cars racing on an orange track across a sunlit wooden desk"></canvas>
+
+<a id="back" class="hud glass" href="/">← Experiments</a>
+<div id="tools" class="hud">
+  <button id="camBtn" class="glass" title="Camera (C)"><span class="lbl">Camera:</span> <b id="camName">Chase</b></button>
+  <button id="photoBtn" class="glass" aria-pressed="false" title="Photo mode (P)">Photo</button>
+  <button id="recBtn" class="glass" title="Record a clip (V)"><i id="recDot"></i><span class="lbl" id="recLbl">Record</span></button>
+  <button id="cleanBtn" class="glass" title="Hide the interface (H)">Clean</button>
+  <button id="soundBtn" class="glass" aria-pressed="true" title="Sound (M)">Sound</button>
+</div>
+
+<div id="raceHud" class="hud" aria-live="polite">
+  <div id="pos">–<small>/4</small></div>
+  <div id="lapLine">LAP <b id="lapNo">1</b>/<span id="lapTot">4</span> · <span id="lapNow">0.00</span></div>
+  <div id="times">LAST <span id="lapLast">–</span> · BEST <span id="lapBest">–</span></div>
+</div>
+<div id="mapWrap" class="hud glass"><canvas id="map" width="400" height="208"></canvas><div id="board"></div></div>
+<div id="dash" class="hud">
+  <div id="speed">0</div>
+  <div id="unit">KM/H · SCALE SPEED</div>
+  <div id="gearRow"><div id="rev"><div id="revFill"></div></div><div id="gear">N</div></div>
+</div>
+<div id="lights" class="hud glass" aria-hidden="true"><span></span><span></span><span></span></div>
+<div id="toast" class="hud" role="status"></div>
+
+<section id="title" class="panel glass" aria-label="Desk Grand Prix">
+  <div class="kicker">1:64 die-cast racing</div>
+  <h1>Desk Grand Prix</h1>
+  <p>Four toy cars, one orange track, one very cluttered desk. Bank around the coffee mug and fly off the books.</p>
+  <div class="carcard">
+    <div><b>Countach LP400</b><span>No. 064 · zamak base · plastic tyres</span></div>
+    <div id="paints" role="group" aria-label="Paint"></div>
+  </div>
+  <div class="row">
+    <button class="btn primary" id="raceBtn">Race · 3 laps</button>
+    <button class="btn" id="watchBtn">Watch the AI</button>
+  </div>
+  <div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows drive · <kbd>Space</kbd> handbrake · <kbd>C</kbd> camera · <kbd>P</kbd> photo · <kbd>V</kbd> record · <kbd>H</kbd> clean · drag to orbit</div>
+</section>
+
+<section id="results" class="panel glass" hidden aria-label="Results">
+  <h2 id="resTitle">Finished</h2>
+  <div class="sub" id="resSub"></div>
+  <div id="resultRows"></div>
+  <div class="row">
+    <button class="btn primary" id="againBtn">Race again</button>
+    <button class="btn" id="menuBtn">Showroom</button>
+  </div>
+</section>
+
+<div id="photoBar" class="panel glass" hidden>
+  <label>Blur <input id="apSlider" type="range" min="0" max="40" step="0.5" value="14"></label>
+  <span class="hint">Drag to orbit · click to focus</span>
+  <button class="btn primary" id="shotBtn">Save PNG</button>
+  <button class="btn" id="photoExit">Done</button>
+</div>
+
+<div id="touch" aria-hidden="true">
+  <button id="tL">◀</button><button id="tR">▶</button><button id="tB">Brake</button><button id="tG">Gas</button>
+</div>
+
+<div id="loader"><div class="in"><h2>Desk Grand Prix</h2><div id="loadStatus">Casting die-cast bodies…</div><div id="loadBar"><div id="loadFill"></div></div></div></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
