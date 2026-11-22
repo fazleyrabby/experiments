@@ -1,5 +1,23 @@
 [
   {
+    "slug": "sreemangal-night-train",
+    "title": "Sreemangal Night Train",
+    "category": "Worlds",
+    "description": "A night train runs through the tea gardens of Sreemangal, across a river bridge, past village lamps and a small station, and into the Lawachara rainforest. Change the speed and camera, sound the horn, and shift the sky from clear moonlight to winter mist, monsoon, thunderstorm or Kalboishakhi."
+  },
+  {
+    "slug": "koi-pond",
+    "title": "Koi Pond in the Rain",
+    "category": "Worlds",
+    "description": "A tranquil, interactive koi pond in the rain. Pure 2D canvas and math: procedural Nishikigoi spine physics, caustic water shimmer, feeding, and soundscapes."
+  },
+  {
+    "slug": "desk-grand-prix",
+    "title": "Desk Grand Prix",
+    "category": "Play",
+    "description": "1:64 die-cast cars race across a sunlit desk on orange toy track. Bank around a coffee mug, jump a stack of books, and race a Countach LP400 against three rivals. All models generated in code."
+  },
+  {
     "slug": "mechanical-stag",
     "title": "Mechanical Stag",
     "category": "Objects",
