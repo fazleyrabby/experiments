@@ -1,5 +1,11 @@
 [
   {
+    "slug": "last-launch",
+    "title": "Last Launch",
+    "category": "Play",
+    "description": "Hold a river island against swarms of up to 2,000 zombies. Merge guns, build a squad, and shoot the arms off building-sized giants before the last ferry leaves."
+  },
+  {
     "slug": "saint-morrow",
     "title": "Saint Morrow",
     "category": "Worlds",
