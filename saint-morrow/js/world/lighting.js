@@ -115,10 +115,13 @@ export function createLampLights(scene, positions) {
         }
       }
 
+      // At most one shadow map is redrawn per frame, so passing a lamp never causes a visible hitch.
+      let redrawn = false;
       for (const slot of slots) {
         const target = slot.next ? 0 : 1;
         slot.weight = THREE.MathUtils.clamp(slot.weight + Math.sign(target - slot.weight) * dt * FADE_SPEED, 0, 1);
-        if (slot.next && slot.weight === 0) {
+        if (slot.next && slot.weight === 0 && !redrawn) {
+          redrawn = true;
           if (slot.lamp) {
             slot.lamp.slot = null;
             slot.lamp.point.intensity = LAMP_INTENSITY;

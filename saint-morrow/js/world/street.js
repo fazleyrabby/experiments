@@ -132,17 +132,21 @@ function createNightSky(noise) {
   return mix(clear, lit, cloud);
 }
 
-export async function createStreet(renderer, tier) {
+export async function createStreet(renderer, tier, loader) {
   const scene = new THREE.Scene();
   const environment = createEnvironment();
   scene.environment = environment;
   scene.environmentIntensity = 1.05;
   scene.fogNode = fog(color(0x1a1d26), densityFogFactor(0.0072));
 
+  loader.trackDownloads('Bringing in the street', 0.08, 0.62);
   const [sets, library] = await Promise.all([loadTextureSets(renderer), loadPropLibrary()]);
+  loader.stopTracking();
+  loader.stage('Raising the buildings', 0.62, 0.78);
+  await loader.paint();
   const noise = createNoiseTexture();
   scene.backgroundNode = createNightSky(noise);
-  const { road, pavement, reflectionHidden, reflectionHooks } = createGroundMaterials(sets, noise, scene, environment);
+  const { road, pavement, reflectionHidden, reflectionHooks, compileReflection } = createGroundMaterials(sets, noise, scene, environment);
   const materials = {
     road,
     pavement,
@@ -165,10 +169,14 @@ export async function createStreet(renderer, tier) {
     signage: new Signage(),
   };
   addGround(ctx, scene, materials);
-  const shopLights = [
-    ...layoutSide(ctx, LEFT, -1, 1200),
-    ...layoutSide(ctx, RIGHT, 1, 4300),
-  ];
+  loader.progress(0.08);
+  await loader.paint();
+  const shopLights = layoutSide(ctx, LEFT, -1, 1200);
+  loader.progress(0.3);
+  await loader.paint();
+  shopLights.push(...layoutSide(ctx, RIGHT, 1, 4300));
+  loader.progress(0.52);
+  await loader.paint();
   addCathedral(ctx, -HALF_LENGTH);
   addBuilding(ctx, { width: 16, floors: 7, wall: 'stone', tint: [0.5, 0.48, 0.45], gabled: true, seed: 8800, x: 0, z: HALF_LENGTH, rotation: Math.PI });
 
@@ -176,6 +184,8 @@ export async function createStreet(renderer, tier) {
   for (let i = 0; i < 9; i++) lanterns.push(addLamp(ctx, (i % 2 ? 1 : -1) * 5.46, -52 + i * 13));
   addStreetProps(ctx);
   const signs = SIGNS.map((sign) => addBladeSign(ctx, scene, sign));
+  loader.progress(0.72);
+  await loader.paint();
 
   const fineMeshes = ctx.batches.build(materials, scene, new Set(['lantern']));
   reflectionHidden.push(...fineMeshes, ...ctx.props.build(scene));
@@ -186,7 +196,7 @@ export async function createStreet(renderer, tier) {
     interiors.geometry.computeBoundingSphere();
     scene.add(interiors);
   }
-  const shopRooms = await createShopInteriors({ scene, shops: ctx.shops, renderer, tier, noise, paneMaterial: interiorMaterial });
+  const shopRooms = createShopInteriors({ scene, shops: ctx.shops, renderer, tier, noise, paneMaterial: interiorMaterial });
   reflectionHooks.push(shopRooms);
   const stainedMaterial = createStainedGlassMaterial();
   const stained = new THREE.Mesh(mergeGeometries(ctx.stained, false), stainedMaterial);
@@ -216,6 +226,10 @@ export async function createStreet(renderer, tier) {
     return flood;
   });
 
+  loader.progress(1);
+  const streakCount = rain.streaks.geometry.instanceCount;
+  const splashCount = rain.splashes.geometry.instanceCount;
+  let fineDrawDistance = FINE_DRAW_DISTANCE;
   const lightCount = lamps.count + signs.length + shopLights.length + floods.length + shopRooms.lightCount + 1;
   const route = [
     [0, 1.7, 46], [3.2, 1.7, 22], [-3.2, 1.7, 0], [3.2, 1.7, -24], [0, 2.2, -46],
@@ -229,11 +243,19 @@ export async function createStreet(renderer, tier) {
     shots: SHOTS,
     collider: ctx.colliders.build(),
     reflectionHidden,
+    shopRooms,
     shopShots: shopShots(ctx.shops),
+    compileReflection: (activeRenderer, camera) => compileReflection(activeRenderer, scene, camera),
+    setDetail({ rain: rainAmount, rooms, fineDistance }) {
+      rain.streaks.geometry.instanceCount = Math.floor(streakCount * rainAmount);
+      rain.splashes.geometry.instanceCount = Math.floor(splashCount * rainAmount);
+      fineDrawDistance = fineDistance;
+      shopRooms.setNearLimit(rooms);
+    },
     spawn: { x: 1.2, y: 0.02, z: 45, yaw: 0.02, pitch: 0.08 },
     update(now, dt, cameraPosition) {
       fineMeshes.forEach((mesh, index) => {
-        mesh.visible = fineCenters[index].distanceToSquared(cameraPosition) < FINE_DRAW_DISTANCE ** 2;
+        mesh.visible = fineCenters[index].distanceToSquared(cameraPosition) < fineDrawDistance ** 2;
       });
       shopRooms.update(dt, cameraPosition);
       lamps.update(dt, cameraPosition);

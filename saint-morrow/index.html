@@ -15,14 +15,29 @@
     "three/webgpu": "./vendor/three.webgpu.js",
     "three/tsl": "./vendor/three.tsl.js",
     "three/addons/": "./vendor/addons/",
-    "three-mesh-bvh": "./vendor/three-mesh-bvh/index.js"
+    "three-mesh-bvh/": "./vendor/three-mesh-bvh/"
   }
 }
 </script>
 </head>
 <body>
 <main id="stage" aria-label="Saint Morrow real-time city view"></main>
-<div id="status" role="status">Lighting the city</div>
+<div id="loader">
+  <div class="loader-glow" aria-hidden="true"></div>
+  <div class="loader-inner">
+    <h1 class="loader-title">Saint Morrow</h1>
+    <p class="loader-tagline">Midnight, in the rain</p>
+    <div id="loader-track" role="progressbar" aria-label="Loading Saint Morrow" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div id="loader-bar"></div>
+    </div>
+    <div class="loader-meta">
+      <span id="status" role="status">Loading the engine</span>
+      <span id="loader-percent" aria-hidden="true">0%</span>
+    </div>
+    <p id="loader-hint" hidden>Slow connection. Still loading.</p>
+    <button id="loader-retry" type="button" hidden>Try again</button>
+  </div>
+</div>
 <button id="enter" type="button" hidden>
   <span class="enter-title">Saint Morrow</span>
   <span class="enter-action">Click to walk</span>

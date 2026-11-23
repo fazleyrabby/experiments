@@ -5,7 +5,8 @@ import {
   texture, time, uniform, uv, vec2, vec3, vec4,
 } from 'three/tsl';
 import { seededRandom } from '../world/geometry.js';
-import { homeFurniture, shopForeground, shopWall } from './interiors.js';
+import { compileObject } from '../render/compile.js';
+import { homeFurniture, shopWall } from './interiors.js';
 
 const SETS = ['cobble', 'pavement', 'brick', 'stone', 'plaster', 'slate', 'iron'];
 
@@ -169,7 +170,22 @@ export function createGroundMaterials(sets, noise, scene, environment) {
     pavement.visible = true;
     return result;
   };
-  return { road, pavement, reflectionHidden, reflectionHooks };
+
+  /** Compiles what the road reflection draws, using the same hidden set as a real reflection pass. */
+  const compileReflection = (renderer, targetScene, camera) => {
+    const virtualCamera = base.getVirtualCamera(camera);
+    const target = base.getRenderTarget(virtualCamera);
+    road.visible = false;
+    pavement.visible = false;
+    const restored = reflectionHidden.filter((mesh) => mesh.visible);
+    restored.forEach((mesh) => { mesh.visible = false; });
+    const pending = compileObject(renderer, targetScene, virtualCamera, targetScene, target, null);
+    restored.forEach((mesh) => { mesh.visible = true; });
+    road.visible = true;
+    pavement.visible = true;
+    return pending;
+  };
+  return { road, pavement, reflectionHidden, reflectionHooks, compileReflection };
 }
 
 export function createWallMaterial(set, noise, { wetness = 0.5, normalScale = 1, metal = false } = {}) {
@@ -259,11 +275,7 @@ export function createInteriorMaterial(noise) {
   const folds = sin(local.x.mul(46).add(seed.mul(30))).mul(0.5).add(0.5);
   const curtain = smoothstep(0.58, 0.76, edge.add(sin(local.y.mul(5).add(seed.mul(17))).mul(0.06))).mul(oneMinus(isShop));
   const curtainColor = mix(vec3(0.3, 0.07, 0.045), vec3(0.2, 0.18, 0.1), fract(seed.mul(11.3))).mul(folds.mul(0.5).add(0.5)).mul(lampColor).mul(0.95);
-  const front = shopForeground(ro, rd, room, kind, seed, lampColor);
-  const withCounter = mix(roomLight, front.color, front.mask.mul(isShop));
-  const withFixtures = mix(withCounter, vec3(0.012, 0.01, 0.008), front.fixture.mul(isShop));
-  const lamps = lampColor.mul(front.bulb).mul(isShop).mul(6.5);
-  const interior = mix(withFixtures.add(lamps), curtainColor, curtain);
+  const interior = mix(roomLight, curtainColor, curtain);
 
   // Rain running down the glass breaks up the view into the room.
   const along = positionWorld.x.add(positionWorld.z);

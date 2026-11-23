@@ -26,15 +26,21 @@ export async function createRenderer(host, { tierName = 'ultra', forceWebGL = fa
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.info.autoReset = false;
 
+  let renderScale = 1;
   const resize = () => {
     const width = Math.max(window.innerWidth, 1);
     const height = Math.max(window.innerHeight, 1);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.width / width));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.width / width) * renderScale);
     renderer.setSize(width, height);
     return width / height;
   };
   resize();
   host.appendChild(renderer.domElement);
 
-  return { renderer, tier, isWebGPU, resize };
+  const setScale = (scale) => {
+    renderScale = scale;
+    resize();
+  };
+
+  return { renderer, tier, isWebGPU, resize, setScale };
 }

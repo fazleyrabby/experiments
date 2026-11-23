@@ -531,72 +531,30 @@ const FURNISH = {
   [KIND.BOOKS]: furnishBooks,
 };
 
-export async function createShopInteriors({ scene, shops, renderer, tier, noise, paneMaterial }) {
+export function createShopInteriors({ scene, shops, renderer, tier, noise, paneMaterial }) {
   for (const shop of shops) {
     shop.paneMesh = new THREE.Mesh(shop.pane, paneMaterial);
     shop.paneMesh.geometry.computeBoundingSphere();
     scene.add(shop.paneMesh);
   }
-  if (!tier.interiors) return { lightCount: 0, update() {}, before() {}, after() {} };
+  if (!tier.interiors) {
+    return { lightCount: 0, load: async () => {}, setNearLimit() {}, update() {}, before() {}, after() {} };
+  }
 
-  const [sets, library] = await Promise.all([
-    loadTextureSets(renderer, ['floorWood', 'floorTile', 'wallPlaster'], './assets/interiors/tex'),
-    loadLibrary(INTERIOR_MODELS, 'interiors', true),
-  ]);
   // Rooms are lit only by this pool, so street lamps and moonlight cannot leak through the facade.
+  // It exists from the start because adding lights later would force every street shader to recompile.
   const lightPool = Array.from({ length: NEAR_SHOPS * LAMPS_PER_SHOP }, () => {
     const light = new THREE.PointLight(0xffbd7d, 0, 7.5, 2);
     scene.add(light);
     return light;
   });
   const roomLights = lights([...lightPool, new THREE.AmbientLight(0xffd9b0, 0.17)]);
-  const roomMaterials = new Map();
-  for (const prop of Object.values(library)) {
-    for (const part of prop.parts) {
-      if (!roomMaterials.has(part.material)) roomMaterials.set(part.material, toRoomMaterial(part.material, roomLights));
-      part.material = roomMaterials.get(part.material);
-    }
-  }
-  for (const part of library.wallClock.parts) if (!part.material.transparent) part.material.color.multiplyScalar(0.62);
+  const pause = () => new Promise((resolve) => { window.setTimeout(resolve, 0); });
 
-  const materials = {
-    floorWood: dryMaterial(sets.floorWood),
-    floorTile: dryMaterial(sets.floorTile, { roughness: 0.6 }),
-    wallPlaster: dryMaterial(sets.wallPlaster, { normalScale: 0.6 }),
-    wood: dryMaterial(sets.floorWood, { normalScale: 0.5, roughness: 0.72 }),
-    cloth: dryMaterial(sets.wallPlaster, { normalScale: 0.4 }),
-    metal: metalMaterial(),
-    bulb: createGlowMaterial(0xffc27a, 2.4),
-  };
-  for (const [key, material] of Object.entries(materials)) if (key !== 'bulb') material.lightsNode = roomLights;
-  const noCast = new Set(Object.keys(materials));
-  const glassMaterial = createShopGlass(noise);
-
-  for (const shop of shops) {
-    const room = new Room(shop, library);
-    buildShell(room);
-    (FURNISH[shop.kind] ?? furnishBar)(room);
-    addPendants(room);
-
-    const group = new THREE.Group();
-    group.applyMatrix4(shop.matrix);
-    room.batches.build(materials, group, noCast);
-    room.items.build(group);
-    group.traverse((object) => {
-      if (!object.isMesh) return;
-      object.castShadow = false;
-      object.receiveShadow = false;
-    });
-    scene.add(group);
-
-    shop.group = group;
-    shop.glass = new THREE.Mesh(shop.pane, glassMaterial);
-    shop.glass.renderOrder = 15;
-    scene.add(shop.glass);
-    shop.center = new THREE.Vector3(0, 2, (room.front + room.back) / 2).applyMatrix4(shop.matrix);
-    shop.near = true;
-    shop.lampPoints = room.lampPoints.map((point) => point.clone().applyMatrix4(shop.matrix));
-  }
+  let active = false;
+  let loading = null;
+  let nearLimit = NEAR_SHOPS;
+  let timer = 0;
 
   const assignLights = () => {
     const points = shops.filter((shop) => shop.near).flatMap((shop) => shop.lampPoints);
@@ -612,18 +570,86 @@ export async function createShopInteriors({ scene, shops, renderer, tier, noise,
     shop.glass.visible = near;
     shop.paneMesh.visible = !near;
   };
-  assignLights();
 
-  // Every room stays visible for the first frames so all its shaders compile during loading.
-  let warmFrames = 4;
-  let timer = 0;
+  /** Streams the rooms in after the street is on screen, a small slice of work at a time. */
+  async function buildRooms(precompile) {
+    const [sets, library] = await Promise.all([
+      loadTextureSets(renderer, ['floorWood', 'floorTile', 'wallPlaster'], './assets/interiors/tex'),
+      loadLibrary(INTERIOR_MODELS, 'interiors', true),
+    ]);
+    const roomMaterials = new Map();
+    for (const prop of Object.values(library)) {
+      for (const part of prop.parts) {
+        if (!roomMaterials.has(part.material)) roomMaterials.set(part.material, toRoomMaterial(part.material, roomLights));
+        part.material = roomMaterials.get(part.material);
+      }
+    }
+    for (const part of library.wallClock.parts) if (!part.material.transparent) part.material.color.multiplyScalar(0.62);
+
+    const materials = {
+      floorWood: dryMaterial(sets.floorWood),
+      floorTile: dryMaterial(sets.floorTile, { roughness: 0.6 }),
+      wallPlaster: dryMaterial(sets.wallPlaster, { normalScale: 0.6 }),
+      wood: dryMaterial(sets.floorWood, { normalScale: 0.5, roughness: 0.72 }),
+      cloth: dryMaterial(sets.wallPlaster, { normalScale: 0.4 }),
+      metal: metalMaterial(),
+      bulb: createGlowMaterial(0xffc27a, 2.4),
+    };
+    for (const [key, material] of Object.entries(materials)) if (key !== 'bulb') material.lightsNode = roomLights;
+    const noCast = new Set(Object.keys(materials));
+    const glassMaterial = createShopGlass(noise);
+
+    for (const shop of shops) {
+      await pause();
+      const room = new Room(shop, library);
+      buildShell(room);
+      await pause();
+      (FURNISH[shop.kind] ?? furnishBar)(room);
+      addPendants(room);
+      await pause();
+
+      const group = new THREE.Group();
+      group.applyMatrix4(shop.matrix);
+      room.batches.build(materials, group, noCast);
+      room.items.build(group);
+      group.traverse((object) => {
+        if (!object.isMesh) return;
+        object.castShadow = false;
+        object.receiveShadow = false;
+      });
+      const glass = new THREE.Mesh(shop.pane, glassMaterial);
+      glass.renderOrder = 15;
+
+      // Compiled while detached from the scene, so nothing draws until its shaders are ready.
+      await precompile(group, scene);
+      await precompile(glass, scene);
+      group.visible = false;
+      glass.visible = false;
+      scene.add(group, glass);
+
+      shop.group = group;
+      shop.glass = glass;
+      shop.center = new THREE.Vector3(0, 2, (room.front + room.back) / 2).applyMatrix4(shop.matrix);
+      shop.near = false;
+      shop.lampPoints = room.lampPoints.map((point) => point.clone().applyMatrix4(shop.matrix));
+    }
+    active = true;
+    timer = 0;
+  }
+
   return {
     lightCount: lightPool.length,
+    get ready() { return active; },
+    load(precompile) {
+      loading ??= buildRooms(precompile);
+      return loading;
+    },
+    setNearLimit(limit) {
+      nearLimit = limit;
+      timer = 0;
+    },
     update(dt, cameraPosition) {
-      if (warmFrames > 0) {
-        warmFrames--;
-        return;
-      }
+      if (!active) return;
       timer -= dt;
       if (timer > 0) return;
       timer = 0.2;
@@ -631,7 +657,7 @@ export async function createShopInteriors({ scene, shops, renderer, tier, noise,
         .map((shop) => ({ shop, distance: shop.center.distanceTo(cameraPosition) }))
         .filter(({ shop, distance }) => distance < NEAR_DISTANCE + (shop.near ? 4 : 0))
         .sort((a, b) => a.distance - b.distance)
-        .slice(0, NEAR_SHOPS)
+        .slice(0, nearLimit)
         .map(({ shop }) => shop));
       let changed = false;
       for (const shop of shops) {
@@ -643,6 +669,7 @@ export async function createShopInteriors({ scene, shops, renderer, tier, noise,
     },
     // The rippled road reflection cannot resolve rooms, so it always sees the cheap painted panes.
     before() {
+      if (!active) return;
       for (const shop of shops) {
         if (!shop.near) continue;
         shop.group.visible = false;
@@ -651,6 +678,7 @@ export async function createShopInteriors({ scene, shops, renderer, tier, noise,
       }
     },
     after() {
+      if (!active) return;
       for (const shop of shops) {
         if (!shop.near) continue;
         shop.group.visible = true;

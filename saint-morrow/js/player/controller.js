@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { MeshBVH } from 'three-mesh-bvh';
+import { MeshBVH } from 'three-mesh-bvh/core/MeshBVH.js';
 
 const RADIUS = 0.3;
 const SEGMENT = 1.15;

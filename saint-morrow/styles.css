@@ -28,22 +28,145 @@ html, body {
   height: 100%;
 }
 
-#status {
+#loader {
   position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overflow: hidden;
+  background: var(--night);
+  transition: opacity 0.7s ease;
+}
+
+#loader[hidden] { display: none; }
+#loader.done { opacity: 0; pointer-events: none; }
+
+.loader-glow {
+  position: absolute;
   left: 50%;
-  bottom: max(32px, env(safe-area-inset-bottom));
-  max-width: calc(100vw - 32px);
-  transform: translateX(-50%);
-  color: var(--muted);
-  font-size: 15px;
-  letter-spacing: 0.04em;
-  text-align: center;
-  transition: opacity 0.6s ease;
+  top: 50%;
+  width: min(120vw, 900px);
+  aspect-ratio: 1;
+  background: radial-gradient(circle, rgba(240, 162, 74, 0.13), rgba(240, 162, 74, 0.035) 38%, rgba(240, 162, 74, 0) 68%);
+  transform: translate(-50%, -58%);
+  animation: loader-breathe 3.6s ease-in-out infinite;
   pointer-events: none;
 }
 
-#status.done { opacity: 0; }
+.loader-inner {
+  position: relative;
+  width: min(420px, 100%);
+  text-align: center;
+}
+
+.loader-title {
+  margin: 0;
+  font-size: clamp(38px, 8vw, 62px);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.05;
+}
+
+.loader-tagline {
+  margin: 8px 0 34px;
+  color: var(--muted);
+  font-size: 15px;
+  font-style: italic;
+}
+
+#loader-track {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+#loader-bar {
+  position: absolute;
+  inset: 0;
+  background: var(--sodium);
+  box-shadow: 0 0 12px rgba(240, 162, 74, 0.7);
+  transform: scaleX(0.28);
+  transform-origin: left;
+  animation: loader-sweep 1.5s ease-in-out infinite;
+}
+
+#loader.determinate #loader-bar {
+  animation: none;
+  transition: transform 0.28s ease-out;
+}
+
+/* Runs on the compositor, so it keeps moving while the main thread is busy building the city. */
+#loader-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(255, 236, 205, 0.75), transparent);
+  animation: loader-shimmer 1.5s linear infinite;
+}
+
+.loader-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: left;
+}
+
+#loader-percent {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+#loader-hint {
+  margin: 14px 0 0;
+  color: var(--sodium);
+  font-size: 14px;
+}
+
+#loader-hint[hidden], #loader-retry[hidden] { display: none; }
 #status.error { color: var(--sodium); }
+#loader.failed #loader-track, #loader.failed #loader-percent { display: none; }
+
+#loader-retry {
+  min-height: 44px;
+  margin-top: 18px;
+  padding: 0 22px;
+  border: 1px solid var(--sodium);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+#loader-retry:focus-visible { outline: 2px solid var(--sodium); outline-offset: 2px; }
+
+@keyframes loader-sweep {
+  from { transform: translateX(-100%) scaleX(0.28); }
+  to { transform: translateX(360%) scaleX(0.28); }
+}
+
+@keyframes loader-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+@keyframes loader-breathe {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader-glow, #loader-track::after { animation: none; }
+  #loader-track::after { display: none; }
+  #loader-bar { animation: none; }
+}
 
 #enter {
   position: fixed;

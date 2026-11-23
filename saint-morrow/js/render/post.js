@@ -3,6 +3,7 @@ import { float, fract, length, mix, mrt, normalView, output, pass, screenUV, sin
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
+import { compileObject } from './compile.js';
 
 export function createPost(renderer, scene, camera, tier) {
   const scenePass = pass(scene, camera);
@@ -36,5 +37,9 @@ export function createPost(renderer, scene, camera, tier) {
   const pipeline = new THREE.RenderPipeline(renderer);
   pipeline.outputNode = vec4(graded, 1);
 
-  return { render: () => pipeline.render(), dispose: () => pipeline.dispose() };
+  return {
+    render: () => pipeline.render(),
+    dispose: () => pipeline.dispose(),
+    precompile: (object, targetScene, onProgress = null) => compileObject(renderer, object, camera, targetScene, scenePass.renderTarget, gBuffer, onProgress),
+  };
 }
