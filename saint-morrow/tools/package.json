@@ -1,0 +1,10 @@
+{
+  "name": "saint-morrow-tools",
+  "private": true,
+  "type": "module",
+  "description": "Local asset pipeline tools for Saint Morrow. Not deployed.",
+  "devDependencies": {
+    "@gltf-transform/cli": "4.5.1",
+    "gltfpack": "1.3.0"
+  }
+}

@@ -303,3 +303,7 @@ storm-at-sea/.capture
 
 # hk-tram: Blender build scripts and the dev server stay local
 hk-tram/tools
+
+# saint-morrow: asset pipeline and social captures stay local
+saint-morrow/tools
+saint-morrow/social
