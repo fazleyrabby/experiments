@@ -1,5 +1,11 @@
 [
   {
+    "slug": "lagoon-island",
+    "title": "Little Lagoon",
+    "category": "Worlds",
+    "description": "A tiny tropical island set in a block of clear lagoon water. Orbit it, scrub from dawn to night, stir up the breeze and ripple the water. Every leaf, plank and wave is generated in code."
+  },
+  {
     "slug": "last-launch",
     "title": "Last Launch",
     "category": "Play",
